@@ -35,12 +35,26 @@ export const testers = pgTable('testers', {
   walletAddress: varchar('wallet_address', { length: 64 }).primaryKey(),
   displayName: text('display_name').notNull(),
   profile: jsonb('profile').$type<{
+    // Basic demographics
+    age_range?: '10s' | '20s' | '30s' | '40s' | '50s' | '60+';
+    region?: string;
+    occupation?: string;
+
+    // Tech & crypto background
     expertise: string[];
     experience_level: string;
+    crypto_experience?: 'none' | 'beginner' | 'intermediate' | 'advanced';
+
+    // Testing preferences
     preferred_domains: string[];
     ui_preference: string;
     languages: string[];
     device_types: string[];
+    primary_device?: 'mobile' | 'desktop';
+
+    // Design & UX sensitivity
+    design_matters?: boolean;
+    frustration_triggers?: string[];
   }>(),
   testsDone: integer('tests_done').notNull().default(0),
   personaId: uuid('persona_id'),
@@ -80,6 +94,21 @@ export const personas = pgTable('personas', {
     expertise: { defi: number; nft: number; gaming: number; ai_tools: number; general_web: number };
     feedback_pattern: { ui_critical: number; security_aware: number; performance_sensitive: number; accessibility_focus: number; detail_oriented: number };
     reliability: { quality_score: number; consistency: number; response_rate: number };
+    demographics?: {
+      age_group: 'teen' | 'young_adult' | 'adult' | 'senior';
+      tech_literacy: number;
+      crypto_experience: number;
+      design_sensitivity: number;
+      patience_level: number;
+    };
+    ux_preferences?: {
+      visual_style: 'minimal' | 'rich' | 'playful' | 'professional';
+      font_size_preference: number;
+      information_density: number;
+      animation_tolerance: number;
+      color_contrast_need: number;
+      mobile_first: boolean;
+    };
     voice_sample: string;
   }>().notNull(),
   isActive: boolean('is_active').notNull().default(true),

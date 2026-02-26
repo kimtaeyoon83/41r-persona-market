@@ -60,6 +60,21 @@ const personaVectorSchema = z.object({
     consistency: z.number().min(0).max(1),
     response_rate: z.number().min(0).max(1),
   }),
+  demographics: z.object({
+    age_group: z.enum(['teen', 'young_adult', 'adult', 'senior']),
+    tech_literacy: z.number().min(0).max(1),
+    crypto_experience: z.number().min(0).max(1),
+    design_sensitivity: z.number().min(0).max(1),
+    patience_level: z.number().min(0).max(1),
+  }).optional(),
+  ux_preferences: z.object({
+    visual_style: z.enum(['minimal', 'rich', 'playful', 'professional']),
+    font_size_preference: z.number().min(0).max(1),
+    information_density: z.number().min(0).max(1),
+    animation_tolerance: z.number().min(0).max(1),
+    color_contrast_need: z.number().min(0).max(1),
+    mobile_first: z.boolean(),
+  }).optional(),
   voice_sample: z.string(),
 });
 
@@ -121,12 +136,39 @@ export async function generatePersona(
   profile: Record<string, unknown>,
   reports: Record<string, unknown>[],
 ): Promise<PersonaVector> {
+  // Map profile demographics to help LLM generate accurate persona
+  const ageRangeToGroup: Record<string, string> = {
+    '10s': 'teen', '20s': 'young_adult', '30s': 'young_adult',
+    '40s': 'adult', '50s': 'adult', '60+': 'senior',
+  };
+  const cryptoExpToScore: Record<string, string> = {
+    'none': '0.0-0.1', 'beginner': '0.1-0.3', 'intermediate': '0.4-0.6', 'advanced': '0.7-1.0',
+  };
+
+  let demographicHints = '';
+  if (profile.age_range) {
+    demographicHints += `\n- Tester age range: ${profile.age_range} → map to age_group "${ageRangeToGroup[profile.age_range as string] || 'adult'}"`;
+  }
+  if (profile.region) demographicHints += `\n- Region: ${profile.region}`;
+  if (profile.occupation) demographicHints += `\n- Occupation: ${profile.occupation}`;
+  if (profile.crypto_experience) {
+    demographicHints += `\n- Crypto experience: ${profile.crypto_experience} → crypto_experience score should be in range ${cryptoExpToScore[profile.crypto_experience as string] || '0.5'}`;
+  }
+  if (profile.primary_device) demographicHints += `\n- Primary device: ${profile.primary_device} → mobile_first=${profile.primary_device === 'mobile'}`;
+  if (profile.design_matters !== undefined) {
+    demographicHints += `\n- Design matters to them: ${profile.design_matters} → design_sensitivity should be ${profile.design_matters ? '0.7-1.0' : '0.2-0.5'}`;
+  }
+  if (Array.isArray(profile.frustration_triggers) && (profile.frustration_triggers as string[]).length > 0) {
+    demographicHints += `\n- Frustration triggers: ${(profile.frustration_triggers as string[]).join(', ')} → reflect these in feedback_pattern and ux_preferences`;
+  }
+
   const prompt = `You are a persona analysis expert. Analyze this tester's profile and their 3 test reports to create a Persona Vector.
 
 [Profile] ${JSON.stringify(profile)}
 [Report 1] ${JSON.stringify(reports[0])}
 [Report 2] ${JSON.stringify(reports[1])}
 [Report 3] ${JSON.stringify(reports[2])}
+${demographicHints ? `\n[Demographic Mapping Hints]${demographicHints}` : ''}
 
 Generate a JSON object with this structure (all numeric values 0.0-1.0):
 {
@@ -134,8 +176,25 @@ Generate a JSON object with this structure (all numeric values 0.0-1.0):
   "expertise": { "defi": 0.0-1.0, "nft": 0.0-1.0, "gaming": 0.0-1.0, "ai_tools": 0.0-1.0, "general_web": 0.0-1.0 },
   "feedback_pattern": { "ui_critical": 0.0-1.0, "security_aware": 0.0-1.0, "performance_sensitive": 0.0-1.0, "accessibility_focus": 0.0-1.0, "detail_oriented": 0.0-1.0 },
   "reliability": { "quality_score": 0.0-1.0, "consistency": 0.0-1.0, "response_rate": 0.0-1.0 },
-  "voice_sample": "2-3 sentence description of this tester's characteristic feedback style"
+  "demographics": {
+    "age_group": "teen"|"young_adult"|"adult"|"senior",
+    "tech_literacy": 0.0-1.0,
+    "crypto_experience": 0.0-1.0,
+    "design_sensitivity": 0.0-1.0,
+    "patience_level": 0.0-1.0
+  },
+  "ux_preferences": {
+    "visual_style": "minimal"|"rich"|"playful"|"professional",
+    "font_size_preference": 0.0-1.0,
+    "information_density": 0.0-1.0,
+    "animation_tolerance": 0.0-1.0,
+    "color_contrast_need": 0.0-1.0,
+    "mobile_first": true|false
+  },
+  "voice_sample": "2-3 sentence description of this tester's characteristic feedback style, reflecting their age group and design preferences"
 }
+
+IMPORTANT: Use the profile's demographic data (age_range, region, occupation, crypto_experience, primary_device, design_matters, frustration_triggers) to set demographics and ux_preferences accurately. Also cross-reference with report writing style.
 
 Return ONLY the JSON, wrapped in \`\`\`json code block.`;
 
@@ -254,6 +313,8 @@ export async function generatePersonaActions(
 ): Promise<Array<{ id: string; action: string; reason: string }>> {
   // Build a focus summary from the persona's top traits
   const focusAreas: string[] = [];
+
+  // Technical focus areas
   if (persona.feedback_pattern.security_aware > 0.7) focusAreas.push('security (check HTTPS, token approvals, suspicious scripts, error handling on invalid input)');
   if (persona.feedback_pattern.performance_sensitive > 0.7) focusAreas.push('performance (loading speed, animation smoothness, lazy-load behavior)');
   if (persona.feedback_pattern.ui_critical > 0.7) focusAreas.push('UI quality (visual glitches, alignment, color contrast, responsive layout)');
@@ -263,17 +324,51 @@ export async function generatePersonaActions(
   if (persona.expertise.gaming > 0.7) focusAreas.push('gaming specifics (frame rate, input latency, tutorial flow)');
   if (persona.test_style.thoroughness > 0.8) focusAreas.push('edge cases (empty states, error recovery, boundary values)');
 
+  // Demographics-driven focus areas
+  const demo = persona.demographics;
+  if (demo) {
+    if (demo.age_group === 'teen') focusAreas.push('teen UX (is the language relatable? are visuals engaging? is onboarding too boring or too long? would a 16-year-old understand this without help?)');
+    if (demo.age_group === 'senior') focusAreas.push('senior UX (font readability at default size, button sizes adequate for less precise clicks, clear navigation without hidden menus, no reliance on hover states)');
+    if (demo.tech_literacy < 0.3) focusAreas.push('non-technical user (confusing jargon, unclear icons, missing explanations for crypto terms, fear-inducing warnings)');
+    if (demo.design_sensitivity > 0.7) focusAreas.push('design quality (visual hierarchy, whitespace balance, typography consistency, color harmony, micro-interactions, brand feeling)');
+    if (demo.patience_level < 0.3) focusAreas.push('impatient user (how many clicks to complete core task? any unnecessary steps? loading states that feel too long?)');
+  }
+
+  // UX preferences-driven focus areas
+  const ux = persona.ux_preferences;
+  if (ux) {
+    if (ux.mobile_first) focusAreas.push('mobile-first (test at 375px width, check thumb-reachable zones, verify no horizontal scroll, ensure tap targets are 44px+)');
+    if (ux.font_size_preference > 0.7) focusAreas.push('readability (check if body text is at least 16px, labels are clear, numbers in data-heavy sections are legible)');
+    if (ux.color_contrast_need > 0.7) focusAreas.push('contrast (check text-on-background contrast ratios, especially on dark themes, verify critical buttons are distinguishable)');
+    if (ux.information_density < 0.3) focusAreas.push('simplicity (is the UI overwhelming? too many numbers/charts on screen? are essential actions buried under data?)');
+    if (ux.animation_tolerance < 0.3) focusAreas.push('animation sensitivity (check for distracting or excessive animations, auto-playing elements, flashing content)');
+  }
+
   if (focusAreas.length === 0) focusAreas.push('general usability and UX flow');
+
+  // Build persona context string
+  let personaContext = '';
+  if (demo) {
+    const ageLabel = { teen: '10대 청소년', young_adult: '20-30대', adult: '30-50대', senior: '50대 이상' }[demo.age_group];
+    personaContext += `\nThis tester is a ${ageLabel} user with tech literacy ${demo.tech_literacy.toFixed(1)}/1.0 and crypto experience ${demo.crypto_experience.toFixed(1)}/1.0.`;
+    if (demo.design_sensitivity > 0.7) personaContext += ' They care deeply about visual design quality.';
+    if (demo.patience_level < 0.4) personaContext += ' They have LOW patience — will abandon if confused.';
+  }
+  if (ux) {
+    personaContext += `\nPrefers ${ux.visual_style} design style.`;
+    if (ux.mobile_first) personaContext += ' Primarily uses mobile.';
+  }
 
   const prompt = `You are generating browser test actions for a QA tester with these focus areas:
 ${focusAreas.map((f, i) => `${i + 1}. ${f}`).join('\n')}
+${personaContext}
 
 Target URL: ${targetUrl}
 
 The tester already performed these base checklist actions:
 ${baseChecklist.map(c => `- ${c.id}: ${c.task}`).join('\n')}
 
-Generate 3-5 ADDITIONAL browser actions this persona would specifically do based on their focus areas. These must be concrete, executable browser actions (click, scroll, type, observe) — NOT abstract analysis.
+Generate 3-5 ADDITIONAL browser actions this persona would specifically do based on their focus areas and demographics. These must be concrete, executable browser actions (click, scroll, type, observe) — NOT abstract analysis.
 
 Return as JSON array:
 \`\`\`json
@@ -285,14 +380,16 @@ Return as JSON array:
 
   const response = await client.messages.create({
     model: HAIKU,
-    max_tokens: 500,
+    max_tokens: 1000,
     messages: [{ role: 'user', content: prompt }],
   });
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '[]';
   try {
-    return JSON.parse(extractJson(text));
-  } catch {
+    const parsed = JSON.parse(extractJson(text));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.error('[generatePersonaActions] Failed to parse LLM response:', text.slice(0, 300), err);
     return [];
   }
 }

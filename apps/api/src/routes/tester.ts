@@ -14,6 +14,38 @@ router.post('/register', async (req, res) => {
       return;
     }
 
+    // Validate profile if provided
+    if (profile) {
+      // Required fields
+      if (!Array.isArray(profile.expertise) || profile.expertise.length === 0) {
+        res.status(400).json({ error: 'profile.expertise must be a non-empty array' });
+        return;
+      }
+      if (!profile.experience_level) {
+        res.status(400).json({ error: 'profile.experience_level is required' });
+        return;
+      }
+
+      // Validate enum fields if provided
+      const validAgeRanges = ['10s', '20s', '30s', '40s', '50s', '60+'];
+      if (profile.age_range && !validAgeRanges.includes(profile.age_range)) {
+        res.status(400).json({ error: `profile.age_range must be one of: ${validAgeRanges.join(', ')}` });
+        return;
+      }
+
+      const validCryptoExp = ['none', 'beginner', 'intermediate', 'advanced'];
+      if (profile.crypto_experience && !validCryptoExp.includes(profile.crypto_experience)) {
+        res.status(400).json({ error: `profile.crypto_experience must be one of: ${validCryptoExp.join(', ')}` });
+        return;
+      }
+
+      const validDevices = ['mobile', 'desktop'];
+      if (profile.primary_device && !validDevices.includes(profile.primary_device)) {
+        res.status(400).json({ error: `profile.primary_device must be one of: ${validDevices.join(', ')}` });
+        return;
+      }
+    }
+
     // Check if already exists
     const existing = await db.select().from(schema.testers).where(eq(schema.testers.walletAddress, wallet_address));
     if (existing.length > 0) {

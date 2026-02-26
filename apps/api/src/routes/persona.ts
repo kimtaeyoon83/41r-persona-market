@@ -49,11 +49,12 @@ router.post('/generate', async (req, res) => {
       return;
     }
 
-    // Generate persona vector via LLM
+    // Generate persona vector via LLM (include demographic data from profile)
+    const profileData = (tester.profile as Record<string, unknown>) || {};
     let vector;
     try {
       vector = await generatePersona(
-        tester.profile as Record<string, unknown> || {},
+        profileData,
         reports.map(r => ({
           checklist_results: r.checklistResults,
           scenario_log: r.scenarioLog,

@@ -59,12 +59,26 @@ export interface GeneratedTestCases {
 
 // ─── Tester ──────────────────────────────────────────
 export interface TesterProfile {
-  expertise: string[];
-  experience_level: string;
-  preferred_domains: string[];
-  ui_preference: string;
-  languages: string[];
-  device_types: string[];
+  // Basic demographics
+  age_range?: '10s' | '20s' | '30s' | '40s' | '50s' | '60+';
+  region?: string;              // e.g. "KR", "US", "JP"
+  occupation?: string;          // e.g. "student", "developer", "designer", "marketer", "trader"
+
+  // Tech & crypto background
+  expertise: string[];          // e.g. ["defi", "nft", "web3"]
+  experience_level: string;     // e.g. "beginner", "intermediate", "expert"
+  crypto_experience?: 'none' | 'beginner' | 'intermediate' | 'advanced';
+
+  // Testing preferences
+  preferred_domains: string[];  // e.g. ["defi", "gaming", "saas"]
+  ui_preference: string;        // e.g. "minimal", "rich", "dark_mode"
+  languages: string[];          // e.g. ["ko", "en"]
+  device_types: string[];       // e.g. ["mobile", "desktop", "tablet"]
+  primary_device?: 'mobile' | 'desktop';
+
+  // Design & UX sensitivity
+  design_matters?: boolean;     // "디자인이 중요하다고 생각하시나요?"
+  frustration_triggers?: string[]; // e.g. ["slow loading", "confusing navigation", "small text"]
 }
 
 export interface Tester {
@@ -143,11 +157,30 @@ export interface Reliability {
   response_rate: number;
 }
 
+export interface Demographics {
+  age_group: 'teen' | 'young_adult' | 'adult' | 'senior';  // 10대, 20-30대, 30-50대, 50대+
+  tech_literacy: number;       // 0=비기술, 1=개발자 수준
+  crypto_experience: number;   // 0=처음, 1=전문 트레이더
+  design_sensitivity: number;  // 0=기능만, 1=디자인 매우 중시
+  patience_level: number;      // 0=즉시 이탈, 1=끝까지 탐색
+}
+
+export interface UxPreferences {
+  visual_style: 'minimal' | 'rich' | 'playful' | 'professional'; // 선호 디자인 톤
+  font_size_preference: number;   // 0=작은 글씨 OK, 1=큰 글씨 필요
+  information_density: number;    // 0=심플, 1=데이터 많을수록 좋음
+  animation_tolerance: number;    // 0=애니메이션 싫음, 1=좋아함
+  color_contrast_need: number;    // 0=낮은 대비 OK, 1=높은 대비 필요
+  mobile_first: boolean;          // 주로 모바일 사용자인지
+}
+
 export interface PersonaVector {
   test_style: TestStyle;
   expertise: Expertise;
   feedback_pattern: FeedbackPattern;
   reliability: Reliability;
+  demographics?: Demographics;
+  ux_preferences?: UxPreferences;
   voice_sample: string;
 }
 
