@@ -87,7 +87,7 @@ async function main(): Promise<void> {
   const stagehand = new Stagehand({
     env: "LOCAL",
     model: {
-      modelName: "claude-sonnet-4-6-20250514",
+      modelName: "claude-sonnet-4-6",
       apiKey: process.env.ANTHROPIC_API_KEY,
     },
     localBrowserLaunchOptions: {

@@ -4,8 +4,7 @@ import type { GeneratedTestCases, PersonaVector } from '@41rpm/shared';
 
 const client = new Anthropic();
 
-// Use HAIKU for all calls — Sonnet requires higher-tier API plan
-const SONNET = process.env.CLAUDE_SONNET_MODEL || 'claude-haiku-4-5-20251001';
+const SONNET = process.env.CLAUDE_SONNET_MODEL || 'claude-sonnet-4-6';
 const HAIKU = process.env.CLAUDE_HAIKU_MODEL || 'claude-haiku-4-5-20251001';
 
 // ─── Zod Schemas ─────────────────────────────────────
