@@ -26,20 +26,18 @@ app.get('/api/health', (_req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// x402 Payment Middleware (Phase 1.1 PoC)
+// x402 Payment Middleware — scoped to /api/hello ONLY
 // ---------------------------------------------------------------------------
-// Set USE_X402_FALLBACK=true in .env to use the manual USDC verification
-// instead of the x402 facilitator.
-if (process.env.USE_X402_FALLBACK === 'true') {
-  console.log('[api] Using FALLBACK payment middleware (manual USDC verification)');
-  app.use(createFallbackPaymentMiddleware());
-} else {
-  console.log('[api] Using x402 payment middleware (Coinbase facilitator)');
-  app.use(createX402Middleware());
+try {
+  const x402Middleware = process.env.USE_X402_FALLBACK === 'true'
+    ? createFallbackPaymentMiddleware()
+    : createX402Middleware();
+  app.use('/api/hello', x402Middleware, helloRouter);
+  console.log(`[api] x402 middleware applied to /api/hello (mode: ${process.env.USE_X402_FALLBACK === 'true' ? 'fallback' : 'x402'})`);
+} catch (err) {
+  console.warn('[api] x402 middleware init failed, /api/hello mounted without payment gate:', err instanceof Error ? err.message : err);
+  app.use('/api/hello', helloRouter);
 }
-
-// x402-gated route
-app.use('/api', helloRouter);
 
 // Routes
 app.use('/api/test', testRouter);

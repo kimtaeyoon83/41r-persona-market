@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto';
 const { Client } = pg;
 
 // ─── Config ──────────────────────────────────────────────
-const CONNECTION_STRING = 'postgresql://admin:admin41rpm@localhost:5432/persona_market';
+const CONNECTION_STRING = process.env.DATABASE_URL || 'postgresql://admin:admin41rpm@localhost:5432/persona_market';
 
 // ─── Deterministic IDs (so verify script can reference them) ──
 const COMPANY_WALLET = 'DemoCompany111111111111111111111111111111111';

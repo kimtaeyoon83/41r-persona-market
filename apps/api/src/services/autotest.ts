@@ -77,6 +77,7 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
   let screenshots: string[] = [];
   let actionLog: string[] = [];
 
+  let stagehandInstance: { close(): Promise<void> } | null = null;
   try {
     const { Stagehand } = await import('@browserbasehq/stagehand');
 
@@ -86,6 +87,7 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
       localBrowserLaunchOptions: { headless: true },
     });
     await stagehand.init();
+    stagehandInstance = stagehand;
     job.progress = 40;
 
     const page = stagehand.context.pages()[0];
@@ -111,11 +113,13 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     // Final screenshot
     const ss2 = await page.screenshot({ fullPage: false });
     screenshots.push(ss2.toString('base64'));
-
-    await stagehand.close();
   } catch (stagehandError) {
     actionLog.push(`Stagehand error: ${stagehandError instanceof Error ? stagehandError.message : 'Unknown'}`);
     // Continue without browser screenshots — generate report from test data alone
+  } finally {
+    if (stagehandInstance) {
+      await stagehandInstance.close().catch(() => {});
+    }
   }
   job.progress = 80;
 

@@ -16,7 +16,7 @@ import pg from 'pg';
 
 const { Client } = pg;
 
-const CONNECTION_STRING = 'postgresql://admin:admin41rpm@localhost:5432/persona_market';
+const CONNECTION_STRING = process.env.DATABASE_URL || 'postgresql://admin:admin41rpm@localhost:5432/persona_market';
 
 // ─── Types ───────────────────────────────────────────────
 interface CheckResult {

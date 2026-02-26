@@ -5,6 +5,6 @@ export default defineConfig({
   out: './drizzle',
   dialect: 'postgresql',
   dbCredentials: {
-    url: process.env.DATABASE_URL || 'postgresql://admin:admin41rpm@localhost:5432/persona_market',
+    url: process.env.DATABASE_URL!,
   },
 });

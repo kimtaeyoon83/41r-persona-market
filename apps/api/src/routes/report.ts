@@ -35,6 +35,18 @@ router.post('/submit', async (req, res) => {
       return;
     }
 
+    // Duplicate submission guard
+    const [existingReport] = await db.select({ id: schema.testReports.id })
+      .from(schema.testReports)
+      .where(and(
+        eq(schema.testReports.testerAddr, tester_addr),
+        eq(schema.testReports.testId, test_id),
+      ));
+    if (existingReport) {
+      res.status(409).json({ error: 'Report already submitted for this test' });
+      return;
+    }
+
     // Calculate quality score via LLM
     let qualityScore: number;
     try {
