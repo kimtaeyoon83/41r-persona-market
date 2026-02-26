@@ -1,6 +1,7 @@
 import express, { type Express } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
 import testRouter from './routes/test.js';
 import testerRouter from './routes/tester.js';
 import reportRouter from './routes/report.js';
@@ -48,6 +49,9 @@ app.use('/api/reports', reportRouter);
 app.use('/api/persona', personaRouter);
 app.use('/api/personas', personaRouter);
 app.use('/api/autotest', autotestRouter);
+
+// Static file serving for screenshots
+app.use('/screenshots', express.static(path.resolve('../../screenshots')));
 
 app.listen(PORT, () => {
   console.log(`[api] listening on http://localhost:${PORT}`);

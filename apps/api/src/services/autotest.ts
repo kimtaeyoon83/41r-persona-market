@@ -1,7 +1,12 @@
 import { eq } from 'drizzle-orm';
+import fs from 'fs';
+import path from 'path';
 import { db, schema } from '../db/index.js';
 import { generateAutoTestReport } from './llm.js';
 import type { GeneratedTestCases, PersonaVector } from '@41rpm/shared';
+
+const SCREENSHOTS_DIR = path.resolve('../../screenshots');
+if (!fs.existsSync(SCREENSHOTS_DIR)) fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 
 interface AutoTestJob {
   id: string;
@@ -74,7 +79,8 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
   job.progress = 30;
 
   // 3. Browser automation (Stagehand)
-  let screenshots: string[] = [];
+  let screenshots: string[] = [];       // base64 for LLM
+  let screenshotFiles: string[] = [];   // saved file paths
   let actionLog: string[] = [];
 
   let stagehandInstance: { close(): Promise<void> } | null = null;
@@ -94,9 +100,15 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     await page.goto(test.targetUrl, { waitUntil: 'domcontentloaded', timeoutMs: 30000 });
     actionLog.push(`Visited ${test.targetUrl}`);
 
+    // Wait for JS rendering
+    await new Promise(r => setTimeout(r, 3000));
+
     // Take initial screenshot
     const ss1 = await page.screenshot({ fullPage: false });
     screenshots.push(ss1.toString('base64'));
+    const ss1File = `autotest_${job.id}_before.png`;
+    fs.writeFileSync(path.join(SCREENSHOTS_DIR, ss1File), ss1);
+    screenshotFiles.push(ss1File);
     job.progress = 50;
 
     // Execute checklist items
@@ -113,6 +125,9 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     // Final screenshot
     const ss2 = await page.screenshot({ fullPage: false });
     screenshots.push(ss2.toString('base64'));
+    const ss2File = `autotest_${job.id}_after.png`;
+    fs.writeFileSync(path.join(SCREENSHOTS_DIR, ss2File), ss2);
+    screenshotFiles.push(ss2File);
   } catch (stagehandError) {
     actionLog.push(`Stagehand error: ${stagehandError instanceof Error ? stagehandError.message : 'Unknown'}`);
     // Continue without browser screenshots — generate report from test data alone
@@ -158,7 +173,7 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     })),
     qualityScore: (uxFeedback.overall_score as number) || 3,
     isPersonaTest: true,
-    screenshots: screenshots.length > 0 ? screenshots.slice(0, 2).map((_, i) => `auto_ss_${i}.png`) : [],
+    screenshots: screenshotFiles,
   }).returning();
 
   // 6. Record settlement (41R Token type for auto tests)
@@ -178,7 +193,7 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
   job.status = 'completed';
   job.reportId = report.id;
   job.result = {
-    screenshots: screenshots.slice(0, 2).map((_, i) => `auto_ss_${i}.png`),
+    screenshots: screenshotFiles,
     actionLog,
     textReport,
     uxFeedback,
