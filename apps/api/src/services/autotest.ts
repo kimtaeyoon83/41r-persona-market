@@ -83,7 +83,7 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
 
     const stagehand = new Stagehand({
       env: 'LOCAL',
-      model: { modelName: 'claude-sonnet-4-6', apiKey: process.env.ANTHROPIC_API_KEY! },
+      model: { modelName: 'anthropic/claude-sonnet-4-6', apiKey: process.env.ANTHROPIC_API_KEY! },
       localBrowserLaunchOptions: { headless: true },
     });
     await stagehand.init();
@@ -132,7 +132,8 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     const report = await generateAutoTestReport(personaVector, screenshots, actionLog, testCases);
     textReport = report.textReport;
     uxFeedback = report.uxFeedback;
-  } catch {
+  } catch (llmErr) {
+    console.error('[AutoTest] LLM report generation failed:', llmErr);
     textReport = `Auto test completed for ${test.targetUrl}. Actions: ${actionLog.join('; ')}`;
     uxFeedback = { overall_score: 3, note: 'Generated without LLM — fallback report' };
   }

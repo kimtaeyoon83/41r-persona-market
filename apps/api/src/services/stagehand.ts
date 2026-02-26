@@ -28,7 +28,7 @@ export async function captureScreenshot(url: string): Promise<ScreenshotResult> 
   const stagehand = new Stagehand({
     env: 'LOCAL',
     model: {
-      modelName: 'claude-sonnet-4-6',
+      modelName: 'anthropic/claude-sonnet-4-6',
       apiKey: process.env.ANTHROPIC_API_KEY!,
     },
     localBrowserLaunchOptions: { headless: true },
@@ -68,7 +68,7 @@ export async function captureWithActions(
   const stagehand = new Stagehand({
     env: 'LOCAL',
     model: {
-      modelName: 'claude-sonnet-4-6',
+      modelName: 'anthropic/claude-sonnet-4-6',
       apiKey: process.env.ANTHROPIC_API_KEY!,
     },
     localBrowserLaunchOptions: { headless: true },
