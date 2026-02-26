@@ -245,3 +245,54 @@ Return ONLY: ["keyword1", "keyword2", ...]`,
   const respText = response.content[0].type === 'text' ? response.content[0].text : '[]';
   return JSON.parse(extractJson(respText));
 }
+
+// ─── Generate Persona-Specific Browser Actions (Haiku - fast) ────
+export async function generatePersonaActions(
+  persona: PersonaVector,
+  targetUrl: string,
+  baseChecklist: Array<{ id: string; task: string }>,
+): Promise<Array<{ id: string; action: string; reason: string }>> {
+  // Build a focus summary from the persona's top traits
+  const focusAreas: string[] = [];
+  if (persona.feedback_pattern.security_aware > 0.7) focusAreas.push('security (check HTTPS, token approvals, suspicious scripts, error handling on invalid input)');
+  if (persona.feedback_pattern.performance_sensitive > 0.7) focusAreas.push('performance (loading speed, animation smoothness, lazy-load behavior)');
+  if (persona.feedback_pattern.ui_critical > 0.7) focusAreas.push('UI quality (visual glitches, alignment, color contrast, responsive layout)');
+  if (persona.feedback_pattern.accessibility_focus > 0.7) focusAreas.push('accessibility (screen reader labels, keyboard navigation, font sizes)');
+  if (persona.expertise.defi > 0.7) focusAreas.push('DeFi specifics (slippage controls, price impact display, fee breakdown, MEV protection, route transparency)');
+  if (persona.expertise.nft > 0.7) focusAreas.push('NFT specifics (image loading, metadata display, ownership verification)');
+  if (persona.expertise.gaming > 0.7) focusAreas.push('gaming specifics (frame rate, input latency, tutorial flow)');
+  if (persona.test_style.thoroughness > 0.8) focusAreas.push('edge cases (empty states, error recovery, boundary values)');
+
+  if (focusAreas.length === 0) focusAreas.push('general usability and UX flow');
+
+  const prompt = `You are generating browser test actions for a QA tester with these focus areas:
+${focusAreas.map((f, i) => `${i + 1}. ${f}`).join('\n')}
+
+Target URL: ${targetUrl}
+
+The tester already performed these base checklist actions:
+${baseChecklist.map(c => `- ${c.id}: ${c.task}`).join('\n')}
+
+Generate 3-5 ADDITIONAL browser actions this persona would specifically do based on their focus areas. These must be concrete, executable browser actions (click, scroll, type, observe) — NOT abstract analysis.
+
+Return as JSON array:
+\`\`\`json
+[
+  { "id": "PA01", "action": "Scroll down to check if fee breakdown is visible without wallet connection", "reason": "DeFi expert checks pre-trade transparency" },
+  ...
+]
+\`\`\``;
+
+  const response = await client.messages.create({
+    model: HAIKU,
+    max_tokens: 500,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const text = response.content[0].type === 'text' ? response.content[0].text : '[]';
+  try {
+    return JSON.parse(extractJson(text));
+  } catch {
+    return [];
+  }
+}

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 import { db, schema } from '../db/index.js';
-import { generateAutoTestReport } from './llm.js';
+import { generateAutoTestReport, generatePersonaActions } from './llm.js';
 import type { GeneratedTestCases, PersonaVector } from '@41rpm/shared';
 
 const SCREENSHOTS_DIR = path.resolve('../../screenshots');
@@ -111,13 +111,39 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     screenshotFiles.push(ss1File);
     job.progress = 50;
 
-    // Execute checklist items
+    // Execute base checklist items (same for all personas)
     for (const item of testCases.checklist) {
       try {
         const result = await stagehand.act(item.task);
         actionLog.push(`[${item.id}] ${item.task} -> ${result.success ? 'OK' : 'Failed'}`);
       } catch {
         actionLog.push(`[${item.id}] ${item.task} -> Error`);
+      }
+    }
+    job.progress = 60;
+
+    // Generate and execute persona-specific exploration actions
+    const personaVector = persona.vector as PersonaVector;
+    let personaActions: Array<{ id: string; action: string; reason: string }> = [];
+    try {
+      personaActions = await generatePersonaActions(
+        personaVector,
+        test.targetUrl,
+        testCases.checklist.map(c => ({ id: c.id, task: c.task })),
+      );
+    } catch {
+      // Non-blocking — continue without persona actions
+    }
+
+    if (personaActions.length > 0) {
+      actionLog.push('--- Persona-specific exploration ---');
+      for (const pa of personaActions) {
+        try {
+          const result = await stagehand.act(pa.action);
+          actionLog.push(`[${pa.id}] ${pa.action} -> ${result.success ? 'OK' : 'Failed'} (${pa.reason})`);
+        } catch {
+          actionLog.push(`[${pa.id}] ${pa.action} -> Error (${pa.reason})`);
+        }
       }
     }
     job.progress = 70;
