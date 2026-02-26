@@ -1,0 +1,39 @@
+{
+  "name": "41rpm",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "lint": "turbo lint"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "dotenv": "^16.6.1",
+    "tsx": "^4.21.0",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "packageManager": "pnpm@10.30.2",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "unrs-resolver",
+      "bufferutil",
+      "utf-8-validate",
+      "bigint-buffer"
+    ]
+  },
+  "dependencies": {
+    "@browserbasehq/stagehand": "^3.1.0",
+    "@scure/base": "^2.0.0",
+    "@solana/kit": "^6.1.0",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4",
+    "@types/pg": "^8.16.0",
+    "@x402/fetch": "^2.5.0",
+    "@x402/svm": "^2.5.0",
+    "pg": "^8.19.0"
+  }
+}
