@@ -75,6 +75,42 @@ export default function TestDetailPage() {
         </div>
       </div>
 
+      {/* Reports List */}
+      {reports.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold mb-3">Submitted Reports</h2>
+          <div className="space-y-2">
+            {reports.map((r) => (
+              <a
+                key={String(r.id)}
+                href={`/report/${r.id}`}
+                className="block p-3 rounded-lg bg-gray-900 border border-gray-800 hover:border-gray-600 transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2 py-0.5 rounded text-xs ${
+                      r.isPersonaTest ? 'bg-orange-500/10 text-orange-400' : 'bg-cyan-500/10 text-cyan-400'
+                    }`}>
+                      {r.isPersonaTest ? 'AI Persona' : 'Manual'}
+                    </span>
+                    <span className="text-sm text-gray-400 font-mono">{String(r.testerAddr).slice(0, 16)}...</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className={`text-sm font-semibold ${
+                      Number(r.qualityScore) >= 4 ? 'text-green-400' :
+                      Number(r.qualityScore) >= 3 ? 'text-yellow-400' : 'text-red-400'
+                    }`}>
+                      {Number(r.qualityScore).toFixed(1)}
+                    </span>
+                    <span className="text-xs text-gray-500">{new Date(String(r.createdAt)).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       {test.requirements && (
         <div className="mb-8 p-4 rounded-lg bg-gray-900 border border-gray-800">
           <h2 className="text-sm font-medium text-gray-400 mb-2">Requirements</h2>

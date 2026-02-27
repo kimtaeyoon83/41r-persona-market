@@ -39,6 +39,13 @@ class SolanaService {
       console.warn('[Solana] No keypair found, using random keypair');
       this.payer = Keypair.generate();
     }
+
+    // Load 41R Token mint from env
+    const mintEnv = process.env.TOKEN_41R_MINT;
+    if (mintEnv) {
+      this.mintAddress = new PublicKey(mintEnv);
+      console.log(`[Solana] 41R Token mint loaded: ${this.mintAddress.toBase58()}`);
+    }
   }
 
   get payerPublicKey(): PublicKey {

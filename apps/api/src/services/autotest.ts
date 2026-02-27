@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { db, schema } from '../db/index.js';
 import { generateAutoTestReport, generatePersonaActions } from './llm.js';
+import { solanaService } from './solana.js';
 import type { GeneratedTestCases, PersonaVector } from '@41rpm/shared';
 
 const SCREENSHOTS_DIR = path.resolve('../../screenshots');
@@ -203,16 +204,27 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
   }).returning();
 
   // 6. Record settlement (41R Token type for auto tests)
-  // TODO: Actual 41R Token minting + Transfer Fee + Hook
+  const settlementAmount = 2; // 50% of $4 auto test = $2 equivalent
+  let txSignature = `pending_41r_${Date.now()}`;
+  let feeCollected = 0.1; // 5% of 2 = 0.1
+
+  try {
+    const mintResult = await solanaService.mint41RTokens(persona.testerAddr, settlementAmount);
+    txSignature = mintResult.txSignature;
+    job.result = { ...job.result!, txSignature };
+  } catch (err) {
+    console.error('[AutoTest] 41R Token mint failed, recording as pending:', err);
+  }
+
   await db.insert(schema.settlements).values({
     testId: job.testId,
     reportId: report.id,
     payerAddr: test.companyAddr,
     payeeAddr: persona.testerAddr,
-    amountToken: 2, // 50% of $4 auto test = $2 equivalent
-    feeCollected: 0.1, // 5% of 2 = 0.1
+    amountToken: settlementAmount,
+    feeCollected,
     settlementType: '41r',
-    txSignature: `pending_41r_${Date.now()}`,
+    txSignature,
   });
 
   job.progress = 100;
