@@ -14,11 +14,11 @@ export function TxLink({ txSignature, label }: TxLinkProps) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-purple-400 hover:text-purple-300 transition-colors"
+      className="inline-flex items-center gap-1.5 text-sol-green hover:text-sol-green/80 transition-colors group"
     >
       <span className="font-mono text-xs">{displayLabel}</span>
       <svg
-        className="w-3 h-3 flex-shrink-0"
+        className="w-3 h-3 flex-shrink-0 opacity-60 group-hover:opacity-100 transition-opacity"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"

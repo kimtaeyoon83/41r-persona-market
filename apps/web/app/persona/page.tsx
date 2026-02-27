@@ -41,35 +41,35 @@ export default function PersonaGallery() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-2">Persona Gallery</h1>
-      <p className="text-gray-400 text-sm mb-8">AI Personas generated from real tester behavior</p>
+    <div className="max-w-4xl">
+      <h1 className="font-display text-2xl font-bold mb-2">Persona Gallery</h1>
+      <p className="text-[var(--text-secondary)] text-sm mb-8">AI Personas generated from real tester behavior</p>
 
       {loading ? (
-        <div className="text-center py-12 text-gray-400">Loading...</div>
+        <div className="text-center py-12 text-[var(--text-secondary)]">Loading...</div>
       ) : personas.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">No personas generated yet</div>
+        <div className="text-center py-12 text-[var(--text-secondary)]">No personas generated yet</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {personas.map((persona) => (
             <Link
               key={persona.id}
               href={`/persona/${persona.id}`}
-              className="block p-5 rounded-lg border border-gray-800 bg-gray-900 hover:border-green-500/50 transition-colors"
+              className="block p-5 rounded-xl border border-border-dim bg-surface hover:border-sol-green/30 hover:bg-surface-elevated transition-all card-hover"
             >
               <div className="flex justify-between items-start mb-3">
                 <div>
-                  <p className="text-xs font-mono text-gray-500">{persona.id.slice(0, 8)}</p>
-                  <div className="flex gap-2 mt-1">
+                  <p className="text-xs font-mono text-[var(--text-tertiary)]">{persona.id.slice(0, 8)}</p>
+                  <div className="flex gap-2 mt-1.5">
                     {topExpertise(persona.vector).map(e => (
-                      <span key={e} className="px-2 py-0.5 rounded-full text-xs bg-green-500/10 text-green-400 border border-green-500/20">
+                      <span key={e} className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-sol-green/8 text-sol-green border border-sol-green/15">
                         {e}
                       </span>
                     ))}
                   </div>
                 </div>
                 {persona.sasAttestId && (
-                  <span className="px-2 py-0.5 rounded text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-sol-purple/10 text-sol-purple border border-sol-purple/20">
                     SAS
                   </span>
                 )}
@@ -77,29 +77,33 @@ export default function PersonaGallery() {
               {persona.vector.demographics && (
                 <div className="flex gap-2 mt-2 mb-2">
                   {persona.vector.demographics.age_group && (
-                    <span className="px-2 py-0.5 rounded-full text-xs bg-pink-500/10 text-pink-400">
+                    <span className="px-2 py-0.5 rounded-md text-[11px] bg-sol-purple/8 text-sol-purple/80">
                       {persona.vector.demographics.age_group}
                     </span>
                   )}
                   {persona.vector.ux_preferences?.mobile_first !== undefined && (
-                    <span className="px-2 py-0.5 rounded-full text-xs bg-amber-500/10 text-amber-400">
+                    <span className="px-2 py-0.5 rounded-md text-[11px] bg-sol-blue/8 text-sol-blue/80">
                       {persona.vector.ux_preferences.mobile_first ? "mobile-first" : "desktop"}
                     </span>
                   )}
                   {persona.vector.ux_preferences?.visual_style && (
-                    <span className="px-2 py-0.5 rounded-full text-xs bg-blue-500/10 text-blue-400">
+                    <span className="px-2 py-0.5 rounded-md text-[11px] bg-sol-blue/8 text-sol-blue/80">
                       {persona.vector.ux_preferences.visual_style}
                     </span>
                   )}
                 </div>
               )}
-              <p className="text-xs text-gray-400 line-clamp-2">{persona.vector.voice_sample}</p>
-              <div className="mt-3 flex gap-4 text-xs text-gray-500">
-                <span>Quality: <span className={`font-semibold ${
-                  persona.vector.reliability.quality_score >= 4 ? "text-green-400" :
-                  persona.vector.reliability.quality_score >= 3 ? "text-yellow-400" : "text-red-400"
-                }`}>{persona.vector.reliability.quality_score.toFixed(1)}</span>/5</span>
-                <span>Consistency: {(persona.vector.reliability.consistency * 100).toFixed(0)}%</span>
+              <p className="text-xs text-[var(--text-secondary)] line-clamp-2">{persona.vector.voice_sample}</p>
+              <div className="mt-3 flex gap-4 text-xs text-[var(--text-tertiary)]">
+                <span title="Average quality of this tester's reports (0-5 scale)">Quality: <span className={`font-semibold ${
+                  persona.vector.reliability.quality_score >= 4 ? "text-sol-green" :
+                  persona.vector.reliability.quality_score >= 3 ? "text-[var(--status-warning)]" : "text-[var(--status-error)]"
+                }`}>{persona.vector.reliability.quality_score > 1
+                  ? persona.vector.reliability.quality_score.toFixed(1)
+                  : (persona.vector.reliability.quality_score * 5).toFixed(1)
+                }</span>/5</span>
+                <span title="How consistently this persona delivers similar quality across tests">Consistency: {(persona.vector.reliability.consistency * 100).toFixed(0)}%</span>
+                <span title="How often this persona responds to test requests">Response: {(persona.vector.reliability.response_rate * 100).toFixed(0)}%</span>
               </div>
             </Link>
           ))}

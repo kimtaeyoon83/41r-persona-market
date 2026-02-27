@@ -56,7 +56,7 @@ const personaVectorSchema = z.object({
     detail_oriented: z.number().min(0).max(1),
   }),
   reliability: z.object({
-    quality_score: z.number().min(0).max(1),
+    quality_score: z.number().min(0).max(5),
     consistency: z.number().min(0).max(1),
     response_rate: z.number().min(0).max(1),
   }),
@@ -104,25 +104,49 @@ export async function generateTestCases(
 
   content.push({
     type: 'text',
-    text: `You are a QA expert. Analyze this website and generate test cases.
+    text: `You are a senior QA architect creating a comprehensive test plan for a product.
 
 Target URL: ${targetUrl}
 Requirements: ${requirements || 'General UX/functionality testing'}
 
-Generate a JSON object with exactly this structure:
+Generate a thorough, detailed JSON test plan with this structure:
 {
   "checklist": [{ "id": "CL01", "task": "...", "expected": "..." }, ...],
   "scenarios": [{ "id": "SC01", "persona_type": "...", "narrative": "...", "evaluation_points": [...] }],
   "questionnaire": [{ "id": "Q01", "question": "...", "type": "rating_1_5"|"rating_1_10"|"free_text" }, ...]
 }
 
-Generate 4-6 checklist items, 1-2 scenarios, and 4-6 questionnaire items.
+## Checklist (8-12 items required)
+Cover ALL of these categories:
+- **Core functionality**: Main user flows, primary CTAs, key features (2-3 items)
+- **Navigation & Layout**: Menu links, breadcrumbs, responsive behavior, header/footer (2-3 items)
+- **Forms & Input**: Validation, error messages, edge cases (empty, too long, special chars) (1-2 items)
+- **Visual & UX**: Loading states, animations, color contrast, typography, spacing (1-2 items)
+- **Error handling**: 404 pages, network failures, invalid URLs, session expiry (1-2 items)
+- **Performance**: Page load speed, image optimization, lazy loading (1 item)
+- **Wallet/Web3** (if applicable): Connection flow, network switching, transaction states (1-2 items)
+Each task must be specific and actionable (not vague like "test the page").
+
+## Scenarios (3-4 required)
+Create distinct user personas with different goals:
+- A first-time visitor (confused, needs guidance)
+- A power user (knows what they want, tests edge cases)
+- A skeptical user (looking for trust signals, checks security)
+- A mobile user (testing on small screen) — if applicable
+Each scenario should have 3-5 evaluation points.
+
+## Questionnaire (6-8 items required)
+Mix of rating and free-text:
+- 2-3 rating_1_5 questions (overall satisfaction, visual design, ease of use)
+- 1-2 rating_1_10 questions (NPS-style: would you recommend? overall impression?)
+- 2-3 free_text questions (biggest pain point, most confusing part, suggestions for improvement, what worked well)
+
 Return ONLY the JSON, wrapped in \`\`\`json code block.`,
   });
 
   const response = await client.messages.create({
     model: SONNET,
-    max_tokens: 2000,
+    max_tokens: 4096,
     messages: [{ role: 'user', content }],
   });
 
@@ -170,12 +194,13 @@ export async function generatePersona(
 [Report 3] ${JSON.stringify(reports[2])}
 ${demographicHints ? `\n[Demographic Mapping Hints]${demographicHints}` : ''}
 
-Generate a JSON object with this structure (all numeric values 0.0-1.0):
+Generate a JSON object with this structure:
 {
   "test_style": { "thoroughness": 0.0-1.0, "speed": 0.0-1.0, "ux_focus": 0.0-1.0, "bug_detection": 0.0-1.0, "creativity": 0.0-1.0 },
   "expertise": { "defi": 0.0-1.0, "nft": 0.0-1.0, "gaming": 0.0-1.0, "ai_tools": 0.0-1.0, "general_web": 0.0-1.0 },
   "feedback_pattern": { "ui_critical": 0.0-1.0, "security_aware": 0.0-1.0, "performance_sensitive": 0.0-1.0, "accessibility_focus": 0.0-1.0, "detail_oriented": 0.0-1.0 },
-  "reliability": { "quality_score": 0.0-1.0, "consistency": 0.0-1.0, "response_rate": 0.0-1.0 },
+  "reliability": { "quality_score": 0.0-5.0, "consistency": 0.0-1.0, "response_rate": 0.0-1.0 },
+  NOTE: quality_score uses 0.0-5.0 scale (average quality of their test reports). All other numeric values use 0.0-1.0 scale.
   "demographics": {
     "age_group": "teen"|"young_adult"|"adult"|"senior",
     "tech_literacy": 0.0-1.0,
@@ -210,12 +235,20 @@ Return ONLY the JSON, wrapped in \`\`\`json code block.`;
 }
 
 // ─── Generate Auto Test Report ───────────────────────
+export interface AutoTestReportResult {
+  textReport: string;
+  uxFeedback: Record<string, unknown>;
+  checklistResults: Array<{ id: string; status: 'passed' | 'failed' | 'blocked'; memo: string }>;
+  questionnaireAnswers: Array<{ id: string; answer: string | number }>;
+  qualityScore: number;
+}
+
 export async function generateAutoTestReport(
   persona: PersonaVector,
   screenshotsBase64: string[],
   actionLog: string[],
   testCases: GeneratedTestCases,
-): Promise<{ textReport: string; uxFeedback: Record<string, unknown> }> {
+): Promise<AutoTestReportResult> {
   const content: Anthropic.ContentBlockParam[] = [];
 
   for (const ss of screenshotsBase64.slice(0, 5)) {
@@ -225,67 +258,236 @@ export async function generateAutoTestReport(
     });
   }
 
+  // Build persona focus description for differentiated analysis
+  const focusAreas: string[] = [];
+  if (persona.feedback_pattern.security_aware > 0.6) focusAreas.push('security vulnerabilities, unsafe inputs, token approvals');
+  if (persona.feedback_pattern.ui_critical > 0.6) focusAreas.push('visual design flaws, layout issues, color contrast');
+  if (persona.feedback_pattern.performance_sensitive > 0.6) focusAreas.push('loading speed, animation jank, resource usage');
+  if (persona.feedback_pattern.accessibility_focus > 0.6) focusAreas.push('accessibility gaps, keyboard nav, screen reader support');
+  if (persona.feedback_pattern.detail_oriented > 0.6) focusAreas.push('subtle bugs, edge cases, inconsistencies');
+  if (persona.expertise.defi > 0.6) focusAreas.push('DeFi mechanics, slippage, fee transparency');
+  if (persona.expertise.nft > 0.6) focusAreas.push('NFT display, metadata, ownership');
+  if (focusAreas.length === 0) focusAreas.push('general usability and user experience');
+
+  // Build a rich persona identity description
+  const demo = persona.demographics;
+  const ux = persona.ux_preferences;
+  let personaIdentity = '';
+  if (demo) {
+    const ageLabels: Record<string, string> = { teen: 'teenager (16-19)', young_adult: 'young adult (20-30s)', adult: 'middle-aged adult (30-50s)', senior: 'senior (50+)' };
+    personaIdentity += `\nYou are a ${ageLabels[demo.age_group] || demo.age_group}.`;
+    if (demo.tech_literacy < 0.3) personaIdentity += ' You struggle with technical jargon and get confused easily.';
+    else if (demo.tech_literacy > 0.8) personaIdentity += ' You are highly technical and notice implementation details others miss.';
+    if (demo.patience_level < 0.3) personaIdentity += ' You are VERY impatient — if something takes more than 2 clicks or 3 seconds, you get frustrated.';
+    if (demo.design_sensitivity > 0.7) personaIdentity += ' You have a strong eye for design and immediately notice visual inconsistencies.';
+    if (demo.crypto_experience < 0.3) personaIdentity += ' Crypto is confusing to you — you need clear explanations for blockchain terms.';
+    else if (demo.crypto_experience > 0.8) personaIdentity += ' You are a crypto native who checks token contracts, understands MEV, and scrutinizes on-chain interactions.';
+  }
+  if (ux) {
+    if (ux.mobile_first) personaIdentity += ' You primarily use mobile and test everything from a phone perspective.';
+    personaIdentity += ` You prefer ${ux.visual_style} design style.`;
+  }
+
   content.push({
     type: 'text',
-    text: `You are a tester with this Persona:
+    text: `You are a real QA tester with a STRONG personality. Stay in character throughout.
+
+## Your Persona Profile
 ${JSON.stringify(persona, null, 2)}
 
+## Your Identity
 Voice style: "${persona.voice_sample}"
+${personaIdentity}
 
-You visited a website and performed the following actions:
+## Your Testing Focus (what you care about MOST)
+${focusAreas.map((f, i) => `${i + 1}. ${f}`).join('\n')}
+
+## Actions You Performed
 ${actionLog.map((a, i) => `${i + 1}. ${a}`).join('\n')}
 
-Test cases were:
+## Test Cases
 ${JSON.stringify(testCases, null, 2)}
 
-Write a test report from this Persona's perspective. Include:
-1. A text report (2-3 paragraphs) reflecting the Persona's style/focus
-2. UX feedback JSON with ratings and comments
+---
+
+Write a DETAILED, opinionated test report from YOUR unique perspective. You must stay in character — your personality, expertise, and biases should be clearly visible in every field.
 
 Return as JSON:
 \`\`\`json
 {
-  "textReport": "...",
+  "textReport": "3-4 paragraphs. Write as if YOU are the tester talking to the product team. Reference specific UI elements, button labels, colors, flows. Mention what frustrated you and what delighted you. Your tone should match your voice_sample. A security-focused tester talks about vulnerabilities; a design-focused tester talks about spacing and typography; a DeFi expert talks about slippage and fee transparency. Be SPECIFIC — no generic feedback.",
+  "qualityScore": 1.0-5.0,
+  "checklistResults": [
+    { "id": "CL01", "status": "passed|failed|blocked", "memo": "2-3 sentences. What did you observe? How does it affect the user experience from YOUR perspective? What would you do differently?" },
+    ...for EVERY checklist item
+  ],
+  "questionnaireAnswers": [
+    { "id": "Q01", "answer": <number for ratings, 2-3 sentence string for free_text> },
+    ...for EVERY questionnaire item — free_text answers must be substantive (min 20 words), reflecting your persona's specific concerns
+  ],
   "uxFeedback": {
     "overall_score": 1-5,
     "usability": 1-5,
     "visual_design": 1-5,
     "performance": 1-5,
-    "issues_found": ["..."],
-    "suggestions": ["..."]
+    "accessibility": 1-5,
+    "trust_and_security": 1-5,
+    "issues_found": ["specific issue with exact location/element", "another specific issue", ...at least 3],
+    "positive_aspects": ["something that worked well", ...at least 2],
+    "suggestions": ["actionable improvement suggestion", ...at least 3],
+    "persona_specific_notes": "What did YOU specifically notice that other testers might miss? 2-3 sentences."
   }
 }
-\`\`\``,
+\`\`\`
+
+CRITICAL RULES:
+- checklistResults: Map action results (OK → passed, Failed/Error → failed, not attempted → blocked). Each memo MUST reflect YOUR persona's viewpoint — same checklist item should get DIFFERENT memos from different personas.
+- questionnaireAnswers: Match ALL IDs from test_cases.questionnaire. Ratings should vary based on your expertise (security expert rates security higher/lower than design expert).
+- qualityScore: YOUR subjective rating. A performance-sensitive tester may give 2.5 if the site is slow but pretty. A design-sensitive tester may give 2.5 if the site is fast but ugly.
+- issues_found: Be SPECIFIC — "The swap button at the bottom of the trade form has no loading state" NOT "UI could be improved".
+- NEVER write generic feedback like "the site works well" or "overall good experience". Be detailed and opinionated.`,
   });
 
   const response = await client.messages.create({
     model: SONNET,
-    max_tokens: 2000,
+    max_tokens: 4096,
     messages: [{ role: 'user', content }],
   });
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
-  return JSON.parse(extractJson(text));
+  const parsed = JSON.parse(extractJson(text));
+
+  // Validate and normalize
+  return {
+    textReport: String(parsed.textReport || ''),
+    qualityScore: Math.min(5, Math.max(1, Number(parsed.qualityScore) || 3)),
+    checklistResults: Array.isArray(parsed.checklistResults)
+      ? parsed.checklistResults.map((c: Record<string, unknown>) => ({
+          id: String(c.id || ''),
+          status: (['passed', 'failed', 'blocked'].includes(String(c.status)) ? c.status : 'blocked') as 'passed' | 'failed' | 'blocked',
+          memo: String(c.memo || ''),
+        }))
+      : [],
+    questionnaireAnswers: Array.isArray(parsed.questionnaireAnswers)
+      ? parsed.questionnaireAnswers.map((q: Record<string, unknown>) => ({
+          id: String(q.id || ''),
+          answer: typeof q.answer === 'number' ? q.answer : String(q.answer || ''),
+        }))
+      : [],
+    uxFeedback: parsed.uxFeedback || { overall_score: 3 },
+  };
 }
 
-// ─── Quality Score (Haiku - fast) ────────────────────
+// ─── Quality Score + Reward (Haiku - fast) ────────────────────
+
+export interface QualityResult {
+  score: number;        // 0.0 ~ 5.0
+  rewardUsdc: number;   // 0 or $1 ~ $5
+  reason: string;       // 1-line explanation
+  rejected: boolean;    // true = no payment
+}
+
 export async function calculateQualityScore(
   report: Record<string, unknown>,
-): Promise<number> {
+): Promise<QualityResult> {
   const response = await client.messages.create({
     model: HAIKU,
-    max_tokens: 100,
+    max_tokens: 300,
     messages: [{
       role: 'user',
-      content: `Rate this test report's quality from 1.0 to 5.0 based on completeness, detail, and usefulness.
-Report: ${JSON.stringify(report)}
-Return ONLY a single number like 3.8`,
+      content: `You are a test report quality judge. Evaluate this report and decide the reward.
+
+## Scoring Rules
+- **0.0 ~ 1.4 → REJECTED (reward $0)**: Empty fields, single-word answers, no real testing done, copy-paste nonsense, all checkboxes clicked with no notes
+- **1.5 ~ 2.4 → Minimal ($1)**: Very brief but shows some real testing effort
+- **2.5 ~ 3.4 → Acceptable ($2~$3)**: Decent coverage, some useful observations
+- **3.5 ~ 4.4 → Good ($4)**: Thorough testing, detailed notes, helpful feedback
+- **4.5 ~ 5.0 → Excellent ($5)**: Exceptional detail, found real bugs, actionable insights
+
+## What makes a good report:
+- Checklist: Marked pass/fail with specific notes (not just "ok" or empty)
+- Scenarios: Detailed journey logs, not just "tested it"
+- Questionnaire: Thoughtful answers (not single words), specific examples
+
+## What gets REJECTED:
+- All checklist items left as "blocked" with no notes
+- Scenario logs with fewer than 10 words total
+- Questionnaire answers that are all empty or single-word
+- Obvious spam or placeholder text
+
+Report data:
+${JSON.stringify(report)}
+
+Return ONLY valid JSON:
+{"score": 3.5, "rewardUsdc": 4, "reason": "brief explanation", "rejected": false}`,
     }],
   });
 
-  const text = response.content[0].type === 'text' ? response.content[0].text : '3.0';
-  const score = parseFloat(text.trim());
-  return Math.min(5, Math.max(1, isNaN(score) ? 3.0 : score));
+  const text = response.content[0].type === 'text' ? response.content[0].text : '';
+  try {
+    const parsed = JSON.parse(extractJson(text));
+    const score = Math.min(5, Math.max(0, Number(parsed.score) || 0));
+    const rejected = score < 1.5 || parsed.rejected === true;
+    return {
+      score,
+      rewardUsdc: rejected ? 0 : Math.min(5, Math.max(1, Number(parsed.rewardUsdc) || 0)),
+      reason: String(parsed.reason || ''),
+      rejected,
+    };
+  } catch {
+    // Fallback: heuristic scoring
+    return heuristicQualityScore(report);
+  }
+}
+
+function heuristicQualityScore(report: Record<string, unknown>): QualityResult {
+  let score = 0;
+  const checklist = report.checklist_results as Array<{ status: string; memo: string }> | undefined;
+  const scenarios = report.scenario_log as Array<{ timeline: Array<{ action: string }> }> | undefined;
+  const answers = report.questionnaire_answers as Array<{ answer: string | number }> | undefined;
+
+  // Checklist: max 2 points
+  if (checklist && checklist.length > 0) {
+    const withNotes = checklist.filter(c => c.memo && c.memo.length > 5).length;
+    const completed = checklist.filter(c => c.status === 'passed' || c.status === 'failed').length;
+    score += (completed / checklist.length) * 1.0;
+    score += (withNotes / checklist.length) * 1.0;
+  }
+
+  // Scenarios: max 1.5 points
+  if (scenarios && scenarios.length > 0) {
+    const totalWords = scenarios.reduce((sum, s) => {
+      const words = s.timeline?.reduce((w, t) => w + (t.action?.split(' ').length || 0), 0) || 0;
+      return sum + words;
+    }, 0);
+    score += Math.min(1.5, totalWords / 40);
+  }
+
+  // Questionnaire: max 1.5 points
+  if (answers && answers.length > 0) {
+    const meaningful = answers.filter(a => {
+      const val = String(a.answer || '');
+      return val.length > 3 && val !== '[object Object]';
+    }).length;
+    score += (meaningful / answers.length) * 1.5;
+  }
+
+  score = Math.round(score * 10) / 10;
+  const rejected = score < 1.5;
+  let rewardUsdc = 0;
+  if (!rejected) {
+    if (score < 2.5) rewardUsdc = 1;
+    else if (score < 3.5) rewardUsdc = Math.round((2 + (score - 2.5)) * 10) / 10;
+    else if (score < 4.5) rewardUsdc = 4;
+    else rewardUsdc = 5;
+  }
+
+  return {
+    score,
+    rewardUsdc,
+    reason: rejected ? 'Report lacks sufficient detail or effort' : `Heuristic score based on completeness`,
+    rejected,
+  };
 }
 
 // ─── Keyword Extraction (Haiku - fast) ───────────────

@@ -15,6 +15,8 @@ export const tests = pgTable('tests', {
   targetUrl: text('target_url').notNull(),
   requirements: text('requirements'),
   budgetUsdc: real('budget_usdc').notNull().default(0),
+  rewardPerTester: real('reward_per_tester').notNull().default(3),
+  depositTxSignature: text('deposit_tx_signature'),
   status: varchar('status', { length: 20 }).notNull().default('pending'), // pending | active | completed
   escrowPda: varchar('escrow_pda', { length: 64 }),
   screenshotUrls: jsonb('screenshot_urls').$type<string[]>(),

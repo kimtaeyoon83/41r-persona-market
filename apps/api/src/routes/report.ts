@@ -1,7 +1,7 @@
 import { Router, type Router as RouterType } from 'express';
 import { eq, and } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
-import { calculateQualityScore } from '../services/llm.js';
+import { calculateQualityScore, type QualityResult } from '../services/llm.js';
 import type { SubmitReportRequest } from '@41rpm/shared';
 
 const router: RouterType = Router();
@@ -47,48 +47,74 @@ router.post('/submit', async (req, res) => {
       return;
     }
 
-    // Calculate quality score via LLM
-    let qualityScore: number;
+    // Calculate quality score + reward via LLM
+    let quality: QualityResult;
     try {
-      qualityScore = await calculateQualityScore({
+      quality = await calculateQualityScore({
         checklist_results,
         scenario_log,
         questionnaire_answers,
       });
     } catch {
-      // Fallback: simple heuristic
-      const checklistCompleteness = checklist_results
-        ? checklist_results.filter(c => c.status === 'passed').length / checklist_results.length
-        : 0.5;
-      qualityScore = Math.round((checklistCompleteness * 5) * 10) / 10;
+      // Fallback: simple heuristic — should not happen since heuristic is built-in
+      quality = { score: 2.0, rewardUsdc: 2, reason: 'Fallback scoring', rejected: false };
     }
 
-    // Create report
+    // Override reward using test's rewardPerTester and quality score
+    const baseReward = test.rewardPerTester;
+    if (!quality.rejected) {
+      const calculated = baseReward * (quality.score / 5.0);
+      quality.rewardUsdc = Math.min(baseReward, Math.max(1, calculated));
+    } else {
+      quality.rewardUsdc = 0;
+    }
+
+    // Check budget before proceeding
+    if (!quality.rejected && test.budgetUsdc < quality.rewardUsdc) {
+      res.status(400).json({ error: 'Test budget exhausted' });
+      return;
+    }
+
+    console.log(`[Report] Quality: ${quality.score}/5.0, Reward: $${quality.rewardUsdc}, Rejected: ${quality.rejected}, Reason: ${quality.reason}`);
+
+    // Create report (even if rejected, for record)
     const [report] = await db.insert(schema.testReports).values({
       testerAddr: tester_addr,
       testId: test_id,
       checklistResults: checklist_results || [],
       scenarioLog: scenario_log || [],
       questionnaireAnswers: questionnaire_answers || [],
-      qualityScore,
+      qualityScore: quality.score,
       isPersonaTest: false,
       screenshots: screenshots || [],
     }).returning();
 
-    // Update tester's testsDone count
+    // If rejected → no payment, no testsDone increment
+    if (quality.rejected) {
+      res.status(200).json({
+        report,
+        quality_score: quality.score,
+        quality_reason: quality.reason,
+        reward_amount: 0,
+        tx_signature: null,
+        rejected: true,
+        rejection_message: `Report rejected: ${quality.reason}. Please provide more detailed testing with specific notes, observations, and thorough answers to earn a reward.`,
+        persona_triggered: false,
+      });
+      return;
+    }
+
+    // Accepted — update testsDone
     const newTestsDone = tester.testsDone + 1;
     await db.update(schema.testers)
       .set({ testsDone: newTestsDone })
       .where(eq(schema.testers.walletAddress, tester_addr));
 
-    // Calculate USDC reward based on quality ($3-$5)
-    const rewardAmount = 3 + (qualityScore / 5) * 2; // $3 base + up to $2 bonus
-
-    // Attempt USDC transfer via Solana service
+    // Attempt USDC transfer
     let txSignature = `pending_${Date.now()}`;
     try {
       const { solanaService } = await import('../services/solana.js');
-      const txResult = await solanaService.transferUsdc(tester_addr, rewardAmount);
+      const txResult = await solanaService.transferUsdc(tester_addr, quality.rewardUsdc);
       txSignature = txResult.txSignature;
     } catch (solanaErr) {
       console.warn('[Report] USDC transfer failed (recording pending):', solanaErr instanceof Error ? solanaErr.message : solanaErr);
@@ -100,20 +126,27 @@ router.post('/submit', async (req, res) => {
       reportId: report.id,
       payerAddr: test.companyAddr,
       payeeAddr: tester_addr,
-      amountToken: rewardAmount,
+      amountToken: quality.rewardUsdc,
       settlementType: 'usdc',
       txSignature,
     }).returning();
+
+    // Deduct reward from test budget
+    await db.update(schema.tests)
+      .set({ budgetUsdc: test.budgetUsdc - quality.rewardUsdc })
+      .where(eq(schema.tests.id, test_id));
 
     // Check if persona should be triggered (3 tests completed)
     const personaTriggered = newTestsDone >= 3 && !tester.personaId;
 
     res.json({
       report,
-      quality_score: qualityScore,
-      reward_amount: rewardAmount,
+      quality_score: quality.score,
+      quality_reason: quality.reason,
+      reward_amount: quality.rewardUsdc,
       tx_signature: settlement.txSignature,
       persona_triggered: personaTriggered,
+      rejected: false,
     });
   } catch (error) {
     console.error('[POST /api/report/submit]', error);
@@ -121,7 +154,7 @@ router.post('/submit', async (req, res) => {
   }
 });
 
-// GET /api/report/:reportId — Get a specific report
+// GET /api/report/:reportId — Get a specific report with settlement info
 router.get('/:reportId', async (req, res) => {
   try {
     const { reportId } = req.params;
@@ -132,31 +165,73 @@ router.get('/:reportId', async (req, res) => {
       return;
     }
 
-    res.json(report);
+    // Fetch all settlements for this report (USDC + 41R)
+    const settlements = await db.select().from(schema.settlements).where(eq(schema.settlements.reportId, reportId));
+
+    res.json({ ...report, settlements });
   } catch (error) {
     console.error('[GET /api/report/:reportId]', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET /api/reports/tester/:wallet — Get all reports for a tester
+// GET /api/reports/tester/:wallet — Get all reports for a tester (with test info + settlements)
 router.get('/tester/:wallet', async (req, res) => {
   try {
     const { wallet } = req.params;
     const reports = await db.select().from(schema.testReports).where(eq(schema.testReports.testerAddr, wallet));
-    res.json(reports);
+
+    if (reports.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    // Fetch related tests and settlements
+    const testIds = [...new Set(reports.map(r => r.testId))];
+    const allTests = await db.select().from(schema.tests);
+    const testsMap = new Map(allTests.filter(t => testIds.includes(t.id)).map(t => [t.id, t]));
+
+    const reportIds = reports.map(r => r.id);
+    const allSettlements = await db.select().from(schema.settlements);
+    const settlementsByReport = new Map<string, typeof allSettlements>();
+    for (const s of allSettlements) {
+      if (s.reportId && reportIds.includes(s.reportId)) {
+        const arr = settlementsByReport.get(s.reportId) || [];
+        arr.push(s);
+        settlementsByReport.set(s.reportId, arr);
+      }
+    }
+
+    const enrichedReports = reports.map(r => {
+      const test = testsMap.get(r.testId);
+      return {
+        ...r,
+        test: test ? { id: test.id, targetUrl: test.targetUrl, requirements: test.requirements, status: test.status } : null,
+        settlements: settlementsByReport.get(r.id) || [],
+      };
+    });
+
+    res.json(enrichedReports);
   } catch (error) {
     console.error('[GET /api/reports/tester/:wallet]', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET /api/reports/test/:testId — Get all reports for a test
+// GET /api/reports/test/:testId — Get all reports for a test (with settlements)
 router.get('/test/:testId', async (req, res) => {
   try {
     const { testId } = req.params;
     const reports = await db.select().from(schema.testReports).where(eq(schema.testReports.testId, testId));
-    res.json(reports);
+    const settlements = await db.select().from(schema.settlements).where(eq(schema.settlements.testId, testId));
+
+    // Attach settlements to each report (may have multiple: USDC + 41R)
+    const reportsWithSettlement = reports.map(r => ({
+      ...r,
+      settlements: settlements.filter(s => s.reportId === r.id),
+    }));
+
+    res.json(reportsWithSettlement);
   } catch (error) {
     console.error('[GET /api/reports/test/:testId]', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -167,10 +242,13 @@ router.get('/test/:testId', async (req, res) => {
 router.get('/compare/:testId', async (req, res) => {
   try {
     const { testId } = req.params;
-    const reports = await db.select().from(schema.testReports).where(eq(schema.testReports.testId, testId));
+    const allReports = await db.select().from(schema.testReports).where(eq(schema.testReports.testId, testId));
+
+    // Exclude rejected reports (qualityScore < 1.5) from comparison
+    const reports = allReports.filter(r => (r.qualityScore ?? 0) >= 1.5);
 
     if (reports.length === 0) {
-      res.status(404).json({ error: 'No reports found for this test' });
+      res.status(404).json({ error: 'No valid reports found for this test' });
       return;
     }
 

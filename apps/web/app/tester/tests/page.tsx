@@ -10,6 +10,7 @@ interface Test {
   targetUrl: string;
   status: string;
   budgetUsdc: number;
+  rewardPerTester: number;
   createdAt: string;
 }
 
@@ -25,32 +26,32 @@ export default function TesterTestList() {
   }, []);
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-2">Available Tests</h1>
-      <p className="text-gray-400 text-sm mb-8">Complete 3 tests to generate your AI Persona</p>
+    <div className="max-w-4xl">
+      <h1 className="font-display text-2xl font-bold mb-2">Available Tests</h1>
+      <p className="text-[var(--text-secondary)] text-sm mb-8">Complete 3 tests to generate your AI Persona</p>
 
       {loading ? (
         <LoadingSpinner text="Loading available tests..." />
       ) : tests.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">No active tests available</div>
+        <div className="text-center py-12 text-[var(--text-secondary)]">No active tests available</div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {tests.map((test) => (
             <Link
               key={test.id}
               href={`/tester/test/${test.id}`}
-              className="block p-5 rounded-lg border border-gray-800 bg-gray-900 hover:border-cyan-500/50 transition-colors"
+              className="block p-5 rounded-xl border border-border-dim bg-surface hover:border-sol-blue/30 hover:bg-surface-elevated transition-all card-hover"
             >
               <div className="flex justify-between items-start">
                 <div>
-                  <p className="font-mono text-sm text-gray-300 truncate max-w-md">{test.targetUrl}</p>
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="font-mono text-sm text-[var(--text-primary)] truncate max-w-md">{test.targetUrl}</p>
+                  <p className="text-xs text-[var(--text-tertiary)] mt-1">
                     Created {new Date(test.createdAt).toLocaleDateString()}
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-cyan-400 font-semibold">$3-$5 USDC</p>
-                  <p className="text-xs text-gray-500 mt-1">per completed test</p>
+                  <p className="text-sol-blue font-display font-semibold">${test.rewardPerTester} USDC</p>
+                  <p className="text-xs text-[var(--text-tertiary)] mt-1">reward per tester</p>
                 </div>
               </div>
             </Link>

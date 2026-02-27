@@ -96,10 +96,10 @@ async function testQualityScore() {
     ],
   };
 
-  const score = await calculateQualityScore(mockReport);
-  assert(typeof score === 'number', `Expected number, got ${typeof score}`);
-  assert(score >= 1.0 && score <= 5.0, `Score ${score} out of range [1.0, 5.0]`);
-  console.log(`       Score: ${score}/5.0`);
+  const result = await calculateQualityScore(mockReport);
+  assert(typeof result.score === 'number', `Expected number, got ${typeof result.score}`);
+  assert(result.score >= 0 && result.score <= 5.0, `Score ${result.score} out of range [0, 5.0]`);
+  console.log(`       Score: ${result.score}/5.0, Reward: $${result.rewardUsdc}, Rejected: ${result.rejected}, Reason: ${result.reason}`);
 }
 
 // ─── 3. Keyword Extraction (Haiku 4.5) ───────────────

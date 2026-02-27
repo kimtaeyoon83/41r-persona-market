@@ -126,7 +126,7 @@ async function main() {
     process.exit(1);
   }
 
-  // Step 2: Create Credential
+  // Step 2: Create Credential (skip if already exists)
   console.log('\n2. Creating Credential...');
   const [credentialPda] = await deriveCredentialPda({
     authority: payer.address,
@@ -134,15 +134,20 @@ async function main() {
   });
   console.log(`   Credential PDA: ${credentialPda}`);
 
-  const credentialIx = getCreateCredentialInstruction({
-    payer,
-    credential: credentialPda,
-    authority: payer,
-    name: CREDENTIAL_NAME,
-    signers: [payer.address],
-  });
-
-  await sendInstructions(rpc, rpcSubscriptions, payer, [credentialIx], 'Credential created');
+  // Check if credential already exists on-chain
+  const credentialAccount = await rpc.getAccountInfo(credentialPda, { encoding: 'base64' }).send();
+  if (credentialAccount.value) {
+    console.log('   [SKIP] Credential already exists on-chain');
+  } else {
+    const credentialIx = getCreateCredentialInstruction({
+      payer,
+      credential: credentialPda,
+      authority: payer,
+      name: CREDENTIAL_NAME,
+      signers: [payer.address],
+    });
+    await sendInstructions(rpc, rpcSubscriptions, payer, [credentialIx], 'Credential created');
+  }
 
   // Step 3: Create Schema
   console.log('\n3. Creating Schema...');

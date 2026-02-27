@@ -9,7 +9,7 @@ const router: RouterType = Router();
 // POST /api/test/register — Create a new test with AI-generated test cases
 router.post('/register', async (req, res) => {
   try {
-    const { target_url, requirements, budget_usdc, company_wallet } = req.body as RegisterTestRequest;
+    const { target_url, requirements, budget_usdc, reward_per_tester, company_wallet, deposit_tx_signature, enable_auto_test } = req.body as RegisterTestRequest;
 
     if (!target_url || !company_wallet) {
       res.status(400).json({ error: 'target_url and company_wallet are required' });
@@ -31,6 +31,8 @@ router.post('/register', async (req, res) => {
       targetUrl: target_url,
       requirements: requirements || '',
       budgetUsdc: budget_usdc || 50,
+      rewardPerTester: reward_per_tester ?? 3,
+      depositTxSignature: deposit_tx_signature || null,
       status: 'pending',
     }).returning();
 
@@ -44,19 +46,29 @@ router.post('/register', async (req, res) => {
       // Fallback test cases
       testCasesData = {
         checklist: [
-          { id: 'CL01', task: 'Load the main page', expected: 'Page loads without errors' },
-          { id: 'CL02', task: 'Check navigation links', expected: 'All links work correctly' },
-          { id: 'CL03', task: 'Test responsive layout', expected: 'Layout adapts to mobile' },
-          { id: 'CL04', task: 'Check form submissions', expected: 'Forms submit successfully' },
+          { id: 'CL01', task: 'Load the main page and verify no console errors', expected: 'Page loads fully without errors within 3 seconds' },
+          { id: 'CL02', task: 'Check all navigation links in header and footer', expected: 'All links navigate to correct pages without 404s' },
+          { id: 'CL03', task: 'Test responsive layout at mobile viewport (375px)', expected: 'Content reflows properly, no horizontal scroll, tap targets are adequate' },
+          { id: 'CL04', task: 'Submit the primary form with valid data', expected: 'Form submits successfully with confirmation feedback' },
+          { id: 'CL05', task: 'Submit the primary form with empty/invalid data', expected: 'Validation errors shown clearly next to relevant fields' },
+          { id: 'CL06', task: 'Check loading states during async operations', expected: 'Spinner or skeleton UI shown during data fetching' },
+          { id: 'CL07', task: 'Navigate to a non-existent page', expected: 'Custom 404 page displayed with link back to home' },
+          { id: 'CL08', task: 'Check visual consistency of typography and spacing', expected: 'Consistent font sizes, line heights, and padding throughout' },
         ],
         scenarios: [
-          { id: 'SC01', persona_type: 'New User', narrative: 'As a first-time visitor, navigate the site and complete the main user flow.', evaluation_points: ['Onboarding clarity', 'Navigation ease', 'Error handling'] },
+          { id: 'SC01', persona_type: 'First-Time Visitor', narrative: 'As a first-time visitor with no context, land on the homepage and try to understand what this product does. Attempt to complete the main user flow without reading any documentation.', evaluation_points: ['Is the value proposition clear within 5 seconds?', 'Can the main flow be completed without confusion?', 'Are error states helpful or confusing?'] },
+          { id: 'SC02', persona_type: 'Skeptical User', narrative: 'As someone evaluating this product for potential use, look for trust signals, security indicators, and professional quality. Try to find the team info, terms of service, and any red flags.', evaluation_points: ['Are trust signals visible (team, audits, reviews)?', 'Does the site feel professional and trustworthy?', 'Is sensitive data handled transparently?'] },
+          { id: 'SC03', persona_type: 'Power User', narrative: 'As an experienced user, try to push the product to its limits. Test edge cases, try unusual inputs, check keyboard shortcuts, and explore advanced features.', evaluation_points: ['Does the product handle edge cases gracefully?', 'Are there keyboard shortcuts or power-user features?', 'How does performance hold under stress?'] },
         ],
         questionnaire: [
-          { id: 'Q01', question: 'Overall UI intuitiveness', type: 'rating_1_5' as const },
-          { id: 'Q02', question: 'Most confusing part of the experience', type: 'free_text' as const },
-          { id: 'Q03', question: 'Would you use this product again? (1-10)', type: 'rating_1_10' as const },
-          { id: 'Q04', question: 'Suggestions for improvement', type: 'free_text' as const },
+          { id: 'Q01', question: 'How intuitive was the overall user interface?', type: 'rating_1_5' as const },
+          { id: 'Q02', question: 'Rate the visual design quality', type: 'rating_1_5' as const },
+          { id: 'Q03', question: 'What was the most confusing part of the experience?', type: 'free_text' as const },
+          { id: 'Q04', question: 'On a scale of 1-10, how likely would you recommend this to a friend?', type: 'rating_1_10' as const },
+          { id: 'Q05', question: 'What feature or improvement would you most want to see added?', type: 'free_text' as const },
+          { id: 'Q06', question: 'Rate the perceived performance and loading speed', type: 'rating_1_5' as const },
+          { id: 'Q07', question: 'Describe the biggest pain point you encountered', type: 'free_text' as const },
+          { id: 'Q08', question: 'What did the product do well? What should not change?', type: 'free_text' as const },
         ],
       };
     }
@@ -75,9 +87,84 @@ router.post('/register', async (req, res) => {
     // Activate test
     await db.update(schema.tests).set({ status: 'active' }).where(eq(schema.tests.id, test.id));
 
-    res.json({ test: { ...test, status: 'active' }, test_cases: testCasesData });
+    // Auto-test: match personas and queue
+    let autoTestJobs: Array<{ persona_id: string; tester_addr: string; job_id: string }> = [];
+    if (enable_auto_test) {
+      try {
+        // Load all active personas with their vectors
+        const allPersonas = await db.select().from(schema.personas).where(eq(schema.personas.isActive, true));
+
+        if (allPersonas.length > 0) {
+          // Import matching service
+          const { matchPersonas } = await import('../services/matching.js');
+          const matches = await matchPersonas(
+            requirements || '',
+            target_url,
+            allPersonas.map(p => ({
+              id: p.id,
+              testerAddr: p.testerAddr,
+              vector: p.vector as any,
+            })),
+            3, // max 3 personas
+          );
+
+          // Import and queue auto-tests
+          const { startAutoTest } = await import('../services/autotest.js');
+          for (const match of matches) {
+            try {
+              const job = await startAutoTest(test.id, match.persona.id);
+              autoTestJobs.push({
+                persona_id: match.persona.id,
+                tester_addr: match.persona.testerAddr,
+                job_id: job.id,
+              });
+            } catch (e) {
+              console.warn(`[AutoTest] Failed to queue for persona ${match.persona.id}:`, e);
+            }
+          }
+          console.log(`[AutoTest] Queued ${autoTestJobs.length} auto-tests for test ${test.id}`);
+        }
+      } catch (autoErr) {
+        console.warn('[AutoTest] Auto-test matching failed:', autoErr);
+      }
+    }
+
+    res.json({
+      test: { ...test, status: 'active' },
+      test_cases: testCasesData,
+      auto_tests: autoTestJobs,
+    });
   } catch (error) {
     console.error('[POST /api/test/register]', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PATCH /api/test/:id/deposit — Update deposit tx signature
+router.patch('/:id/deposit', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { deposit_tx_signature } = req.body as { deposit_tx_signature: string };
+
+    if (!deposit_tx_signature) {
+      res.status(400).json({ error: 'deposit_tx_signature is required' });
+      return;
+    }
+
+    const [test] = await db.select().from(schema.tests).where(eq(schema.tests.id, id));
+    if (!test) {
+      res.status(404).json({ error: 'Test not found' });
+      return;
+    }
+
+    const [updated] = await db.update(schema.tests)
+      .set({ depositTxSignature: deposit_tx_signature })
+      .where(eq(schema.tests.id, id))
+      .returning();
+
+    res.json({ test: updated });
+  } catch (error) {
+    console.error('[PATCH /api/test/:id/deposit]', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -24,33 +24,34 @@ export function RadarChart({ data, title, color }: RadarChartProps) {
   }));
 
   return (
-    <div className="p-4 rounded-lg bg-gray-900 border border-gray-800">
-      <h3 className="text-sm font-medium mb-2" style={{ color }}>
+    <div className="p-5 rounded-xl bg-surface border border-border-dim">
+      <h3 className="text-sm font-mono font-medium mb-3" style={{ color }}>
         {title}
       </h3>
       <div className="w-full h-64">
         <ResponsiveContainer width="100%" height="100%">
           <RechartsRadarChart cx="50%" cy="50%" outerRadius="70%" data={chartData}>
-            <PolarGrid stroke="#374151" strokeDasharray="3 3" />
+            <PolarGrid stroke="#1E2230" strokeDasharray="3 3" />
             <PolarAngleAxis
               dataKey="axis"
-              tick={{ fill: "#9ca3af", fontSize: 11 }}
+              tick={{ fill: "#8A8F9E", fontSize: 11 }}
               tickLine={false}
             />
             <PolarRadiusAxis
               angle={90}
               domain={[0, 100]}
-              tick={{ fill: "#6b7280", fontSize: 10 }}
+              tick={{ fill: "#555B6E", fontSize: 10 }}
               tickCount={5}
               axisLine={false}
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: "#1f2937",
-                border: "1px solid #374151",
+                backgroundColor: "#151822",
+                border: "1px solid #282D3E",
                 borderRadius: "8px",
                 fontSize: "12px",
-                color: "#e5e7eb",
+                color: "#E8E9ED",
+                fontFamily: "JetBrains Mono, monospace",
               }}
               formatter={(value: number | undefined) => [`${value ?? 0}%`, "Score"]}
             />
@@ -59,7 +60,7 @@ export function RadarChart({ data, title, color }: RadarChartProps) {
               dataKey="value"
               stroke={color}
               fill={color}
-              fillOpacity={0.2}
+              fillOpacity={0.15}
               strokeWidth={2}
               dot={{
                 r: 3,

@@ -207,52 +207,92 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     llmScreenshots = [...new Set(indices)].map(i => allBase64[i]);
   }
 
-  // 4. Generate report via LLM
+  // 4. Generate report via LLM (with persona-specific analysis)
   const personaVector = persona.vector as PersonaVector;
   let textReport: string;
   let uxFeedback: Record<string, unknown>;
+  let llmChecklistResults: Array<{ id: string; status: 'passed' | 'failed' | 'blocked'; memo: string }> = [];
+  let llmQuestionnaireAnswers: Array<{ id: string; answer: string | number }> = [];
+  let qualityScore = 3;
 
   try {
-    const report = await generateAutoTestReport(personaVector, llmScreenshots, actionLog, testCases);
-    textReport = report.textReport;
-    uxFeedback = report.uxFeedback;
+    const llmReport = await generateAutoTestReport(personaVector, llmScreenshots, actionLog, testCases);
+    textReport = llmReport.textReport;
+    uxFeedback = llmReport.uxFeedback;
+    llmChecklistResults = llmReport.checklistResults;
+    llmQuestionnaireAnswers = llmReport.questionnaireAnswers;
+    qualityScore = llmReport.qualityScore;
   } catch (llmErr) {
     console.error('[AutoTest] LLM report generation failed:', llmErr);
     textReport = `Auto test completed for ${test.targetUrl}. Actions: ${actionLog.join('; ')}`;
     uxFeedback = { overall_score: 3, note: 'Generated without LLM — fallback report' };
+
+    // Fallback: derive checklist status from action log
+    llmChecklistResults = testCases.checklist.map(c => {
+      const logEntry = actionLog.find(a => a.includes(`[${c.id}]`));
+      let status: 'passed' | 'failed' | 'blocked' = 'blocked';
+      if (logEntry) {
+        status = logEntry.includes('-> OK') ? 'passed' : 'failed';
+      }
+      return { id: c.id, status, memo: logEntry || `Auto-tested by persona ${persona.id}` };
+    });
   }
   job.progress = 90;
 
-  // 5. Save report to DB
+  // 5. Save report to DB (using LLM-generated persona-specific results)
   const [report] = await db.insert(schema.testReports).values({
     testerAddr: persona.testerAddr,
     testId: job.testId,
-    checklistResults: testCases.checklist.map(c => ({
-      id: c.id,
-      status: 'passed' as const,
-      memo: `Auto-tested by persona ${persona.id}`,
-    })),
+    checklistResults: llmChecklistResults.length > 0
+      ? llmChecklistResults
+      : testCases.checklist.map(c => {
+          const logEntry = actionLog.find(a => a.includes(`[${c.id}]`));
+          const status = logEntry?.includes('-> OK') ? 'passed' as const : 'failed' as const;
+          return { id: c.id, status, memo: logEntry || c.task };
+        }),
     scenarioLog: [{
       id: 'auto',
       timeline: actionLog.map(a => ({ time: new Date().toISOString(), action: a })),
     }],
-    questionnaireAnswers: Object.entries(uxFeedback).map(([k, v]) => ({
-      id: k,
-      answer: typeof v === 'number' ? v : String(v),
-    })),
-    qualityScore: (uxFeedback.overall_score as number) || 3,
+    questionnaireAnswers: llmQuestionnaireAnswers.length > 0
+      ? llmQuestionnaireAnswers
+      : Object.entries(uxFeedback)
+          .filter(([, v]) => v !== null && v !== undefined && typeof v !== 'object')
+          .map(([k, v]) => ({ id: k, answer: typeof v === 'number' ? v : String(v) })),
+    qualityScore,
     isPersonaTest: true,
     screenshots: screenshotFiles,
   }).returning();
 
-  // 6. Record settlement (41R Token type for auto tests)
-  const settlementAmount = 2; // 50% of $4 auto test = $2 equivalent
-  let txSignature = `pending_41r_${Date.now()}`;
-  let feeCollected = 0.1; // 5% of 2 = 0.1
+  // 6. Settlement: USDC reward + 41R Token bonus
+  const settlementAmount = test.rewardPerTester;
+  const feeCollected = settlementAmount * 0.05; // 5% fee
 
+  // 6a. Transfer USDC reward from company budget
+  let usdcTxSignature = `pending_usdc_${Date.now()}`;
+  try {
+    const usdcResult = await solanaService.transferUsdc(persona.testerAddr, settlementAmount);
+    usdcTxSignature = usdcResult.txSignature;
+  } catch (err) {
+    console.error('[AutoTest] USDC transfer failed, recording as pending:', err);
+  }
+
+  await db.insert(schema.settlements).values({
+    testId: job.testId,
+    reportId: report.id,
+    payerAddr: test.companyAddr,
+    payeeAddr: persona.testerAddr,
+    amountToken: settlementAmount,
+    feeCollected,
+    settlementType: 'usdc',
+    txSignature: usdcTxSignature,
+  });
+
+  // 6b. Mint 41R Token as performance bonus
+  let tokenTxSignature = `pending_41r_${Date.now()}`;
   try {
     const mintResult = await solanaService.mint41RTokens(persona.testerAddr, settlementAmount);
-    txSignature = mintResult.txSignature;
+    tokenTxSignature = mintResult.txSignature;
   } catch (err) {
     console.error('[AutoTest] 41R Token mint failed, recording as pending:', err);
   }
@@ -263,10 +303,15 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     payerAddr: test.companyAddr,
     payeeAddr: persona.testerAddr,
     amountToken: settlementAmount,
-    feeCollected,
+    feeCollected: feeCollected,
     settlementType: '41r',
-    txSignature,
+    txSignature: tokenTxSignature,
   });
+
+  // Deduct from test budget
+  await db.update(schema.tests)
+    .set({ budgetUsdc: test.budgetUsdc - settlementAmount })
+    .where(eq(schema.tests.id, job.testId));
 
   job.progress = 100;
   job.status = 'completed';
@@ -277,6 +322,6 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     actionLog,
     textReport,
     uxFeedback,
-    txSignature,
+    txSignature: usdcTxSignature,
   };
 }

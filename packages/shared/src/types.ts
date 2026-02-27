@@ -15,6 +15,8 @@ export interface Test {
   target_url: string;
   requirements?: string;
   budget_usdc: number;
+  reward_per_tester: number;
+  deposit_tx_signature?: string;
   status: TestStatus;
   escrow_pda?: string;
   screenshot_urls?: string[];
@@ -216,12 +218,16 @@ export interface RegisterTestRequest {
   target_url: string;
   requirements?: string;
   budget_usdc: number;
+  reward_per_tester: number;
   company_wallet: string;
+  deposit_tx_signature?: string;
+  enable_auto_test?: boolean;
 }
 
 export interface RegisterTestResponse {
   test: Test;
   test_cases: GeneratedTestCases;
+  auto_tests: Array<{ persona_id: string; tester_addr: string; job_id: string }>;
 }
 
 export interface SubmitReportRequest {

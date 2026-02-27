@@ -14,8 +14,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 // ─── Test APIs ───────────────────────────────────────
 export const testApi = {
-  register: (data: { target_url: string; requirements?: string; budget_usdc: number; company_wallet: string }) =>
+  register: (data: { target_url: string; requirements?: string; budget_usdc: number; reward_per_tester: number; company_wallet: string; deposit_tx_signature?: string; enable_auto_test?: boolean }) =>
     request('/api/test/register', { method: 'POST', body: JSON.stringify(data) }),
+
+  updateDeposit: (testId: string, deposit_tx_signature: string) =>
+    request(`/api/test/${testId}/deposit`, { method: 'PATCH', body: JSON.stringify({ deposit_tx_signature }) }),
 
   list: () => request('/api/tests'),
 
@@ -24,6 +27,8 @@ export const testApi = {
 
 // ─── Tester APIs ─────────────────────────────────────
 export const testerApi = {
+  list: () => request('/api/testers'),
+
   register: (data: { wallet_address: string; display_name: string; profile?: Record<string, unknown> }) =>
     request('/api/tester/register', { method: 'POST', body: JSON.stringify(data) }),
 
@@ -59,7 +64,7 @@ export const personaApi = {
 
 // ─── Auto Test APIs ──────────────────────────────────
 export const autoTestApi = {
-  run: (data: { test_id: string; persona_id: string }) =>
+  run: (data: { test_id: string; persona_id: string; payment_tx?: string }) =>
     request('/api/autotest/run', { method: 'POST', body: JSON.stringify(data) }),
 
   status: (jobId: string) => request(`/api/autotest/status/${jobId}`),

@@ -8,6 +8,7 @@ import reportRouter from './routes/report.js';
 import personaRouter from './routes/persona.js';
 import autotestRouter from './routes/autotest.js';
 import helloRouter from './routes/hello.js';
+import x402DemoRouter from './routes/x402-demo.js';
 import {
   createX402Middleware,
   createFallbackPaymentMiddleware,
@@ -49,11 +50,13 @@ app.use('/api/hello', helloRouter);
 app.use('/api/test', testRouter);
 app.use('/api/tests', testRouter);
 app.use('/api/tester', testerRouter);
+app.use('/api/testers', testerRouter);
 app.use('/api/report', reportRouter);
 app.use('/api/reports', reportRouter);
 app.use('/api/persona', personaRouter);
 app.use('/api/personas', personaRouter);
 app.use('/api/autotest', autotestRouter);
+app.use('/api/x402-demo', x402DemoRouter);
 
 // Static file serving for screenshots
 app.use('/screenshots', express.static(path.resolve('../../screenshots')));

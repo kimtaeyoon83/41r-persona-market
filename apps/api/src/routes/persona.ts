@@ -119,6 +119,60 @@ router.post('/generate', async (req, res) => {
   }
 });
 
+// POST /api/persona/:personaId/renew-sas — Re-issue on-chain SAS attestation
+router.post('/:personaId/renew-sas', async (req, res) => {
+  try {
+    const { personaId } = req.params;
+    const [persona] = await db.select().from(schema.personas).where(eq(schema.personas.id, personaId));
+
+    if (!persona) {
+      res.status(404).json({ error: 'Persona not found' });
+      return;
+    }
+
+    // Get tester info for attestation data
+    const [tester] = await db.select().from(schema.testers).where(eq(schema.testers.walletAddress, persona.testerAddr));
+    if (!tester) {
+      res.status(404).json({ error: 'Tester not found' });
+      return;
+    }
+
+    // Get reports for quality calculation
+    const reports = await db.select().from(schema.testReports)
+      .where(eq(schema.testReports.testerAddr, persona.testerAddr))
+      .limit(10);
+
+    const avgQuality = reports.length > 0
+      ? reports.reduce((sum, r) => sum + (r.qualityScore || 3), 0) / reports.length
+      : 3.0;
+
+    const vector = persona.vector as { expertise: Record<string, number> };
+
+    const attestResult = await sasService.issueAttestation(persona.testerAddr, {
+      tests_completed: tester.testsDone,
+      avg_quality: avgQuality,
+      expertise_defi: vector.expertise?.defi || 0,
+      expertise_ai_tools: vector.expertise?.ai_tools || 0,
+      trust_tier: calculateTrustTier(avgQuality, tester.testsDone),
+      persona_activated: true,
+    });
+
+    // Update persona with new attestation ID
+    await db.update(schema.personas)
+      .set({ sasAttestId: attestResult.attestationId, updatedAt: new Date() })
+      .where(eq(schema.personas.id, persona.id));
+
+    res.json({
+      attestationId: attestResult.attestationId,
+      onChain: attestResult.onChain,
+      explorerUrl: attestResult.explorerUrl,
+    });
+  } catch (error) {
+    console.error('[POST /api/persona/:personaId/renew-sas]', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Internal server error' });
+  }
+});
+
 // GET /api/persona/:personaId — Get persona details
 router.get('/:personaId', async (req, res) => {
   try {

@@ -7,24 +7,24 @@ interface SasBadgeProps {
   attestId?: string;
 }
 
-const tierConfig: Record<SasTier, { bg: string; text: string; border: string; glow: string }> = {
+const tierConfig: Record<SasTier, { bg: string; text: string; border: string; icon: string }> = {
   Bronze: {
-    bg: "bg-amber-700/15",
+    bg: "bg-amber-700/10",
     text: "text-amber-500",
-    border: "border-amber-600/30",
-    glow: "shadow-amber-600/10",
+    border: "border-amber-600/20",
+    icon: "text-amber-500",
   },
   Silver: {
-    bg: "bg-slate-300/10",
+    bg: "bg-slate-300/8",
     text: "text-slate-300",
-    border: "border-slate-400/30",
-    glow: "shadow-slate-400/10",
+    border: "border-slate-400/20",
+    icon: "text-slate-300",
   },
   Gold: {
-    bg: "bg-yellow-400/10",
+    bg: "bg-yellow-400/8",
     text: "text-yellow-400",
-    border: "border-yellow-400/30",
-    glow: "shadow-yellow-400/10",
+    border: "border-yellow-400/20",
+    icon: "text-yellow-400",
   },
 };
 
@@ -33,9 +33,9 @@ export function SasBadge({ tier, attestId }: SasBadgeProps) {
 
   const badge = (
     <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border shadow-sm ${config.bg} ${config.text} ${config.border} ${config.glow}`}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono font-medium border ${config.bg} ${config.text} ${config.border}`}
     >
-      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+      <svg className={`w-3.5 h-3.5 ${config.icon}`} fill="currentColor" viewBox="0 0 20 20">
         <path
           fillRule="evenodd"
           d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
@@ -45,7 +45,7 @@ export function SasBadge({ tier, attestId }: SasBadgeProps) {
       SAS {tier}
       {attestId && (
         <svg
-          className="w-3 h-3 ml-0.5 opacity-60"
+          className="w-3 h-3 ml-0.5 opacity-50"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -64,7 +64,7 @@ export function SasBadge({ tier, attestId }: SasBadgeProps) {
   if (attestId) {
     return (
       <a
-        href={`https://explorer.solana.com/tx/${attestId}?cluster=devnet`}
+        href={`https://explorer.solana.com/address/${attestId}?cluster=devnet`}
         target="_blank"
         rel="noopener noreferrer"
         className="inline-block hover:opacity-80 transition-opacity"
