@@ -579,6 +579,8 @@ export async function generatePersonaActions(
   persona: PersonaVector,
   targetUrl: string,
   baseChecklist: Array<{ id: string; task: string }>,
+  discoveredLinks: string[] = [],
+  navLabels: string[] = [],
 ): Promise<Array<{ id: string; action: string; reason: string }>> {
   // Build a focus summary from the persona's top traits
   const focusAreas: string[] = [];
@@ -628,21 +630,38 @@ export async function generatePersonaActions(
     if (ux.mobile_first) personaContext += ' Primarily uses mobile.';
   }
 
+  // Build site context for navigation-aware actions
+  let siteContext = '';
+  if (discoveredLinks.length > 0) {
+    siteContext += `\n\nDiscovered pages on this site:\n${discoveredLinks.map(l => `- ${l}`).join('\n')}`;
+  }
+  if (navLabels.length > 0) {
+    siteContext += `\n\nNavigation menu items found: ${navLabels.join(', ')}`;
+  }
+
   const prompt = `You are generating browser test actions for a QA tester with these focus areas:
 ${focusAreas.map((f, i) => `${i + 1}. ${f}`).join('\n')}
 ${personaContext}
 
 Target URL: ${targetUrl}
+${siteContext}
 
 The tester already performed these base checklist actions:
 ${baseChecklist.map(c => `- ${c.id}: ${c.task}`).join('\n')}
 
-Generate 3-5 ADDITIONAL browser actions this persona would specifically do based on their focus areas and demographics. These must be concrete, executable browser actions (click, scroll, type, observe) — NOT abstract analysis.
+Generate 5-8 ADDITIONAL browser actions this persona would specifically do. CRITICAL RULES:
+1. **At least 2-3 actions MUST navigate to DIFFERENT pages** — click nav items, visit discovered links, explore sections the checklist didn't cover
+2. **Vary the interaction types**: click buttons, open modals/dropdowns, scroll to specific sections, try form inputs, toggle dark/light mode, resize viewport, check mobile menu
+3. Actions must be concrete and executable by a browser automation tool (click, scroll, type, navigate)
+4. Each action should result in a visually DIFFERENT screen state from the others
+5. Do NOT repeat actions already in the checklist
 
 Return as JSON array:
 \`\`\`json
 [
-  { "id": "PA01", "action": "Scroll down to check if fee breakdown is visible without wallet connection", "reason": "DeFi expert checks pre-trade transparency" },
+  { "id": "PA01", "action": "Click the navigation link to go to the Settings or Profile page", "reason": "Explore pages beyond the landing page" },
+  { "id": "PA02", "action": "Scroll to the footer section and check all footer links", "reason": "Verify site-wide navigation and legal links" },
+  { "id": "PA03", "action": "Click the hamburger menu or mobile nav toggle if visible", "reason": "Test responsive navigation behavior" },
   ...
 ]
 \`\`\``;
