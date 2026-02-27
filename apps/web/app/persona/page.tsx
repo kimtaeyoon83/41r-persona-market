@@ -8,6 +8,8 @@ interface PersonaVector {
   test_style: Record<string, number>;
   expertise: Record<string, number>;
   reliability: Record<string, number>;
+  demographics?: { age_group?: string; tech_literacy?: number; crypto_experience?: number };
+  ux_preferences?: { mobile_first?: boolean; visual_style?: string };
   voice_sample: string;
 }
 
@@ -72,9 +74,31 @@ export default function PersonaGallery() {
                   </span>
                 )}
               </div>
+              {persona.vector.demographics && (
+                <div className="flex gap-2 mt-2 mb-2">
+                  {persona.vector.demographics.age_group && (
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-pink-500/10 text-pink-400">
+                      {persona.vector.demographics.age_group}
+                    </span>
+                  )}
+                  {persona.vector.ux_preferences?.mobile_first !== undefined && (
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-amber-500/10 text-amber-400">
+                      {persona.vector.ux_preferences.mobile_first ? "mobile-first" : "desktop"}
+                    </span>
+                  )}
+                  {persona.vector.ux_preferences?.visual_style && (
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-blue-500/10 text-blue-400">
+                      {persona.vector.ux_preferences.visual_style}
+                    </span>
+                  )}
+                </div>
+              )}
               <p className="text-xs text-gray-400 line-clamp-2">{persona.vector.voice_sample}</p>
               <div className="mt-3 flex gap-4 text-xs text-gray-500">
-                <span>Quality: {(persona.vector.reliability.quality_score * 5).toFixed(1)}/5</span>
+                <span>Quality: <span className={`font-semibold ${
+                  persona.vector.reliability.quality_score >= 4 ? "text-green-400" :
+                  persona.vector.reliability.quality_score >= 3 ? "text-yellow-400" : "text-red-400"
+                }`}>{persona.vector.reliability.quality_score.toFixed(1)}</span>/5</span>
                 <span>Consistency: {(persona.vector.reliability.consistency * 100).toFixed(0)}%</span>
               </div>
             </Link>
