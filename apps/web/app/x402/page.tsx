@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { API_BASE } from "@/lib/api";
 
-const API = "http://localhost:4100";
+const API = API_BASE;
 
 interface Step1Result {
   status: number;

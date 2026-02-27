@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { testApi, reportApi } from "@/lib/api";
 import { LoadingSpinner } from "@/components/loading";
+import { ErrorDisplay } from "@/components/error-display";
 
 interface TestDetail {
   test: {
@@ -27,9 +28,12 @@ export default function TestDetailPage() {
   const [data, setData] = useState<TestDetail | null>(null);
   const [reports, setReports] = useState<Array<Record<string, unknown>>>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadData = () => {
     if (!testId) return;
+    setLoading(true);
+    setError(null);
     Promise.all([
       testApi.get(testId) as Promise<TestDetail>,
       reportApi.byTest(testId) as Promise<Array<Record<string, unknown>>>,
@@ -38,12 +42,18 @@ export default function TestDetailPage() {
         setData(testData);
         setReports(reportData);
       })
-      .catch(console.error)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load test details"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testId]);
 
   if (loading) return <LoadingSpinner text="Loading test details..." />;
-  if (!data) return <div className="text-[var(--status-error)] text-center py-12">Test not found</div>;
+  if (error) return <ErrorDisplay message={error} onRetry={loadData} />;
+  if (!data) return <ErrorDisplay message="Test not found" />;
 
   const { test, test_cases } = data;
 

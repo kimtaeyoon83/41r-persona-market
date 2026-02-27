@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { testApi, reportApi } from "@/lib/api";
 import { LoadingSpinner } from "@/components/loading";
+import { ErrorDisplay } from "@/components/error-display";
 import { useWalletContext } from "@/components/wallet-provider";
 
 interface ChecklistItem { id: string; task: string; expected: string }
@@ -26,6 +27,7 @@ export default function TesterTestPage() {
   const testId = params.testId as string;
   const [data, setData] = useState<TestData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
@@ -34,12 +36,19 @@ export default function TesterTestPage() {
   const [scenarioLogs, setScenarioLogs] = useState<Record<string, string>>({});
   const [answers, setAnswers] = useState<Record<string, string | number>>({});
 
-  useEffect(() => {
+  const loadTest = () => {
     if (!testId) return;
+    setLoading(true);
+    setError(null);
     (testApi.get(testId) as Promise<TestData>)
       .then(setData)
-      .catch(console.error)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load test"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadTest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testId]);
 
   const handleSubmit = async () => {
@@ -82,7 +91,8 @@ export default function TesterTestPage() {
   };
 
   if (loading) return <LoadingSpinner text="Loading test session..." />;
-  if (!data) return <div className="text-[var(--status-error)] text-center py-12">Test not found</div>;
+  if (error) return <ErrorDisplay message={error} onRetry={loadTest} />;
+  if (!data) return <ErrorDisplay message="Test not found" />;
 
   if (submitted && result) {
     const isRejected = result.rejected === true;

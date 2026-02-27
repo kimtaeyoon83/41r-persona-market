@@ -1,163 +1,220 @@
 # 41R Persona Market
 
-> **AI Persona-Based Product Validation Marketplace on Solana**
->
-> Solana Startup Village Hackathon | February 2026
+**AI Persona-driven product validation marketplace on Solana** -- turn human testers into reusable AI personas for autonomous product testing.
 
----
+![Solana](https://img.shields.io/badge/Solana-Token--2022-9945FF?logo=solana&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=next.js&logoColor=white)
 
-## The Problem
-
-Product testing is slow, expensive, and inconsistent. Companies hire human testers who provide varying quality feedback. There's no way to capture a tester's unique perspective and reuse it at scale.
-
-## The Solution
-
-**41R Persona Market** turns real human testers into reusable AI Personas. After 3 manual tests, an AI analyzes a tester's behavior patterns, expertise, and feedback style to generate a 20-dimension PersonaVector. That Persona then autonomously tests products via browser automation — delivering consistent, persona-perspective reports at a fraction of the cost.
-
-We even **dogfooded our own product**: the 41R platform tested itself using its own AI Personas and generated a real UX report with 7 actionable findings.
+> Built for the **Solana Startup Village Hackathon** (7-day sprint, Feb 2026)
 
 ---
 
 ## Architecture
 
 ```
-                            ┌──────────────────────────────────────────────┐
-                            │              41R Persona Market              │
-                            └──────────────────────────────────────────────┘
-
-    ┌─────────────┐         ┌──────────────────────┐         ┌─────────────────────┐
-    │   Company    │────────▶│    Express API        │◀────────│      Tester         │
-    │  (Browser)   │         │    (port 4100)        │         │    (Browser)        │
-    └─────────────┘         └──────────┬───────────┘         └─────────────────────┘
-          │                            │                              │
-          │  Register URL              │                    Complete 3 tests
-          │  + requirements            │                    Earn $3-$5 USDC
-          ▼                            ▼                              │
-    ┌─────────────┐         ┌──────────────────────┐                  │
-    │ Claude       │         │    PostgreSQL         │                  │
-    │ Sonnet 4.6   │         │    (7 tables)         │                  ▼
-    │              │         │                      │         ┌─────────────────────┐
-    │ - Test cases │         │  companies           │         │  AI Persona         │
-    │ - Persona    │         │  tests               │         │  Generated          │
-    │   generation │         │  test_cases          │         │                     │
-    │ - Auto test  │         │  testers             │         │  20-dim Vector      │
-    │   reports    │         │  test_reports        │         │  + voice sample     │
-    └─────────────┘         │  personas            │         │  + SAS attestation  │
-                            │  settlements         │         └──────────┬──────────┘
-                            └──────────────────────┘                    │
-                                                                       │
-    ┌──────────────────────────────────────────────────────────────────┘
-    │
-    ▼
-    ┌─────────────────────────────────────────────────────────────────────┐
-    │                     Auto Test Engine                                │
-    │                                                                     │
-    │  ┌───────────┐    ┌────────────────┐    ┌────────────────────────┐ │
-    │  │ Stagehand  │───▶│ Visit site +    │───▶│ Claude Vision          │ │
-    │  │ (Playwright │    │ execute tasks   │    │ generates persona-     │ │
-    │  │  + AI)     │    │ + screenshots   │    │ perspective report     │ │
-    │  └───────────┘    └────────────────┘    └────────────────────────┘ │
-    │                                                                     │
-    └─────────────────────────────────┬───────────────────────────────────┘
-                                      │
-                                      ▼
-    ┌─────────────────────────────────────────────────────────────────────┐
-    │                        Solana Devnet                                │
-    │                                                                     │
-    │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
-    │  │ 41R Token     │  │ USDC         │  │ x402         │             │
-    │  │ (Token-2022)  │  │ Settlement   │  │ Micropayment │             │
-    │  │ 5% tx fee     │  │ $3-$5/test   │  │ $0.001-$0.10 │             │
-    │  └──────────────┘  └──────────────┘  └──────────────┘             │
-    │                                                                     │
-    │  ┌──────────────┐  ┌──────────────┐                                │
-    │  │ SAS          │  │ Transfer     │                                │
-    │  │ Attestation  │  │ Hook         │                                │
-    │  │ Bronze/Gold  │  │ Performance  │                                │
-    │  └──────────────┘  └──────────────┘                                │
-    └─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         41R Persona Market                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌───────────────┐         ┌──────────────────────────────────┐    │
+│  │  @41rpm/web   │  HTTP   │          @41rpm/api              │    │
+│  │  Next.js 14   │────────>│        Express.js                │    │
+│  │  port 3000    │         │        port 4100                 │    │
+│  │               │         │                                  │    │
+│  │  - Dashboard  │         │  Routes:                         │    │
+│  │  - Test Mgmt  │         │    /api/test      (register/list)│    │
+│  │  - Reports    │         │    /api/tester    (register/CRUD)│    │
+│  │  - Personas   │         │    /api/report    (submit/query) │    │
+│  │  - AutoTest   │         │    /api/persona   (generate/get) │    │
+│  │  - x402 Demo  │         │    /api/autotest  (run/status)   │    │
+│  │               │         │    /api/x402-demo (payment demo) │    │
+│  └───────────────┘         │    /api/hello     (x402 gated)   │    │
+│                            │                                  │    │
+│                            │  Services:                       │    │
+│                            │    LLM (Claude Sonnet/Haiku)     │    │
+│                            │    Stagehand (browser automation) │    │
+│                            │    Solana (USDC transfers)       │    │
+│                            │    SAS (on-chain attestation)    │    │
+│                            │    Matching (persona-test)       │    │
+│                            └──────────┬───────────────────────┘    │
+│                                       │                            │
+│           ┌───────────────────────────┼─────────────────┐          │
+│           │                           │                 │          │
+│           ▼                           ▼                 ▼          │
+│  ┌────────────────┐     ┌──────────────────┐  ┌──────────────┐    │
+│  │   PostgreSQL   │     │  Solana Devnet   │  │   External   │    │
+│  │  Drizzle ORM   │     │                  │  │              │    │
+│  │                │     │  - Token-2022    │  │  - Anthropic │    │
+│  │  - companies   │     │    (41R, 5% fee) │  │  - Browserbase│   │
+│  │  - tests       │     │  - USDC rewards  │  │    Stagehand │    │
+│  │  - test_cases  │     │  - SAS attests   │  │              │    │
+│  │  - testers     │     │  - x402 payments │  └──────────────┘    │
+│  │  - test_reports│     │                  │                       │
+│  │  - personas    │     └──────────────────┘                       │
+│  │  - settlements │                                                │
+│  └────────────────┘                                                │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Data Flow
+### Core Flow
 
 ```
-1. REGISTER       Company → POST /api/test/register → Claude generates test cases
-                                                       (checklist + scenarios + questionnaire)
-
-2. MANUAL TEST    Tester → picks test → completes checklist → submits report
-                                                               → Claude scores quality (1-5)
-                                                               → USDC reward ($3-$5) on Solana
-
-3. PERSONA        3 reports → Claude analyzes patterns → 20-dim PersonaVector
-                                                        → SAS on-chain attestation
-
-4. AUTO TEST      Persona matched → Stagehand visits site → 10-15 step screenshots
-                                  → Claude Vision report → 41R token settlement on-chain
-
-5. COMPARE        Manual report ←→ AI Persona report — side-by-side analysis
+Company registers test  ──>  AI generates test cases  ──>  Human testers complete tests
+        │                   (Claude Sonnet 4.6)                    │
+        │                                                          ▼
+        │                                              LLM evaluates quality
+        │                                              (power-curve reward)
+        │                                                          │
+        ▼                                                          ▼
+   USDC budget deposited                              Reward: $0.50~$5.00 USDC
+        │                                              + 41R token bonus
+        │                                                          │
+        │                                                          ▼
+        │                                              After 3 tests:
+        │                                              AI Persona generated
+        │                                              (20-dim vector)
+        │                                                          │
+        ▼                                                          ▼
+   Persona hired for auto-testing  <──────────  Stagehand browser + Claude Vision
+        │
+        ▼
+   SAS attestation on-chain (Bronze/Silver/Gold)
 ```
+
+1. **Register** -- Company submits URL + requirements + USDC budget
+2. **Generate** -- Claude Sonnet 4.6 creates structured test cases (checklist, scenarios, questionnaires)
+3. **Test** -- Human testers complete tests and submit reports
+4. **Score** -- Claude Haiku 4.5 evaluates quality; power-curve reward ($0.50-$5.00 USDC on-chain)
+5. **Persona** -- After 3 tests, a 20-dimensional AI Persona vector is generated
+6. **Auto-Test** -- Persona drives Stagehand (Browserbase) headless browser + Claude Vision
+7. **Settle** -- USDC reward + 41R token bonus (5% transfer fee to ecosystem treasury)
+8. **Attest** -- SAS records tester trust tier on Solana (Bronze/Silver/Gold)
+9. **Gate** -- x402 micropayments protect premium API endpoints ($0.001-$0.10)
 
 ---
 
-## Solana Integration (5 Technologies)
+## Features
 
-| # | Technology | How We Use It | Verified |
-|---|-----------|---------------|:--------:|
-| 1 | **x402 Micropayment** | Per-API-call payment gating ($0.001-$0.10) for test results and persona data | /api/hello, /api/persona, /api/test/results |
-| 2 | **Token-2022 Transfer Fee** | 41R token with 5% built-in fee — platform revenue on every transfer | Mint: `GeriorgNHG6o7XGA2xqLyjexqaFxq8nYDvYdJ37qACpS` |
-| 3 | **Token-2022 Transfer Hook** | Atomic payment + performance recording in same transaction | Fallback: PostgreSQL settlements |
-| 4 | **SAS Attestation** | Persona credentials (quality, expertise, trust tier) attested on-chain via `sas-lib` | Credential: `R3hRyk…` Schema: `H3ut5o…` |
-| 5 | **USDC on Solana** | Instant settlement for manual testers — no bank delays | $131+ settled in demo |
-
-### On-Chain Assets
-
-```
-41R Token Mint:     GeriorgNHG6o7XGA2xqLyjexqaFxq8nYDvYdJ37qACpS  (devnet)
-Transfer Fee:       5% (500 bps), max 1 token per transfer
-Decimals:           9
-Wallet:             8Vm3ys3kwLSy2qThejn56E2j6fptwSE2qcLkEeiLrdB8
-
-SAS Credential PDA: R3hRyk7FKd7m1eAJHetzTkzbygVwNBQSgsV2YPHmkzh  (devnet)
-SAS Schema PDA:     H3ut5oZXhn8LwviXs5cxCaadfuAdEKzzox8ckpcR4k1V  (devnet)
-SAS Schema Fields:  tests_completed, avg_quality, expertise_defi, expertise_ai, trust_tier, persona_activated
-```
+- **AI-Generated Test Cases** -- Claude Sonnet 4.6 creates checklists, scenario narratives, and questionnaires from a target URL and requirements
+- **LLM Quality Scoring** -- Claude Haiku 4.5 evaluates report quality (0-5 scale) with power-curve reward distribution
+- **AI Persona Generation** -- After 3 completed tests, a 20-dimensional persona vector is generated capturing test style, expertise, feedback patterns, demographics, and UX preferences
+- **Autonomous Browser Testing** -- Stagehand (Browserbase) drives headless Chrome with the persona's behavioral profile, producing screenshots and structured reports
+- **Persona-Test Matching** -- LLM-powered matching scores personas against test requirements for optimal auto-test assignment
+- **On-Chain Settlements** -- USDC rewards transferred on Solana; 41R token bonus with 5% transfer fee flowing to ecosystem treasury
+- **SAS Attestation** -- Solana Attestation Service records tester trust tiers (Bronze/Silver/Gold) on-chain
+- **x402 Micropayments** -- Premium API endpoints gated by x402 protocol ($0.001-$0.10 USDC)
+- **Manual vs Persona Comparison** -- Side-by-side comparison of manual and AI-generated test reports
+- **Per-Action Screenshot Timeline** -- Auto tests capture screenshots after every browser action, displayed as a step-by-step timeline
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology | Model / Version |
-|-------|-----------|-----------------|
-| Frontend | Next.js 14, Tailwind CSS, Recharts | App Router, dark theme |
-| Backend | Express.js, PostgreSQL 16, Drizzle ORM | 7 tables, typed queries |
-| AI — Heavy | Claude Sonnet 4.6 | Test case gen, persona gen, auto test reports |
-| AI — Fast | Claude Haiku 4.5 | Quality scoring, keyword extraction |
-| Browser Agent | Stagehand v3 (Playwright + Claude Vision) | Headless Chromium, per-action screenshots |
-| Blockchain | Solana devnet | Token-2022, SAS, x402 |
-| Monorepo | pnpm workspaces + Turborepo | apps/web, apps/api, packages/* |
+| Layer | Technology | Details |
+|-------|-----------|---------|
+| Frontend | Next.js 14, React 18, Tailwind CSS, Recharts | Solana Wallet Adapter, dark theme |
+| Backend | Express.js 4, TypeScript 5.7, Zod | CORS, 10mb JSON body limit |
+| Database | PostgreSQL, Drizzle ORM 0.38 | 6 tables, typed schema, `drizzle-kit` migrations |
+| AI (Heavy) | Claude Sonnet 4.6 (`@anthropic-ai/sdk`) | Test case generation, persona generation, auto-test reports |
+| AI (Fast) | Claude Haiku 4.5 (`@anthropic-ai/sdk`) | Quality scoring, keyword extraction |
+| Browser | Stagehand v3 (`@browserbasehq/stagehand`) | Playwright + Claude Vision, headless Chromium |
+| Blockchain | Solana devnet (`@solana/web3.js`, `@solana/spl-token`) | Token-2022, SAS (`sas-lib`), x402 |
+| Payments | x402 (`@x402/express`, `@x402/fetch`, `@x402/svm`) | USDC micropayments on Solana |
+| Monorepo | pnpm 10.30, Turborepo 2.3 | Parallel dev/build/test tasks |
+| Testing | Vitest, Supertest, Playwright | Unit + E2E |
 
 ---
 
-## Key Features
+## Quick Start
 
-### AI-Generated Test Cases
-Company submits a URL. Claude Sonnet analyzes the page and generates structured test cases — checklist items, user scenario narratives, and UX questionnaires. No manual test plan writing needed.
+### Prerequisites
 
-### 20-Dimension PersonaVector
-After 3 manual tests, Claude analyzes all reports to extract:
-- **test_style** (5 axes): speed, thoroughness, creativity, ux_focus, bug_detection
-- **expertise** (5 axes): defi, nft, gaming, ai_tools, general_web
-- **feedback_pattern** (5 axes): detail_oriented, ui_critical, security_aware, performance_sensitive, accessibility_focus
-- **reliability** (3 axes): consistency, quality_score, response_rate
-- **demographics**: age_group, tech_literacy, crypto_experience, design_sensitivity
-- **ux_preferences**: visual_style, information_density, animation_tolerance
-- **voice_sample**: Natural language writing style
+- **Node.js** >= 18
+- **pnpm** >= 10.30
+- **PostgreSQL** >= 15
+- **Solana CLI** (`solana-keygen`, `spl-token`)
 
-### Per-Action Screenshot Timeline
-Auto tests capture a screenshot after every browser action (10-15 per session), labeled with step number, action description, and phase. The LLM receives a sampled subset (max 6) for report generation while the full timeline is displayed in the UI.
+### 1. Clone and install
 
-### Self-Test (Dogfooding)
-We registered `http://localhost:3000` (our own platform) as a test target. Alice Persona (30s DeFi expert) autonomously tested our platform and found 7 real UX issues including accessibility gaps and missing progress indicators. The report was settled with real 41R tokens on Solana devnet.
+```bash
+git clone <repo-url> && cd 41rpm
+pnpm install
+```
+
+### 2. Environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your values:
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string (default: `postgresql://admin:admin41rpm@localhost:5432/persona_market`) |
+| `SOLANA_RPC_URL` | Solana RPC endpoint (default: `https://api.devnet.solana.com`) |
+| `SOLANA_KEYPAIR_PATH` | Path to Solana keypair JSON (default: `~/.config/solana/id.json`) |
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude |
+| `BROWSERBASE_API_KEY` | Browserbase API key for Stagehand |
+| `BROWSERBASE_PROJECT_ID` | Browserbase project ID |
+| `API_PORT` | Express server port (default: `4100`) |
+| `NEXT_PUBLIC_API_URL` | API URL for frontend (default: `http://localhost:4100`) |
+| `TOKEN_41R_MINT` | 41R token mint address (set after running `setup-token.ts`) |
+| `SAS_CREDENTIAL_PDA` | SAS credential PDA (set after running `setup-sas.ts`) |
+| `SAS_SCHEMA_PDA` | SAS schema PDA (set after running `setup-sas.ts`) |
+| `X402_RESOURCE_WALLET` | Wallet address receiving x402 payments |
+
+### 3. Database
+
+```bash
+# Create the database
+createdb persona_market
+
+# Push the Drizzle schema
+pnpm --filter @41rpm/api db:push
+```
+
+### 4. Solana token setup
+
+```bash
+# Create 41R Token-2022 mint with 5% transfer fee on devnet
+pnpm tsx scripts/setup-token.ts
+
+# Initialize SAS credential and schema PDAs
+pnpm tsx scripts/setup-sas.ts
+```
+
+Copy the output mint address and PDA values into `.env`.
+
+### 5. Seed data
+
+```bash
+pnpm tsx scripts/seed-data.ts
+```
+
+### 6. Run
+
+```bash
+# Start both API (port 4100) and web (port 3000) via Turborepo
+pnpm dev
+```
+
+Or run individually:
+
+```bash
+# API only
+pnpm --filter @41rpm/api dev
+
+# Web only
+pnpm --filter @41rpm/web dev
+```
+
+### 7. Verify
+
+```bash
+pnpm tsx scripts/verify-demo.ts
+```
 
 ---
 
@@ -166,175 +223,197 @@ We registered `http://localhost:3000` (our own platform) as a test target. Alice
 ```
 41rpm/
 ├── apps/
-│   ├── api/                     # Express backend (port 4100)
-│   │   ├── src/
-│   │   │   ├── routes/          # test, tester, report, persona, autotest, hello
-│   │   │   ├── services/        # llm, solana, sas, autotest, matching
-│   │   │   ├── middleware/      # x402 payment (4 gated routes)
-│   │   │   └── db/              # Drizzle ORM schema + connection
-│   │   └── drizzle.config.ts
-│   └── web/                     # Next.js 14 frontend (port 3000)
-│       ├── app/
-│       │   ├── page.tsx                      # Homepage with live stats
-│       │   ├── company/                      # Dashboard, register, test detail
-│       │   │   └── test/[testId]/compare/    # Manual vs AI report comparison
-│       │   ├── tester/                       # Tests list, test session, profile
-│       │   ├── persona/                      # Gallery, detail (radar chart + demographics)
-│       │   ├── autotest/                     # Trigger + step-by-step results viewer
-│       │   └── report/[reportId]/            # Full report viewer
-│       ├── components/          # sidebar, loading, radar-chart, sas-badge
-│       └── lib/api.ts           # Typed API client
+│   ├── api/                        # @41rpm/api — Express backend (port 4100)
+│   │   └── src/
+│   │       ├── index.ts            # Server entry, middleware, route mounting
+│   │       ├── db/
+│   │       │   ├── schema.ts       # Drizzle ORM schema (6 tables)
+│   │       │   └── index.ts        # DB connection pool
+│   │       ├── routes/
+│   │       │   ├── test.ts         # Test registration, listing, results
+│   │       │   ├── tester.ts       # Tester CRUD with stats
+│   │       │   ├── report.ts       # Report submission, quality scoring, comparison
+│   │       │   ├── persona.ts      # Persona generation, SAS attestation
+│   │       │   ├── autotest.ts     # Auto-test job management + payment verification
+│   │       │   ├── hello.ts        # x402 payment-gated demo endpoint
+│   │       │   └── x402-demo.ts    # x402 flow inspection and paid request demo
+│   │       ├── services/
+│   │       │   ├── llm.ts          # Claude API (test gen, quality scoring, persona)
+│   │       │   ├── stagehand.ts    # Browserbase headless browser automation
+│   │       │   ├── solana.ts       # USDC transfers, token operations
+│   │       │   ├── sas.ts          # Solana Attestation Service integration
+│   │       │   ├── autotest.ts     # Auto-test orchestration (Stagehand + LLM)
+│   │       │   └── matching.ts     # Persona-test matching via LLM
+│   │       ├── middleware/
+│   │       │   └── x402.ts         # x402 payment middleware (standard + fallback)
+│   │       └── __tests__/          # Vitest unit tests
+│   │
+│   └── web/                        # @41rpm/web — Next.js 14 frontend (port 3000)
+│       └── app/
+│           ├── page.tsx            # Dashboard with live stats
+│           ├── layout.tsx          # Root layout
+│           ├── company/            # Company test management
+│           ├── tester/             # Tester profile and history
+│           ├── report/             # Report viewer
+│           ├── persona/            # Persona details, radar charts, demographics
+│           ├── autotest/           # Auto-test trigger and step-by-step results
+│           └── x402/              # x402 demo page
+│
 ├── packages/
-│   ├── shared/                  # TypeScript interfaces (PersonaVector, etc.)
-│   └── solana-utils/            # Token-2022 creation, transfer, fee utils
-├── scripts/
-│   ├── seed-data.ts             # Demo data (5 testers, 3 personas, 9 reports)
-│   ├── verify-demo.ts           # 18-check environment verification
-│   ├── setup-token.ts           # Create 41R Token on devnet
-│   └── test-stagehand.ts        # Browser automation PoC
-├── screenshots/                 # Auto test screenshot output
-├── design.md                    # Technical design document (v5)
-└── .env.example                 # Environment template
+│   ├── shared/                     # @41rpm/shared — TypeScript interfaces
+│   │   └── src/types.ts            # All domain types and API contracts
+│   │
+│   └── solana-utils/               # @41rpm/solana-utils — Token-2022 utilities
+│       └── src/token-setup.ts      # Mint creation, transfers, fee collection
+│
+├── scripts/                        # Setup, seed, and test scripts
+├── screenshots/                    # Auto-test screenshot output
+├── package.json                    # Root workspace config (pnpm 10.30, Turborepo)
+├── pnpm-workspace.yaml             # Workspace: apps/*, packages/*
+├── turbo.json                      # Turborepo task config (dev, build, test, lint)
+└── .env.example                    # Environment template
 ```
 
 ---
 
 ## API Endpoints
 
-| Method | Endpoint | x402 | Description |
-|--------|----------|:----:|-------------|
-| GET | `/api/health` | | Health check |
-| POST | `/api/test/register` | | Register test + generate AI test cases |
-| GET | `/api/tests` | | List all tests |
-| GET | `/api/test/:id` | | Test detail with test cases |
-| GET | `/api/test/:id/results` | $0.05 | Test results with reports + settlements |
-| POST | `/api/tester/register` | | Register tester with demographics |
-| GET | `/api/tester/:wallet` | | Tester profile + persona link |
-| POST | `/api/report/submit` | | Submit report → quality score → USDC reward |
-| GET | `/api/report/:id` | | Report detail |
-| GET | `/api/reports/test/:testId` | | All reports for a test |
-| GET | `/api/reports/compare/:testId` | | Manual vs persona comparison |
-| POST | `/api/persona/generate` | | Generate persona (requires 3 reports) |
-| GET | `/api/personas` | | List active personas |
-| GET | `/api/persona/:id` | $0.10 | Persona detail with full vector |
-| POST | `/api/autotest/run` | | Trigger auto test (async job) |
-| GET | `/api/autotest/status/:jobId` | | Auto test progress + results |
-| GET | `/api/hello` | $0.001 | x402 PoC endpoint |
+### Health
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/health` | Health check (`{ status, timestamp }`) |
+
+### Tests
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/test/register` | Register a new test -- AI generates test cases (checklist + scenarios + questionnaire) |
+| `GET` | `/api/tests` | List all tests |
+| `GET` | `/api/test/:id` | Get test details with test cases |
+| `GET` | `/api/test/:id/results` | Get test results with reports and settlements **(x402: $0.05)** |
+| `PATCH` | `/api/test/:id/deposit` | Update deposit transaction signature |
+
+### Testers
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/tester/register` | Register a new tester with demographic profile |
+| `GET` | `/api/testers` | List all testers with stats (report count, avg quality, earnings, persona info) |
+| `GET` | `/api/tester/:wallet` | Get tester profile with linked persona |
+| `PUT` | `/api/tester/:wallet` | Update tester display name or profile |
+
+### Reports
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/report/submit` | Submit test report -- triggers LLM quality scoring + USDC reward + persona check |
+| `GET` | `/api/report/:reportId` | Get a report with its settlements (USDC + 41R) |
+| `GET` | `/api/reports/tester/:wallet` | All reports by a tester with test info and settlements |
+| `GET` | `/api/reports/test/:testId` | All reports for a test with settlements |
+| `GET` | `/api/reports/compare/:testId` | Compare manual vs persona reports (quality, issues, counts) |
+
+### Personas
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/persona/generate` | Generate AI persona from tester's 3+ reports (issues SAS attestation) |
+| `GET` | `/api/personas` | List all active personas **(x402: $0.05)** |
+| `GET` | `/api/persona/:personaId` | Get persona details with full vector **(x402: $0.10)** |
+| `POST` | `/api/persona/:personaId/renew-sas` | Re-issue SAS attestation with updated stats |
+
+### Auto-Test
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/autotest/run` | Start auto-test job (requires $0.10 USDC payment or `payment_tx`) |
+| `GET` | `/api/autotest/status/:jobId` | Poll job status, progress, and results |
+
+### x402 Demo
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/hello` | Payment-gated endpoint **(x402: $0.001)** |
+| `GET` | `/api/x402-demo/test-402` | Inspect a 402 Payment Required response |
+| `GET` | `/api/x402-demo/test-paid` | Execute a paid request using `@x402/fetch` client |
 
 ---
 
-## Database Schema
+## Solana Integration
 
-| Table | Key Fields | Description |
-|-------|-----------|-------------|
-| `companies` | walletAddress, companyName | Registered companies |
-| `tests` | targetUrl, requirements, budgetUsdc, status | Test records with AI-generated cases |
-| `test_cases` | testId, type, content, order | Checklist, scenario, questionnaire items |
-| `testers` | walletAddress, displayName, profile, testsDone | Tester profiles with demographics |
-| `test_reports` | testerAddr, testId, qualityScore, isPersonaTest | Manual + AI persona reports |
-| `personas` | testerAddr, vector, sasAttestId, isActive | 20-dim PersonaVector + SAS link |
-| `settlements` | testId, reportId, amountToken, txSignature | USDC and 41R payment records |
+### 41R Token (Token-2022)
 
----
+The 41R token uses the Token-2022 program with a **5% transfer fee** extension. Every token transfer automatically withholds fees that accumulate in recipient accounts and can be collected into the ecosystem treasury by the withdraw authority.
 
-## Getting Started
+| Property | Value |
+|----------|-------|
+| Program | Token-2022 (`TOKEN_2022_PROGRAM_ID`) |
+| Decimals | 9 |
+| Transfer fee | 500 basis points (5%) |
+| Max fee per transfer | 1,000,000,000 base units (1 token) |
 
-### Prerequisites
+The `@41rpm/solana-utils` package provides:
 
-- Node.js 22+
-- pnpm 10+
-- Docker (for PostgreSQL)
-- Solana CLI (for devnet operations)
+- `createTransferFeeMint()` -- Create a new Token-2022 mint with transfer fee config
+- `transferTokensWithFee()` -- Transfer using `transferCheckedWithFee` instruction
+- `collectWithheldFees()` -- Two-step harvest: accounts to mint, then mint to destination
+- `withdrawFeesFromAccounts()` -- Direct single-step fee withdrawal
+- `calculateExpectedFee()` -- Off-chain fee calculation (ceiling division, matching on-chain)
+- `fetchTransferFeeConfig()` -- Read the on-chain fee config
 
-### Setup
+### USDC Rewards
 
-```bash
-# Clone and install
-git clone <repo-url> && cd 41rpm
-pnpm install
+Report quality is scored 0-5 by Claude Haiku 4.5. Reward follows a **power curve** (`score^1.5`) applied against the test's `reward_per_tester`:
 
-# Start PostgreSQL
-docker run -d --name 41rpm-postgres \
-  -e POSTGRES_USER=admin \
-  -e POSTGRES_PASSWORD=admin41rpm \
-  -e POSTGRES_DB=persona_market \
-  -p 5432:5432 postgres:16-alpine
+| Quality Score | % of Max Reward | Example ($3.00 max) |
+|:---:|:---:|:---:|
+| 5.0 | 100% | $3.00 |
+| 4.0 | 72% | $2.15 |
+| 3.0 | 46% | $1.39 |
+| 2.0 | 25% | $0.76 |
+| < 1.5 | Rejected | $0.00 |
 
-# Configure environment
-cp .env.example .env
-# Edit .env:
-#   ANTHROPIC_API_KEY=sk-ant-...
-#   TOKEN_41R_MINT=GeriorgNHG6o7XGA2xqLyjexqaFxq8nYDvYdJ37qACpS
-#   X402_RESOURCE_WALLET=<your-solana-wallet>
+### SAS Attestation
 
-# Push database schema
-pnpm --filter @41rpm/api db:push
+Solana Attestation Service records tester trust tiers on-chain. The attestation schema includes: `tests_completed`, `avg_quality`, `expertise_defi`, `expertise_ai_tools`, `trust_tier`, and `persona_activated`.
 
-# Seed demo data
-npx tsx scripts/seed-data.ts
+| Tier | Criteria |
+|------|----------|
+| **Gold** | avg quality >= 4.0 and 10+ tests |
+| **Silver** | avg quality >= 3.0 and 5+ tests |
+| **Bronze** | avg quality >= 2.0 and 3+ tests |
 
-# Verify everything works (18 checks)
-npx tsx scripts/verify-demo.ts
+Attestations are issued when a persona is generated and can be renewed via `POST /api/persona/:id/renew-sas`.
 
-# Start dev servers
-pnpm dev
-# API: http://localhost:4100
-# Web: http://localhost:3000
-```
+### x402 Micropayments
 
-### Run Auto Test
+Premium endpoints are gated via the x402 protocol. The middleware intercepts requests, returns `402 Payment Required` with Solana payment instructions (CAIP-2: `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1`), and verifies the `X-Payment` header on retry. Two middleware modes are supported: standard `@x402/express` and a fallback mode (set `USE_X402_FALLBACK=true`).
 
-```bash
-# Via API
-curl -X POST http://localhost:4100/api/autotest/run \
-  -H "Content-Type: application/json" \
-  -d '{"test_id": "<test-id>", "persona_id": "<persona-id>"}'
-
-# Poll for results
-curl http://localhost:4100/api/autotest/status/<job-id>
-```
-
-### Create 41R Token (one-time)
-
-```bash
-npx tsx scripts/setup-token.ts
-# Creates Token-2022 mint with 5% transfer fee
-# Mints initial supply and verifies fee collection
-```
-
----
-
-## Demo Data
-
-The seed script populates a realistic demo environment:
-
-| Entity | Count | Details |
-|--------|:-----:|---------|
-| Company | 1 | "DeFi Protocol X" |
-| Tests | 4 | jup.ag, magiceden.io, raydium.io, localhost:3000 (self-test) |
-| Testers | 5 | Alice (DeFi, 30s), Bob (NFT, 20s), Charlie (Security, 40s), Diana, Evan |
-| Reports | 9+ | 6 manual + 3+ AI persona |
-| Personas | 3 | Alice (Gold 4.5), Bob (Bronze 3.2), Charlie (Gold 4.8) |
-| Settlements | $131+ | USDC + 41R tokens with on-chain TX signatures |
+| Endpoint | Price (USDC) |
+|----------|:---:|
+| `/api/hello` | $0.001 |
+| `/api/test/:id/results` | $0.05 |
+| `/api/personas` (search) | $0.05 |
+| `/api/persona/:id` | $0.10 |
 
 ---
 
 ## Scripts
 
-```bash
-npx tsx scripts/seed-data.ts       # Populate demo data
-npx tsx scripts/verify-demo.ts     # Verify demo environment (18 checks)
-npx tsx scripts/setup-token.ts     # Create 41R Token on devnet (Token-2022)
-npx tsx scripts/setup-sas.ts       # Create SAS Credential + Schema on devnet
-npx tsx scripts/test-stagehand.ts  # Test Stagehand browser automation
-npx tsx scripts/test-x402.ts       # Test x402 payment protocol
-```
+| Script | Command | Description |
+|--------|---------|-------------|
+| `setup-token.ts` | `pnpm tsx scripts/setup-token.ts` | Create 41R Token-2022 mint with 5% transfer fee on devnet |
+| `setup-sas.ts` | `pnpm tsx scripts/setup-sas.ts` | Initialize SAS credential and schema PDAs on devnet |
+| `seed-data.ts` | `pnpm tsx scripts/seed-data.ts` | Seed database with sample companies, testers, tests, and reports |
+| `verify-demo.ts` | `pnpm tsx scripts/verify-demo.ts` | Verify demo environment is working correctly |
+| `e2e-flow.ts` | `pnpm tsx scripts/e2e-flow.ts` | Full end-to-end flow: register, test, report, persona, auto-test |
+| `test-ai-features.ts` | `pnpm tsx scripts/test-ai-features.ts` | Test Claude LLM integration (test case generation, quality scoring) |
+| `test-stagehand.ts` | `pnpm tsx scripts/test-stagehand.ts` | Test Stagehand browser automation |
+| `test-x402.ts` | `pnpm tsx scripts/test-x402.ts` | Test x402 payment flow (402 response and paid request) |
+| `test-demographics-diff.ts` | `pnpm tsx scripts/test-demographics-diff.ts` | Test demographic profile differentiation across testers |
+| `test-persona-diff.ts` | `pnpm tsx scripts/test-persona-diff.ts` | Test persona vector differentiation across testers |
 
 ---
-
-## Team
-
-Built for **Solana Startup Village** hackathon, February 2026.
 
 ## License
 

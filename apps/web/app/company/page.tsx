@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { testApi } from "@/lib/api";
 import { LoadingSpinner } from "@/components/loading";
+import { ErrorDisplay } from "@/components/error-display";
 
 interface Test {
   id: string;
@@ -16,12 +17,19 @@ interface Test {
 export default function CompanyDashboard() {
   const [tests, setTests] = useState<Test[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadTests = () => {
+    setLoading(true);
+    setError(null);
     testApi.list()
       .then((data) => setTests(data as Test[]))
-      .catch(console.error)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load tests"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadTests();
   }, []);
 
   return (
@@ -38,6 +46,8 @@ export default function CompanyDashboard() {
 
       {loading ? (
         <LoadingSpinner text="Loading tests..." />
+      ) : error ? (
+        <ErrorDisplay message={error} onRetry={loadTests} />
       ) : tests.length === 0 ? (
         <div className="text-center py-12">
           <p className="text-[var(--text-secondary)] mb-4">No tests registered yet</p>

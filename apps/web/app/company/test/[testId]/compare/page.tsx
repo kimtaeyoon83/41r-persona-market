@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { reportApi, testApi } from "@/lib/api";
+import { reportApi, testApi, API_BASE } from "@/lib/api";
+import { LoadingSpinner } from "@/components/loading";
+import { ErrorDisplay } from "@/components/error-display";
 import Link from "next/link";
 
 interface ChecklistResult {
@@ -46,9 +48,12 @@ export default function CompareReportsPage() {
   const [data, setData] = useState<CompareData | null>(null);
   const [testUrl, setTestUrl] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadData = () => {
     if (!testId) return;
+    setLoading(true);
+    setError(null);
     Promise.all([
       reportApi.compare(testId) as Promise<CompareData>,
       testApi.get(testId) as Promise<{ test: { targetUrl: string } }>,
@@ -57,19 +62,18 @@ export default function CompareReportsPage() {
         setData(compareData);
         setTestUrl(testData.test?.targetUrl || "");
       })
-      .catch(console.error)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load comparison data"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testId]);
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 gap-3">
-        <div className="w-8 h-8 border-2 border-border-dim border-t-sol-green rounded-full animate-spin" />
-        <p className="text-sm text-[var(--text-tertiary)]">Loading comparison...</p>
-      </div>
-    );
-  }
-  if (!data) return <div className="text-[var(--status-error)] text-center py-12">No comparison data available</div>;
+  if (loading) return <LoadingSpinner text="Loading comparison..." />;
+  if (error) return <ErrorDisplay message={error} onRetry={loadData} />;
+  if (!data) return <ErrorDisplay message="No comparison data available" />;
 
   const manualReport = data.manual.reports[0];
   const personaReport = data.persona.reports[0];
@@ -221,7 +225,7 @@ export default function CompareReportsPage() {
                 {manualReport?.screenshots?.map((ss, i) => (
                   <img
                     key={i}
-                    src={`http://localhost:4100/screenshots/${ss}`}
+                    src={`${API_BASE}/screenshots/${ss}`}
                     alt={`Manual screenshot ${i + 1}`}
                     className="w-full rounded-lg border border-border-dim"
                     onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
@@ -235,7 +239,7 @@ export default function CompareReportsPage() {
                 {personaReport?.screenshots?.slice(0, 4).map((ss, i) => (
                   <img
                     key={i}
-                    src={`http://localhost:4100/screenshots/${ss}`}
+                    src={`${API_BASE}/screenshots/${ss}`}
                     alt={`Persona screenshot ${i + 1}`}
                     className="w-full rounded-lg border border-border-dim"
                     onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}

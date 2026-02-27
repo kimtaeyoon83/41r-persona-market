@@ -45,11 +45,17 @@ export default function TesterListPage() {
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"reports" | "quality" | "earned" | "recent">("reports");
 
-  useEffect(() => {
+  const loadTesters = () => {
+    setLoading(true);
+    setError(null);
     testerApi.list()
       .then((data) => setTesters(data as TesterWithStats[]))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load testers"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadTesters();
   }, []);
 
   const sorted = useMemo(() =>
@@ -72,7 +78,7 @@ export default function TesterListPage() {
   }), [testers]);
 
   if (loading) return <Loading variant="skeleton" />;
-  if (error) return <ErrorDisplay message={error} />;
+  if (error) return <ErrorDisplay message={error} onRetry={loadTesters} />;
 
   return (
     <div className="max-w-5xl">

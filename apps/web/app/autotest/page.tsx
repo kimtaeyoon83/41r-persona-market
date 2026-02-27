@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { testApi, personaApi, autoTestApi } from "@/lib/api";
+import { testApi, personaApi, autoTestApi, API_BASE } from "@/lib/api";
 import { useWalletContext } from "@/components/wallet-provider";
+import { LoadingSpinner } from "@/components/loading";
+import { ErrorDisplay } from "@/components/error-display";
 import {
   Connection,
   PublicKey,
@@ -97,6 +99,8 @@ export default function AutoTestPage() {
   const { publicKey, connect } = useWalletContext();
   const [tests, setTests] = useState<Test[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [initialError, setInitialError] = useState<string | null>(null);
   const [selectedTest, setSelectedTest] = useState("");
   const [selectedPersona, setSelectedPersona] = useState("");
   const [running, setRunning] = useState(false);
@@ -107,14 +111,23 @@ export default function AutoTestPage() {
   const [paymentTx, setPaymentTx] = useState<string>("");
   const [payError, setPayError] = useState("");
 
-  useEffect(() => {
+  const loadInitialData = () => {
+    setInitialLoading(true);
+    setInitialError(null);
     Promise.all([
       testApi.list() as Promise<Test[]>,
       personaApi.list() as Promise<Persona[]>,
-    ]).then(([t, p]) => {
-      setTests(t.filter(x => x.status === "active"));
-      setPersonas(p);
-    });
+    ])
+      .then(([t, p]) => {
+        setTests(t.filter(x => x.status === "active"));
+        setPersonas(p);
+      })
+      .catch((err) => setInitialError(err instanceof Error ? err.message : "Failed to load tests and personas"))
+      .finally(() => setInitialLoading(false));
+  };
+
+  useEffect(() => {
+    loadInitialData();
   }, []);
 
   const pollStatus = useCallback(async (jobId: string) => {
@@ -230,6 +243,9 @@ export default function AutoTestPage() {
 
   const steps = result?.result?.steps || [];
   const hasSteps = steps.length > 0;
+
+  if (initialLoading) return <LoadingSpinner text="Loading tests and personas..." />;
+  if (initialError) return <ErrorDisplay message={initialError} onRetry={loadInitialData} />;
 
   return (
     <div className="max-w-5xl">
@@ -436,7 +452,7 @@ export default function AutoTestPage() {
                             <div className="px-3 pb-3">
                               <div className="rounded-lg overflow-hidden border border-border-dim bg-surface-base">
                                 <img
-                                  src={`http://localhost:4100/screenshots/${step.file}`}
+                                  src={`${API_BASE}/screenshots/${step.file}`}
                                   alt={step.label}
                                   className="w-full"
                                   onError={(e) => {
@@ -468,7 +484,7 @@ export default function AutoTestPage() {
                         onClick={() => setExpandedStep(expandedStep === i ? null : i)}
                       >
                         <img
-                          src={`http://localhost:4100/screenshots/${step.file}`}
+                          src={`${API_BASE}/screenshots/${step.file}`}
                           alt={`Step ${step.step}`}
                           className="w-full h-24 object-cover object-top"
                           onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
@@ -495,7 +511,7 @@ export default function AutoTestPage() {
                 {result.result.screenshots.map((ss, i) => (
                   <div key={i} className="rounded-xl overflow-hidden border border-border-dim bg-surface">
                     <img
-                      src={`http://localhost:4100/screenshots/${ss}`}
+                      src={`${API_BASE}/screenshots/${ss}`}
                       alt={`Screenshot ${i + 1}`}
                       className="w-full"
                       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}

@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { reportApi } from "@/lib/api";
+import { reportApi, API_BASE } from "@/lib/api";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/loading";
+import { ErrorDisplay } from "@/components/error-display";
 
 interface ChecklistResult {
   id: string;
@@ -90,17 +91,26 @@ export default function ReportDetailPage() {
   const reportId = params.reportId as string;
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadReport = () => {
     if (!reportId) return;
+    setLoading(true);
+    setError(null);
     (reportApi.get(reportId) as Promise<Report>)
       .then(setReport)
-      .catch(console.error)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load report"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId]);
 
   if (loading) return <LoadingSpinner text="Loading report..." />;
-  if (!report) return <div className="text-[var(--status-error)] text-center py-12">Report not found</div>;
+  if (error) return <ErrorDisplay message={error} onRetry={loadReport} />;
+  if (!report) return <ErrorDisplay message="Report not found" />;
 
   const passed = report.checklistResults?.filter(c => c.status === "passed").length || 0;
   const total = report.checklistResults?.length || 0;
@@ -237,7 +247,7 @@ export default function ReportDetailPage() {
                 {ss.startsWith("autotest_") || ss.endsWith(".png") ? (
                   <div className="p-3">
                     <a
-                      href={`http://localhost:4100/screenshots/${ss}`}
+                      href={`${API_BASE}/screenshots/${ss}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm text-sol-blue hover:text-sol-blue/80"
@@ -245,7 +255,7 @@ export default function ReportDetailPage() {
                       {ss}
                     </a>
                     <img
-                      src={`http://localhost:4100/screenshots/${ss}`}
+                      src={`${API_BASE}/screenshots/${ss}`}
                       alt={`Screenshot ${i + 1}`}
                       className="mt-2 rounded-lg w-full"
                       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}

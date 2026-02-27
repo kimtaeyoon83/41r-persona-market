@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { personaApi } from "@/lib/api";
+import { LoadingSpinner } from "@/components/loading";
+import { ErrorDisplay } from "@/components/error-display";
 
 interface PersonaVector {
   test_style: Record<string, number>;
@@ -25,12 +27,19 @@ interface Persona {
 export default function PersonaGallery() {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadPersonas = () => {
+    setLoading(true);
+    setError(null);
     personaApi.list()
       .then((data) => setPersonas(data as Persona[]))
-      .catch(console.error)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load personas"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadPersonas();
   }, []);
 
   const topExpertise = (vector: PersonaVector) => {
@@ -46,7 +55,9 @@ export default function PersonaGallery() {
       <p className="text-[var(--text-secondary)] text-sm mb-8">AI Personas generated from real tester behavior</p>
 
       {loading ? (
-        <div className="text-center py-12 text-[var(--text-secondary)]">Loading...</div>
+        <LoadingSpinner text="Loading personas..." />
+      ) : error ? (
+        <ErrorDisplay message={error} onRetry={loadPersonas} />
       ) : personas.length === 0 ? (
         <div className="text-center py-12 text-[var(--text-secondary)]">No personas generated yet</div>
       ) : (
