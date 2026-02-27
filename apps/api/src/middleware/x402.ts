@@ -75,6 +75,42 @@ export function createX402Middleware() {
       description: 'Pay-gated hello endpoint (x402 PoC)',
       mimeType: 'application/json',
     },
+    'GET /api/test/:testId/results': {
+      accepts: [
+        {
+          scheme: 'exact' as const,
+          price: '$0.05',
+          network: SOLANA_DEVNET,
+          payTo,
+        },
+      ],
+      description: 'Access test results and reports — $0.05 per request',
+      mimeType: 'application/json',
+    },
+    'GET /api/persona/search': {
+      accepts: [
+        {
+          scheme: 'exact' as const,
+          price: '$0.05',
+          network: SOLANA_DEVNET,
+          payTo,
+        },
+      ],
+      description: 'Search AI Personas by expertise — $0.05 per query',
+      mimeType: 'application/json',
+    },
+    'GET /api/persona/:personaId': {
+      accepts: [
+        {
+          scheme: 'exact' as const,
+          price: '$0.10',
+          network: SOLANA_DEVNET,
+          payTo,
+        },
+      ],
+      description: 'Access AI Persona details and vector — $0.10 per view',
+      mimeType: 'application/json',
+    },
   };
 
   return paymentMiddleware(routes, resourceServer);
@@ -138,12 +174,23 @@ export function createFallbackPaymentMiddleware() {
     return ataPromise;
   }
 
-  /** Paths that require payment (method + path) */
-  const protectedRoutes = new Set(['GET /api/hello']);
+  /** Paths that require payment (method + path pattern) */
+  const protectedRoutes = new Set([
+    'GET /api/hello',
+    'GET /api/persona/search',
+  ]);
+
+  /** Path patterns with dynamic segments */
+  const protectedPatterns = [
+    { method: 'GET', pattern: /^\/api\/test\/[^/]+\/results$/ },
+    { method: 'GET', pattern: /^\/api\/persona\/[0-9a-f-]{36}$/ },
+  ];
 
   return async (req: Request, res: Response, next: NextFunction) => {
     const routeKey = `${req.method} ${req.path}`;
-    if (!protectedRoutes.has(routeKey)) {
+    const isProtected = protectedRoutes.has(routeKey) ||
+      protectedPatterns.some(p => p.method === req.method && p.pattern.test(req.path));
+    if (!isProtected) {
       return next();
     }
 

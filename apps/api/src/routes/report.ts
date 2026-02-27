@@ -163,4 +163,58 @@ router.get('/test/:testId', async (req, res) => {
   }
 });
 
+// GET /api/reports/compare/:testId — Compare manual vs persona reports for a test
+router.get('/compare/:testId', async (req, res) => {
+  try {
+    const { testId } = req.params;
+    const reports = await db.select().from(schema.testReports).where(eq(schema.testReports.testId, testId));
+
+    if (reports.length === 0) {
+      res.status(404).json({ error: 'No reports found for this test' });
+      return;
+    }
+
+    const manual = reports.filter(r => !r.isPersonaTest);
+    const persona = reports.filter(r => r.isPersonaTest);
+
+    // Aggregate stats
+    const avg = (arr: number[]) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+    const manualScores = manual.map(r => r.qualityScore || 0);
+    const personaScores = persona.map(r => r.qualityScore || 0);
+
+    // Count checklist issues
+    const countIssues = (reports: typeof manual) => {
+      let passed = 0, failed = 0, blocked = 0;
+      for (const r of reports) {
+        const results = r.checklistResults as Array<{ status: string }> || [];
+        for (const c of results) {
+          if (c.status === 'passed') passed++;
+          else if (c.status === 'failed') failed++;
+          else blocked++;
+        }
+      }
+      return { passed, failed, blocked };
+    };
+
+    res.json({
+      test_id: testId,
+      manual: {
+        count: manual.length,
+        reports: manual,
+        avg_quality: Math.round(avg(manualScores) * 10) / 10,
+        issues: countIssues(manual),
+      },
+      persona: {
+        count: persona.length,
+        reports: persona,
+        avg_quality: Math.round(avg(personaScores) * 10) / 10,
+        issues: countIssues(persona),
+      },
+    });
+  } catch (error) {
+    console.error('[GET /api/reports/compare/:testId]', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

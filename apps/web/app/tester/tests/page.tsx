@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { testApi } from "@/lib/api";
+import { LoadingSpinner } from "@/components/loading";
 
 interface Test {
   id: string;
@@ -29,7 +30,7 @@ export default function TesterTestList() {
       <p className="text-gray-400 text-sm mb-8">Complete 3 tests to generate your AI Persona</p>
 
       {loading ? (
-        <div className="text-center py-12 text-gray-400">Loading...</div>
+        <LoadingSpinner text="Loading available tests..." />
       ) : tests.length === 0 ? (
         <div className="text-center py-12 text-gray-400">No active tests available</div>
       ) : (

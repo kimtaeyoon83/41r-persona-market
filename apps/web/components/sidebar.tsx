@@ -121,9 +121,19 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="mt-auto pt-4 border-t border-gray-800">
-        <div className="text-xs text-gray-500 text-center">
-          Solana Devnet
+      <div className="mt-auto pt-4 border-t border-gray-800 space-y-2">
+        <a
+          href="https://explorer.solana.com/address/GeriorgNHG6o7XGA2xqLyjexqaFxq8nYDvYdJ37qACpS?cluster=devnet"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block text-xs text-gray-500 hover:text-orange-400 text-center transition-colors"
+        >
+          41R Token on Devnet
+        </a>
+        <div className="flex items-center justify-center gap-2 text-[10px] text-gray-600">
+          <span>Stagehand</span>
+          <span>+</span>
+          <span>Claude Sonnet</span>
         </div>
       </div>
     </aside>

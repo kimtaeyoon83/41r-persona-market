@@ -43,6 +43,8 @@ export const reportApi = {
   byTester: (wallet: string) => request(`/api/reports/tester/${wallet}`),
 
   byTest: (testId: string) => request(`/api/reports/test/${testId}`),
+
+  compare: (testId: string) => request(`/api/reports/compare/${testId}`),
 };
 
 // ─── Persona APIs ────────────────────────────────────

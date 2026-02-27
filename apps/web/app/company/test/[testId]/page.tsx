@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { testApi, reportApi } from "@/lib/api";
+import { LoadingSpinner } from "@/components/loading";
 
 interface TestDetail {
   test: {
@@ -41,7 +42,7 @@ export default function TestDetailPage() {
       .finally(() => setLoading(false));
   }, [testId]);
 
-  if (loading) return <div className="text-gray-400 text-center py-12">Loading...</div>;
+  if (loading) return <LoadingSpinner text="Loading test details..." />;
   if (!data) return <div className="text-red-400 text-center py-12">Test not found</div>;
 
   const { test, test_cases } = data;
@@ -74,6 +75,17 @@ export default function TestDetailPage() {
           <p className="text-sm">{new Date(test.createdAt).toLocaleDateString()}</p>
         </div>
       </div>
+
+      {/* Compare button — show when both manual and persona reports exist */}
+      {reports.some(r => r.isPersonaTest) && reports.some(r => !r.isPersonaTest) && (
+        <a
+          href={`/company/test/${testId}/compare`}
+          className="block mb-6 p-4 rounded-xl border border-dashed border-orange-500/30 bg-orange-500/5 hover:bg-orange-500/10 transition-colors text-center"
+        >
+          <p className="text-sm font-medium text-orange-400">Compare Manual vs AI Persona Reports</p>
+          <p className="text-xs text-gray-500 mt-1">Side-by-side analysis of human tester and AI persona findings</p>
+        </a>
+      )}
 
       {/* Reports List */}
       {reports.length > 0 && (

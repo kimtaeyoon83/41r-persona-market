@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { reportApi } from "@/lib/api";
 import Link from "next/link";
+import { LoadingSpinner } from "@/components/loading";
 
 interface ChecklistResult {
   id: string;
@@ -60,7 +61,7 @@ export default function ReportDetailPage() {
       .finally(() => setLoading(false));
   }, [reportId]);
 
-  if (loading) return <div className="text-gray-400 text-center py-12">Loading report...</div>;
+  if (loading) return <LoadingSpinner text="Loading report..." />;
   if (!report) return <div className="text-red-400 text-center py-12">Report not found</div>;
 
   const passed = report.checklistResults?.filter(c => c.status === "passed").length || 0;

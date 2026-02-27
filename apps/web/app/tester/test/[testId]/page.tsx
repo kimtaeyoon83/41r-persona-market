@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { testApi, reportApi } from "@/lib/api";
+import { LoadingSpinner } from "@/components/loading";
 
 interface ChecklistItem { id: string; task: string; expected: string }
 interface ScenarioItem { id: string; persona_type: string; narrative: string; evaluation_points: string[] }
@@ -74,7 +75,7 @@ export default function TesterTestPage() {
     }
   };
 
-  if (loading) return <div className="text-gray-400 text-center py-12">Loading test...</div>;
+  if (loading) return <LoadingSpinner text="Loading test session..." />;
   if (!data) return <div className="text-red-400 text-center py-12">Test not found</div>;
 
   if (submitted && result) {

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { testApi } from "@/lib/api";
+import { LoadingSpinner } from "@/components/loading";
 
 interface Test {
   id: string;
@@ -36,7 +37,7 @@ export default function CompanyDashboard() {
       </div>
 
       {loading ? (
-        <div className="text-center py-12 text-gray-400">Loading...</div>
+        <LoadingSpinner text="Loading tests..." />
       ) : tests.length === 0 ? (
         <div className="text-center py-12">
           <p className="text-gray-400 mb-4">No tests registered yet</p>

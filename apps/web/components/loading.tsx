@@ -79,3 +79,22 @@ export function TableSkeleton({ rows = 5 }: { rows?: number }) {
     </div>
   );
 }
+
+export function LoadingSpinner({ text = "Loading..." }: { text?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 gap-3">
+      <div className="w-8 h-8 border-2 border-gray-700 border-t-orange-500 rounded-full animate-spin" />
+      <p className="text-sm text-gray-500">{text}</p>
+    </div>
+  );
+}
+
+export function LoadingSkeleton({ lines = 3 }: { lines?: number }) {
+  return (
+    <div className="space-y-3 animate-pulse">
+      {Array.from({ length: lines }).map((_, i) => (
+        <div key={i} className="h-4 bg-gray-800 rounded" style={{ width: `${85 - i * 15}%` }} />
+      ))}
+    </div>
+  );
+}

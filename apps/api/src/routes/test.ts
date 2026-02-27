@@ -118,4 +118,37 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// GET /api/test/:id/results — Get test results with reports (x402 gated: $0.05)
+router.get('/:id/results', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [test] = await db.select().from(schema.tests).where(eq(schema.tests.id, id));
+    if (!test) {
+      res.status(404).json({ error: 'Test not found' });
+      return;
+    }
+
+    const reports = await db.select().from(schema.testReports).where(eq(schema.testReports.testId, id));
+    const settlements = await db.select().from(schema.settlements).where(eq(schema.settlements.testId, id));
+
+    res.json({
+      test,
+      reports,
+      settlements,
+      summary: {
+        total_reports: reports.length,
+        manual_reports: reports.filter(r => !r.isPersonaTest).length,
+        persona_reports: reports.filter(r => r.isPersonaTest).length,
+        avg_quality: reports.length > 0
+          ? Math.round(reports.reduce((sum, r) => sum + (r.qualityScore || 0), 0) / reports.length * 10) / 10
+          : 0,
+        total_spent: settlements.reduce((sum, s) => sum + s.amountToken, 0),
+      },
+    });
+  } catch (error) {
+    console.error('[GET /api/test/:id/results]', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
