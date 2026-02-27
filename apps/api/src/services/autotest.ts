@@ -9,6 +9,13 @@ import type { GeneratedTestCases, PersonaVector } from '@41rpm/shared';
 const SCREENSHOTS_DIR = path.resolve('../../screenshots');
 if (!fs.existsSync(SCREENSHOTS_DIR)) fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 
+interface StepScreenshot {
+  file: string;
+  label: string;
+  step: number;
+  phase: 'init' | 'checklist' | 'persona' | 'final';
+}
+
 interface AutoTestJob {
   id: string;
   testId: string;
@@ -19,11 +26,34 @@ interface AutoTestJob {
   error?: string;
   result?: {
     screenshots: string[];
+    steps: StepScreenshot[];
     actionLog: string[];
     textReport: string;
     uxFeedback: Record<string, unknown>;
     txSignature?: string;
   };
+}
+
+/** Capture a labeled screenshot and append to tracking arrays */
+async function captureStep(
+  page: { screenshot(opts: { fullPage: boolean }): Promise<Buffer> },
+  jobId: string,
+  stepNum: number,
+  label: string,
+  phase: StepScreenshot['phase'],
+  base64Arr: string[],
+  stepArr: StepScreenshot[],
+): Promise<void> {
+  try {
+    await new Promise(r => setTimeout(r, 800)); // Wait for UI to settle
+    const buf = await page.screenshot({ fullPage: false });
+    base64Arr.push(buf.toString('base64'));
+    const file = `autotest_${jobId}_step${String(stepNum).padStart(2, '0')}.png`;
+    fs.writeFileSync(path.join(SCREENSHOTS_DIR, file), buf);
+    stepArr.push({ file, label, step: stepNum, phase });
+  } catch {
+    // Non-blocking
+  }
 }
 
 // In-memory job store (for hackathon simplicity)
@@ -79,10 +109,11 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
   };
   job.progress = 30;
 
-  // 3. Browser automation (Stagehand)
-  let screenshots: string[] = [];       // base64 for LLM
-  let screenshotFiles: string[] = [];   // saved file paths
+  // 3. Browser automation (Stagehand) — per-action screenshots
+  let allBase64: string[] = [];          // base64 for LLM (capped at 6)
+  let allSteps: StepScreenshot[] = [];   // labeled step screenshots
   let actionLog: string[] = [];
+  let stepCounter = 0;
 
   let stagehandInstance: { close(): Promise<void> } | null = null;
   try {
@@ -104,21 +135,20 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     // Wait for JS rendering
     await new Promise(r => setTimeout(r, 3000));
 
-    // Take initial screenshot
-    const ss1 = await page.screenshot({ fullPage: false });
-    screenshots.push(ss1.toString('base64'));
-    const ss1File = `autotest_${job.id}_before.png`;
-    fs.writeFileSync(path.join(SCREENSHOTS_DIR, ss1File), ss1);
-    screenshotFiles.push(ss1File);
+    // Step 0: Initial page load
+    await captureStep(page, job.id, stepCounter++, `Page loaded: ${test.targetUrl}`, 'init', allBase64, allSteps);
     job.progress = 50;
 
-    // Execute base checklist items (same for all personas)
+    // Execute base checklist items — screenshot after each
     for (const item of testCases.checklist) {
       try {
         const result = await stagehand.act(item.task);
-        actionLog.push(`[${item.id}] ${item.task} -> ${result.success ? 'OK' : 'Failed'}`);
+        const status = result.success ? 'OK' : 'Failed';
+        actionLog.push(`[${item.id}] ${item.task} -> ${status}`);
+        await captureStep(page, job.id, stepCounter++, `[${item.id}] ${item.task} -> ${status}`, 'checklist', allBase64, allSteps);
       } catch {
         actionLog.push(`[${item.id}] ${item.task} -> Error`);
+        await captureStep(page, job.id, stepCounter++, `[${item.id}] ${item.task} -> Error`, 'checklist', allBase64, allSteps);
       }
     }
     job.progress = 60;
@@ -141,20 +171,19 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
       for (const pa of personaActions) {
         try {
           const result = await stagehand.act(pa.action);
-          actionLog.push(`[${pa.id}] ${pa.action} -> ${result.success ? 'OK' : 'Failed'} (${pa.reason})`);
+          const status = result.success ? 'OK' : 'Failed';
+          actionLog.push(`[${pa.id}] ${pa.action} -> ${status} (${pa.reason})`);
+          await captureStep(page, job.id, stepCounter++, `[${pa.id}] ${pa.action} -> ${status}`, 'persona', allBase64, allSteps);
         } catch {
           actionLog.push(`[${pa.id}] ${pa.action} -> Error (${pa.reason})`);
+          await captureStep(page, job.id, stepCounter++, `[${pa.id}] ${pa.action} -> Error`, 'persona', allBase64, allSteps);
         }
       }
     }
     job.progress = 70;
 
     // Final screenshot
-    const ss2 = await page.screenshot({ fullPage: false });
-    screenshots.push(ss2.toString('base64'));
-    const ss2File = `autotest_${job.id}_after.png`;
-    fs.writeFileSync(path.join(SCREENSHOTS_DIR, ss2File), ss2);
-    screenshotFiles.push(ss2File);
+    await captureStep(page, job.id, stepCounter++, 'Test complete — final state', 'final', allBase64, allSteps);
   } catch (stagehandError) {
     actionLog.push(`Stagehand error: ${stagehandError instanceof Error ? stagehandError.message : 'Unknown'}`);
     // Continue without browser screenshots — generate report from test data alone
@@ -165,13 +194,26 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
   }
   job.progress = 80;
 
+  // Cap base64 screenshots sent to LLM (first, last, and up to 4 evenly spaced)
+  const screenshotFiles = allSteps.map(s => s.file);
+  let llmScreenshots: string[];
+  if (allBase64.length <= 6) {
+    llmScreenshots = allBase64;
+  } else {
+    const indices = [0];
+    const step = (allBase64.length - 1) / 5;
+    for (let i = 1; i < 5; i++) indices.push(Math.round(step * i));
+    indices.push(allBase64.length - 1);
+    llmScreenshots = [...new Set(indices)].map(i => allBase64[i]);
+  }
+
   // 4. Generate report via LLM
   const personaVector = persona.vector as PersonaVector;
   let textReport: string;
   let uxFeedback: Record<string, unknown>;
 
   try {
-    const report = await generateAutoTestReport(personaVector, screenshots, actionLog, testCases);
+    const report = await generateAutoTestReport(personaVector, llmScreenshots, actionLog, testCases);
     textReport = report.textReport;
     uxFeedback = report.uxFeedback;
   } catch (llmErr) {
@@ -211,7 +253,6 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
   try {
     const mintResult = await solanaService.mint41RTokens(persona.testerAddr, settlementAmount);
     txSignature = mintResult.txSignature;
-    job.result = { ...job.result!, txSignature };
   } catch (err) {
     console.error('[AutoTest] 41R Token mint failed, recording as pending:', err);
   }
@@ -232,6 +273,7 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
   job.reportId = report.id;
   job.result = {
     screenshots: screenshotFiles,
+    steps: allSteps,
     actionLog,
     textReport,
     uxFeedback,
