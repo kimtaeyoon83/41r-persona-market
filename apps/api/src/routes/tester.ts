@@ -26,11 +26,26 @@ router.get('/', async (_req, res) => {
       settlementType: schema.settlements.settlementType,
     }).from(schema.settlements);
 
+    // Build lookup maps for O(N) instead of O(T*R) filtering
+    const reportsByTester = new Map<string, typeof allReports>();
+    for (const r of allReports) {
+      const arr = reportsByTester.get(r.testerAddr) || [];
+      arr.push(r);
+      reportsByTester.set(r.testerAddr, arr);
+    }
+    const personaByTester = new Map(allPersonas.map(p => [p.testerAddr, p]));
+    const settlementsByPayee = new Map<string, typeof allSettlements>();
+    for (const s of allSettlements) {
+      const arr = settlementsByPayee.get(s.payeeAddr) || [];
+      arr.push(s);
+      settlementsByPayee.set(s.payeeAddr, arr);
+    }
+
     const testersWithStats = allTesters.map(t => {
-      const reports = allReports.filter(r => r.testerAddr === t.walletAddress);
+      const reports = reportsByTester.get(t.walletAddress) || [];
       const validReports = reports.filter(r => (r.qualityScore ?? 0) >= 1.5);
-      const persona = allPersonas.find(p => p.testerAddr === t.walletAddress);
-      const settlements = allSettlements.filter(s => s.payeeAddr === t.walletAddress);
+      const persona = personaByTester.get(t.walletAddress);
+      const settlements = settlementsByPayee.get(t.walletAddress) || [];
       const usdcEarned = settlements.filter(s => s.settlementType === 'usdc').reduce((sum, s) => sum + s.amountToken, 0);
       const tokenEarned = settlements.filter(s => s.settlementType === '41r').reduce((sum, s) => sum + s.amountToken, 0);
       const avgQuality = validReports.length > 0

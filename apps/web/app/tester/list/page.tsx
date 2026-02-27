@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { testerApi } from "@/lib/api";
 import { Loading } from "@/components/loading";
+import { ErrorDisplay } from "@/components/error-display";
 
 interface TesterProfile {
   age_range?: string;
@@ -41,30 +42,37 @@ interface TesterWithStats {
 export default function TesterListPage() {
   const [testers, setTesters] = useState<TesterWithStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"reports" | "quality" | "earned" | "recent">("reports");
 
   useEffect(() => {
     testerApi.list()
       .then((data) => setTesters(data as TesterWithStats[]))
-      .catch(console.error)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load testers"))
       .finally(() => setLoading(false));
   }, []);
 
-  const sorted = [...testers].sort((a, b) => {
-    switch (sortBy) {
-      case "reports": return b.stats.totalReports - a.stats.totalReports;
-      case "quality": return b.stats.avgQuality - a.stats.avgQuality;
-      case "earned": return b.stats.usdcEarned - a.stats.usdcEarned;
-      case "recent": return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      default: return 0;
-    }
-  });
+  const sorted = useMemo(() =>
+    [...testers].sort((a, b) => {
+      switch (sortBy) {
+        case "reports": return b.stats.totalReports - a.stats.totalReports;
+        case "quality": return b.stats.avgQuality - a.stats.avgQuality;
+        case "earned": return b.stats.usdcEarned - a.stats.usdcEarned;
+        case "recent": return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        default: return 0;
+      }
+    }),
+    [testers, sortBy]
+  );
 
-  const totalUsdc = testers.reduce((sum, t) => sum + t.stats.usdcEarned, 0);
-  const totalReports = testers.reduce((sum, t) => sum + t.stats.totalReports, 0);
-  const withPersona = testers.filter(t => t.persona).length;
+  const { totalUsdc, totalReports, withPersona } = useMemo(() => ({
+    totalUsdc: testers.reduce((sum, t) => sum + t.stats.usdcEarned, 0),
+    totalReports: testers.reduce((sum, t) => sum + t.stats.totalReports, 0),
+    withPersona: testers.filter(t => t.persona).length,
+  }), [testers]);
 
   if (loading) return <Loading variant="skeleton" />;
+  if (error) return <ErrorDisplay message={error} />;
 
   return (
     <div className="max-w-5xl">

@@ -70,8 +70,10 @@ export default function TesterDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadTester = () => {
     if (!wallet) return;
+    setLoading(true);
+    setError(null);
 
     Promise.all([
       testerApi.get(wallet) as Promise<{ tester: Tester; persona: Persona | null }>,
@@ -84,10 +86,13 @@ export default function TesterDetailPage() {
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load tester"))
       .finally(() => setLoading(false));
-  }, [wallet]);
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadTester(); }, [wallet]);
 
   if (loading) return <Loading variant="skeleton" />;
-  if (error) return <ErrorDisplay message={error} />;
+  if (error) return <ErrorDisplay message={error} onRetry={loadTester} />;
   if (!tester) return <ErrorDisplay message="Tester not found" />;
 
   const profile = tester.profile;
@@ -311,7 +316,7 @@ export default function TesterDetailPage() {
           <div className="text-center py-8 text-[var(--text-secondary)] text-sm">No test reports yet</div>
         ) : (
           <div className="space-y-3">
-            {reports
+            {[...reports]
               .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
               .map((report) => {
                 const isRejected = (report.qualityScore ?? 0) < 1.5;
