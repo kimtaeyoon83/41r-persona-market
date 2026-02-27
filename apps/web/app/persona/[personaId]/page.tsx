@@ -14,6 +14,8 @@ interface PersonaVector {
   expertise: Record<string, number>;
   feedback_pattern: Record<string, number>;
   reliability: Record<string, number>;
+  demographics?: Record<string, number | string>;
+  ux_preferences?: Record<string, string | boolean | number>;
   voice_sample: string;
 }
 
@@ -103,10 +105,57 @@ export default function PersonaDetail() {
       </div>
 
       {/* Radar Charts — Feedback Pattern and Reliability */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <RadarChart title="Feedback Pattern" data={vector.feedback_pattern} color="#4ade80" />
         <RadarChart title="Reliability" data={vector.reliability} color="#fb923c" />
       </div>
+
+      {/* Demographics + UX Preferences */}
+      {(vector.demographics || vector.ux_preferences) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          {vector.demographics && (
+            <div className="p-4 rounded-lg bg-gray-900 border border-gray-800">
+              <h3 className="text-sm font-medium text-pink-400 mb-3">Demographics</h3>
+              <div className="space-y-2">
+                {Object.entries(vector.demographics).map(([key, val]) => (
+                  <div key={key} className="flex items-center justify-between">
+                    <span className="text-xs text-gray-500">{key.replace(/_/g, " ")}</span>
+                    {typeof val === "number" ? (
+                      <div className="flex items-center gap-2">
+                        <div className="w-20 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                          <div className="h-full bg-pink-500 rounded-full" style={{ width: `${val * 100}%` }} />
+                        </div>
+                        <span className="text-xs text-gray-400 w-10 text-right">{(val * 100).toFixed(0)}%</span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-pink-300 px-2 py-0.5 rounded bg-pink-500/10">{String(val)}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {vector.ux_preferences && (
+            <div className="p-4 rounded-lg bg-gray-900 border border-gray-800">
+              <h3 className="text-sm font-medium text-amber-400 mb-3">UX Preferences</h3>
+              <div className="space-y-2">
+                {Object.entries(vector.ux_preferences).map(([key, val]) => (
+                  <div key={key} className="flex items-center justify-between">
+                    <span className="text-xs text-gray-500">{key.replace(/_/g, " ")}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded ${
+                      typeof val === "boolean"
+                        ? val ? "bg-green-500/10 text-green-400" : "bg-gray-700 text-gray-400"
+                        : "bg-amber-500/10 text-amber-300"
+                    }`}>
+                      {String(val)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Footer Info */}
       <div className="mt-6 p-4 rounded-lg bg-gray-900/50 border border-gray-800">
