@@ -27,25 +27,25 @@ app.get('/api/health', (_req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// x402 Payment Middleware — applied to payment-gated routes
-// Routes: /api/hello ($0.001), /api/test/:id/results ($0.05),
-//         /api/persona/search ($0.05), /api/persona/:id ($0.10)
+// x402 Payment Middleware — applied at root to gate specific routes
+// Gated routes: /api/hello ($0.001), /api/test/:id/results ($0.05),
+//               /api/persona/search ($0.05), /api/persona/:id ($0.10)
+// The middleware internally checks req.path to decide which routes need payment.
 // ---------------------------------------------------------------------------
 try {
   const x402Mode = process.env.USE_X402_FALLBACK === 'true' ? 'fallback' : 'x402';
   const x402Middleware = x402Mode === 'fallback'
     ? createFallbackPaymentMiddleware()
     : createX402Middleware();
-  // Apply x402 to all routes — the middleware internally checks which paths are gated
-  app.use('/api/hello', x402Middleware, helloRouter);
-  // Note: persona and test routes below will also be payment-gated via x402 route config
+  // Apply at root — middleware internally matches gated paths
+  app.use(x402Middleware);
   console.log(`[api] x402 middleware applied (mode: ${x402Mode}) — /api/hello, /api/test/*/results, /api/persona/*`);
 } catch (err) {
   console.warn('[api] x402 middleware init failed, routes mounted without payment gate:', err instanceof Error ? err.message : err);
-  app.use('/api/hello', helloRouter);
 }
 
 // Routes
+app.use('/api/hello', helloRouter);
 app.use('/api/test', testRouter);
 app.use('/api/tests', testRouter);
 app.use('/api/tester', testerRouter);

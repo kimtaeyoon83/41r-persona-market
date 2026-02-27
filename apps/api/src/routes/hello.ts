@@ -9,7 +9,7 @@ import { Router, type Router as RouterType } from 'express';
 
 const router: RouterType = Router();
 
-router.get('/hello', (_req, res) => {
+router.get('/', (_req, res) => {
   res.json({
     message: 'Hello from 41R Persona Market!',
     paid: true,
