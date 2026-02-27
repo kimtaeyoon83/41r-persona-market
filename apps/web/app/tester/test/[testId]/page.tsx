@@ -54,7 +54,7 @@ export default function TesterTestPage() {
   const handleSubmit = async () => {
     if (!data) return;
 
-    let testerWallet = publicKey;
+    const testerWallet = publicKey;
     if (!testerWallet) {
       await connect();
       return; // connect will update publicKey, user clicks submit again

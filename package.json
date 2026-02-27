@@ -8,7 +8,6 @@
     "lint": "turbo lint"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
     "dotenv": "^16.6.1",
     "tsx": "^4.21.0",
     "turbo": "^2.3.0",
@@ -27,7 +26,6 @@
   },
   "dependencies": {
     "@browserbasehq/stagehand": "^3.1.0",
-    "@scure/base": "^2.0.0",
     "@solana/kit": "^5.5.1",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",

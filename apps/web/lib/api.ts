@@ -17,9 +17,6 @@ export const testApi = {
   register: (data: { target_url: string; requirements?: string; budget_usdc: number; reward_per_tester: number; company_wallet: string; deposit_tx_signature?: string; enable_auto_test?: boolean }) =>
     request('/api/test/register', { method: 'POST', body: JSON.stringify(data) }),
 
-  updateDeposit: (testId: string, deposit_tx_signature: string) =>
-    request(`/api/test/${testId}/deposit`, { method: 'PATCH', body: JSON.stringify({ deposit_tx_signature }) }),
-
   list: () => request('/api/tests'),
 
   get: (id: string) => request(`/api/test/${id}`),
@@ -33,9 +30,6 @@ export const testerApi = {
     request('/api/tester/register', { method: 'POST', body: JSON.stringify(data) }),
 
   get: (wallet: string) => request(`/api/tester/${wallet}`),
-
-  update: (wallet: string, data: Record<string, unknown>) =>
-    request(`/api/tester/${wallet}`, { method: 'PUT', body: JSON.stringify(data) }),
 };
 
 // ─── Report APIs ─────────────────────────────────────
