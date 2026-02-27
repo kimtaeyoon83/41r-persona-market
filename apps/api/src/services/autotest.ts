@@ -235,5 +235,6 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     actionLog,
     textReport,
     uxFeedback,
+    txSignature,
   };
 }

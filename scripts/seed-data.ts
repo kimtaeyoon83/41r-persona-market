@@ -19,7 +19,8 @@ const { Client } = pg;
 const CONNECTION_STRING = process.env.DATABASE_URL || 'postgresql://admin:admin41rpm@localhost:5432/persona_market';
 
 // ─── Deterministic IDs (so verify script can reference them) ──
-const COMPANY_WALLET = 'DemoCompany111111111111111111111111111111111';
+// Real Solana keypair-derived addresses (valid for on-chain operations)
+const COMPANY_WALLET = '41vJ6xuoKp6Tvo7NNFuMQ6qB2sMiEZX7hbW2MRrc3h4b';
 
 const TEST_IDS = {
   dex: randomUUID(),
@@ -27,11 +28,11 @@ const TEST_IDS = {
 };
 
 const TESTER_WALLETS = {
-  alice:   'AliceTester11111111111111111111111111111111111',
-  bob:     'BobTester2222222222222222222222222222222222222',
-  charlie: 'CharlieTester333333333333333333333333333333333',
-  diana:   'DianaTester44444444444444444444444444444444444',
-  evan:    'EvanTester555555555555555555555555555555555555',
+  alice:   'B8b9UjQHVuro5PQusRpPXgks56EjENArMyJNeWTJmKf7',
+  bob:     'Hkx82LPxTTuwLdeQrz9FJ2njAvgnsUqqDXaqn6V8CfRi',
+  charlie: 'D8u48MaHwa854zL5iWvrdF8sEHauZXYcK2xDVniXeDA8',
+  diana:   'J6CDiMgn5Cej3zPATb2VDFJxdsEs5zBECQ6h3Ze6XtCf',
+  evan:    '4TwvNhBpFwTg7Dq1UXwhodsRNgKqkmxskfLwCZdATZb4',
 };
 
 const PERSONA_IDS = {
@@ -404,8 +405,8 @@ async function main() {
     `, [
       TEST_IDS.dex,
       COMPANY_WALLET,
-      'https://demo-dex.app',
-      'Full UX audit of the token swap interface. Focus on wallet connection flow, swap execution, slippage settings, and transaction history. Test on both desktop and mobile viewports.',
+      'https://jup.ag',
+      'Full UX audit of the Jupiter token swap interface. Focus on wallet connection flow, swap execution, slippage settings, and transaction history. Test on both desktop and mobile viewports.',
       500.0,
       'active',
       'EscrowPda111111111111111111111111111111111111',
@@ -418,8 +419,8 @@ async function main() {
     `, [
       TEST_IDS.nft,
       COMPANY_WALLET,
-      'https://demo-nft.app',
-      'End-to-end testing of the NFT marketplace. Cover browsing, searching, buying, and listing flows. Pay special attention to the first-time user experience and fee transparency.',
+      'https://magiceden.io/solana',
+      'End-to-end testing of the Magic Eden NFT marketplace. Cover browsing, searching, buying, and listing flows. Pay special attention to the first-time user experience and fee transparency.',
       350.0,
       'active',
       'EscrowPda222222222222222222222222222222222222',
