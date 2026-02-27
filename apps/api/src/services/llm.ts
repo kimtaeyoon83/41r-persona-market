@@ -79,7 +79,7 @@ const personaVectorSchema = z.object({
 });
 
 // ─── Helper: extract JSON from LLM response ─────────
-function extractJson(text: string): string {
+export function extractJson(text: string): string {
   const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (match) return match[1].trim();
   const braceMatch = text.match(/\{[\s\S]*\}/);
