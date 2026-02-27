@@ -106,16 +106,20 @@ We even **dogfooded our own product**: the 41R platform tested itself using its 
 | 1 | **x402 Micropayment** | Per-API-call payment gating ($0.001-$0.10) for test results and persona data | /api/hello, /api/persona, /api/test/results |
 | 2 | **Token-2022 Transfer Fee** | 41R token with 5% built-in fee — platform revenue on every transfer | Mint: `GeriorgNHG6o7XGA2xqLyjexqaFxq8nYDvYdJ37qACpS` |
 | 3 | **Token-2022 Transfer Hook** | Atomic payment + performance recording in same transaction | Fallback: PostgreSQL settlements |
-| 4 | **SAS Attestation** | Persona credentials (quality, expertise, trust tier) attested on-chain | Bronze/Silver/Gold tiers |
+| 4 | **SAS Attestation** | Persona credentials (quality, expertise, trust tier) attested on-chain via `sas-lib` | Credential: `R3hRyk…` Schema: `H3ut5o…` |
 | 5 | **USDC on Solana** | Instant settlement for manual testers — no bank delays | $131+ settled in demo |
 
 ### On-Chain Assets
 
 ```
-41R Token Mint:  GeriorgNHG6o7XGA2xqLyjexqaFxq8nYDvYdJ37qACpS  (devnet)
-Transfer Fee:    5% (500 bps), max 1 token per transfer
-Decimals:        9
-Wallet:          8Vm3ys3kwLSy2qThejn56E2j6fptwSE2qcLkEeiLrdB8
+41R Token Mint:     GeriorgNHG6o7XGA2xqLyjexqaFxq8nYDvYdJ37qACpS  (devnet)
+Transfer Fee:       5% (500 bps), max 1 token per transfer
+Decimals:           9
+Wallet:             8Vm3ys3kwLSy2qThejn56E2j6fptwSE2qcLkEeiLrdB8
+
+SAS Credential PDA: R3hRyk7FKd7m1eAJHetzTkzbygVwNBQSgsV2YPHmkzh  (devnet)
+SAS Schema PDA:     H3ut5oZXhn8LwviXs5cxCaadfuAdEKzzox8ckpcR4k1V  (devnet)
+SAS Schema Fields:  tests_completed, avg_quality, expertise_defi, expertise_ai, trust_tier, persona_activated
 ```
 
 ---
@@ -321,6 +325,7 @@ The seed script populates a realistic demo environment:
 npx tsx scripts/seed-data.ts       # Populate demo data
 npx tsx scripts/verify-demo.ts     # Verify demo environment (18 checks)
 npx tsx scripts/setup-token.ts     # Create 41R Token on devnet (Token-2022)
+npx tsx scripts/setup-sas.ts       # Create SAS Credential + Schema on devnet
 npx tsx scripts/test-stagehand.ts  # Test Stagehand browser automation
 npx tsx scripts/test-x402.ts       # Test x402 payment protocol
 ```
