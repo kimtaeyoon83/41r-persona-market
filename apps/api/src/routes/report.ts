@@ -61,12 +61,25 @@ router.post('/submit', async (req, res) => {
     }
 
     // Override reward using test's rewardPerTester and quality score
+    // Power curve (score^1.5) for dramatic differentiation:
+    //   5.0→100%, 4.0→72%, 3.0→46%, 2.0→25%, 1.5→16%
     const baseReward = test.rewardPerTester;
+    let rewardTier: string;
     if (!quality.rejected) {
-      const calculated = baseReward * (quality.score / 5.0);
-      quality.rewardUsdc = Math.min(baseReward, Math.max(1, calculated));
+      const ratio = quality.score / 5.0;
+      const curved = Math.pow(ratio, 1.5);
+      const calculated = baseReward * curved;
+      // No fixed floor — reward scales proportionally to baseReward
+      // e.g., baseReward $0.1 with score 1.5 → $0.016
+      quality.rewardUsdc = Math.round(Math.min(baseReward, calculated) * 1000000) / 1000000;
+
+      if (quality.score >= 4.5) rewardTier = 'exceptional';
+      else if (quality.score >= 3.5) rewardTier = 'good';
+      else if (quality.score >= 2.5) rewardTier = 'average';
+      else rewardTier = 'below_average';
     } else {
       quality.rewardUsdc = 0;
+      rewardTier = 'rejected';
     }
 
     // Check budget before proceeding
@@ -75,7 +88,7 @@ router.post('/submit', async (req, res) => {
       return;
     }
 
-    console.log(`[Report] Quality: ${quality.score}/5.0, Reward: $${quality.rewardUsdc}, Rejected: ${quality.rejected}, Reason: ${quality.reason}`);
+    console.log(`[Report] Quality: ${quality.score}/5.0 (${rewardTier}), Reward: $${quality.rewardUsdc}/${baseReward}, Rejected: ${quality.rejected}, Reason: ${quality.reason}`);
 
     // Create report (even if rejected, for record)
     const [report] = await db.insert(schema.testReports).values({
@@ -95,7 +108,9 @@ router.post('/submit', async (req, res) => {
         report,
         quality_score: quality.score,
         quality_reason: quality.reason,
+        reward_tier: 'rejected',
         reward_amount: 0,
+        reward_max: baseReward,
         tx_signature: null,
         rejected: true,
         rejection_message: `Report rejected: ${quality.reason}. Please provide more detailed testing with specific notes, observations, and thorough answers to earn a reward.`,
@@ -143,7 +158,9 @@ router.post('/submit', async (req, res) => {
       report,
       quality_score: quality.score,
       quality_reason: quality.reason,
+      reward_tier: rewardTier,
       reward_amount: quality.rewardUsdc,
+      reward_max: baseReward,
       tx_signature: settlement.txSignature,
       persona_triggered: personaTriggered,
       rejected: false,

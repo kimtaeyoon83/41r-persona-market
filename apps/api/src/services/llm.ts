@@ -87,6 +87,41 @@ export function extractJson(text: string): string {
   return text;
 }
 
+// ─── Helper: repair truncated/malformed JSON ─────────
+function repairJson(text: string): string {
+  let json = text;
+  // Remove trailing commas before ] or }
+  json = json.replace(/,\s*([\]}])/g, '$1');
+  // Try to fix truncated JSON by closing open brackets
+  let openBraces = 0, openBrackets = 0;
+  let inString = false, escape = false;
+  for (const ch of json) {
+    if (escape) { escape = false; continue; }
+    if (ch === '\\') { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') openBraces++;
+    else if (ch === '}') openBraces--;
+    else if (ch === '[') openBrackets++;
+    else if (ch === ']') openBrackets--;
+  }
+  // Close any unclosed structures
+  for (let i = 0; i < openBrackets; i++) json += ']';
+  for (let i = 0; i < openBraces; i++) json += '}';
+  return json;
+}
+
+function parseJsonSafe(text: string): any {
+  const raw = extractJson(text);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    console.warn('[LLM] JSON parse failed, attempting repair...');
+    const repaired = repairJson(raw);
+    return JSON.parse(repaired);
+  }
+}
+
 // ─── Generate Test Cases ─────────────────────────────
 export async function generateTestCases(
   targetUrl: string,
@@ -102,12 +137,27 @@ export async function generateTestCases(
     });
   }
 
+  const hasCustomRequirements = requirements && requirements.trim().length > 0;
+
   content.push({
     type: 'text',
     text: `You are a senior QA architect creating a comprehensive test plan for a product.
 
 Target URL: ${targetUrl}
-Requirements: ${requirements || 'General UX/functionality testing'}
+${hasCustomRequirements ? `
+## ⚠️ CLIENT REQUIREMENTS (HIGHEST PRIORITY)
+The client has specified the following testing focus areas. These MUST be the primary driver of your test plan.
+At least 40-50% of all checklist items MUST directly address these requirements:
+
+"${requirements}"
+
+Analyze these requirements carefully and generate test cases that specifically target each concern mentioned.
+For example:
+- If security is mentioned → include items for XSS, CSRF, token approval checks, input sanitization, CSP headers, etc.
+- If numerical accuracy / math is mentioned → include items for price calculation verification, rounding errors, slippage math, fee computation, etc.
+- If DeFi is mentioned → include items for liquidity pool math, impermanent loss display, APY calculations, oracle price accuracy, etc.
+- Map every keyword in the requirements to concrete, testable checklist items.
+` : `Requirements: General UX/functionality testing`}
 
 Generate a thorough, detailed JSON test plan with this structure:
 {
@@ -117,19 +167,22 @@ Generate a thorough, detailed JSON test plan with this structure:
 }
 
 ## Checklist (8-12 items required)
-Cover ALL of these categories:
+${hasCustomRequirements ? `**FIRST**: Generate 4-6 items directly from the client requirements above.
+**THEN**: Fill remaining slots from these general categories:` : `Cover ALL of these categories:`}
 - **Core functionality**: Main user flows, primary CTAs, key features (2-3 items)
-- **Navigation & Layout**: Menu links, breadcrumbs, responsive behavior, header/footer (2-3 items)
+- **Navigation & Layout**: Menu links, breadcrumbs, responsive behavior, header/footer (1-2 items)
 - **Forms & Input**: Validation, error messages, edge cases (empty, too long, special chars) (1-2 items)
-- **Visual & UX**: Loading states, animations, color contrast, typography, spacing (1-2 items)
-- **Error handling**: 404 pages, network failures, invalid URLs, session expiry (1-2 items)
+- **Visual & UX**: Loading states, animations, color contrast, typography, spacing (1 item)
+- **Error handling**: 404 pages, network failures, invalid URLs, session expiry (1 item)
 - **Performance**: Page load speed, image optimization, lazy loading (1 item)
 - **Wallet/Web3** (if applicable): Connection flow, network switching, transaction states (1-2 items)
 Each task must be specific and actionable (not vague like "test the page").
+${hasCustomRequirements ? `\n**IMPORTANT**: The first 4-6 checklist items (CL01-CL06) MUST be derived from the client requirements. Do NOT generate generic items for these slots.` : ''}
 
 ## Scenarios (3-4 required)
 Create distinct user personas with different goals:
-- A first-time visitor (confused, needs guidance)
+${hasCustomRequirements ? `- At least 1 scenario MUST be a specialist who focuses on the client's requirement areas (e.g., security auditor, DeFi analyst, etc.)
+- The remaining scenarios should cover:` : `- A first-time visitor (confused, needs guidance)`}
 - A power user (knows what they want, tests edge cases)
 - A skeptical user (looking for trust signals, checks security)
 - A mobile user (testing on small screen) — if applicable
@@ -140,18 +193,30 @@ Mix of rating and free-text:
 - 2-3 rating_1_5 questions (overall satisfaction, visual design, ease of use)
 - 1-2 rating_1_10 questions (NPS-style: would you recommend? overall impression?)
 - 2-3 free_text questions (biggest pain point, most confusing part, suggestions for improvement, what worked well)
+${hasCustomRequirements ? `- At least 1-2 questions MUST specifically address the client requirements (e.g., "How confident are you in the security of this product?" or "Did you notice any numerical inconsistencies?")` : ''}
 
 Return ONLY the JSON, wrapped in \`\`\`json code block.`,
   });
 
   const response = await client.messages.create({
     model: SONNET,
-    max_tokens: 4096,
+    max_tokens: 8192,
     messages: [{ role: 'user', content }],
   });
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
-  const parsed = JSON.parse(extractJson(text));
+  const parsed = parseJsonSafe(text);
+
+  // Fill in missing sections from truncated responses
+  if (!parsed.checklist) parsed.checklist = [];
+  if (!parsed.scenarios) parsed.scenarios = [];
+  if (!parsed.questionnaire) parsed.questionnaire = [];
+
+  // Log stop reason for debugging
+  if (response.stop_reason === 'max_tokens') {
+    console.warn(`[LLM] Response was truncated (max_tokens hit). Checklist: ${parsed.checklist.length}, Scenarios: ${parsed.scenarios.length}, Questionnaire: ${parsed.questionnaire.length}`);
+  }
+
   return testCasesSchema.parse(parsed);
 }
 
@@ -230,7 +295,7 @@ Return ONLY the JSON, wrapped in \`\`\`json code block.`;
   });
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
-  const parsed = JSON.parse(extractJson(text));
+  const parsed = parseJsonSafe(text);
   return personaVectorSchema.parse(parsed);
 }
 
@@ -355,7 +420,7 @@ CRITICAL RULES:
   });
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
-  const parsed = JSON.parse(extractJson(text));
+  const parsed = parseJsonSafe(text);
 
   // Validate and normalize
   return {
@@ -395,21 +460,23 @@ export async function calculateQualityScore(
     max_tokens: 300,
     messages: [{
       role: 'user',
-      content: `You are a test report quality judge. Evaluate this report and decide the reward.
+      content: `You are a test report quality judge. Score the report quality from 0.0 to 5.0.
+The actual dollar reward is calculated separately using a power curve — your job is ONLY to assign an accurate quality score.
 
-## Scoring Rules
-- **0.0 ~ 1.4 → REJECTED (reward $0)**: Empty fields, single-word answers, no real testing done, copy-paste nonsense, all checkboxes clicked with no notes
-- **1.5 ~ 2.4 → Minimal ($1)**: Very brief but shows some real testing effort
-- **2.5 ~ 3.4 → Acceptable ($2~$3)**: Decent coverage, some useful observations
-- **3.5 ~ 4.4 → Good ($4)**: Thorough testing, detailed notes, helpful feedback
-- **4.5 ~ 5.0 → Excellent ($5)**: Exceptional detail, found real bugs, actionable insights
+## Scoring Rules (be strict — differentiate clearly)
+- **0.0 ~ 1.4 → REJECTED**: Empty fields, single-word answers, no real testing done, copy-paste nonsense, all checkboxes clicked with no notes
+- **1.5 ~ 2.4 → Below Average**: Very brief, minimal effort, few details, generic observations
+- **2.5 ~ 3.4 → Average**: Decent coverage but lacking depth, some useful observations
+- **3.5 ~ 4.4 → Good**: Thorough testing, detailed notes per checklist item, helpful feedback with specifics
+- **4.5 ~ 5.0 → Exceptional**: Found real bugs, actionable insights, detailed journey logs, expert-level observations
 
-## What makes a good report:
-- Checklist: Marked pass/fail with specific notes (not just "ok" or empty)
-- Scenarios: Detailed journey logs, not just "tested it"
-- Questionnaire: Thoughtful answers (not single words), specific examples
+## Score Anchors (use these to calibrate)
+- A report where every checklist item just says "ok" or "pass" = 1.5~2.0
+- A report with 1-sentence notes per item, brief scenarios = 2.5~3.0
+- A report with detailed notes, specific bugs found, thorough scenarios = 3.5~4.0
+- A report with screenshots evidence, edge-case testing, root cause analysis = 4.5~5.0
 
-## What gets REJECTED:
+## What gets REJECTED (score < 1.5):
 - All checklist items left as "blocked" with no notes
 - Scenario logs with fewer than 10 words total
 - Questionnaire answers that are all empty or single-word
@@ -419,18 +486,18 @@ Report data:
 ${JSON.stringify(report)}
 
 Return ONLY valid JSON:
-{"score": 3.5, "rewardUsdc": 4, "reason": "brief explanation", "rejected": false}`,
+{"score": 3.5, "reason": "brief explanation", "rejected": false}`,
     }],
   });
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
   try {
-    const parsed = JSON.parse(extractJson(text));
+    const parsed = parseJsonSafe(text);
     const score = Math.min(5, Math.max(0, Number(parsed.score) || 0));
     const rejected = score < 1.5 || parsed.rejected === true;
     return {
       score,
-      rewardUsdc: rejected ? 0 : Math.min(5, Math.max(1, Number(parsed.rewardUsdc) || 0)),
+      rewardUsdc: 0, // Calculated by report.ts using power curve
       reason: String(parsed.reason || ''),
       rejected,
     };
@@ -504,7 +571,7 @@ Return ONLY: ["keyword1", "keyword2", ...]`,
   });
 
   const respText = response.content[0].type === 'text' ? response.content[0].text : '[]';
-  return JSON.parse(extractJson(respText));
+  return parseJsonSafe(respText);
 }
 
 // ─── Generate Persona-Specific Browser Actions (Haiku - fast) ────
@@ -588,7 +655,7 @@ Return as JSON array:
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '[]';
   try {
-    const parsed = JSON.parse(extractJson(text));
+    const parsed = parseJsonSafe(text);
     return Array.isArray(parsed) ? parsed : [];
   } catch (err) {
     console.error('[generatePersonaActions] Failed to parse LLM response:', text.slice(0, 300), err);

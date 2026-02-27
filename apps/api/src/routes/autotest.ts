@@ -83,14 +83,19 @@ router.post('/run', async (req, res) => {
       return;
     }
 
-    // Verify payment on-chain
-    const { verified, error: verifyError } = await verifyUsdcPayment(payment_tx);
-    if (!verified) {
-      res.status(402).json({
-        error: 'Payment verification failed',
-        details: verifyError,
-      });
-      return;
+    // Verify payment on-chain (skip in devnet demo mode)
+    const skipVerification = process.env.SKIP_PAYMENT_VERIFY === 'true';
+    if (!skipVerification) {
+      const { verified, error: verifyError } = await verifyUsdcPayment(payment_tx);
+      if (!verified) {
+        res.status(402).json({
+          error: 'Payment verification failed',
+          details: verifyError,
+        });
+        return;
+      }
+    } else {
+      console.log(`[autotest] Payment verification skipped (demo mode): ${payment_tx}`);
     }
 
     console.log(`[autotest] Payment verified: ${payment_tx}`);
