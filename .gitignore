@@ -30,6 +30,12 @@ test-ledger/
 # Screenshots
 screenshots/
 
+# Cloudflare
+.wrangler/
+
+# ngrok
+ngrok.yml
+
 # Logs
 *.log
 npm-debug.log*
