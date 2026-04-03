@@ -65,11 +65,15 @@ class SASService {
       this.rpc = this.kit.createSolanaRpc(rpcUrl);
       this.rpcSubs = this.kit.createSolanaRpcSubscriptions(wssUrl);
 
-      // Load keypair
-      const keypairPath = (process.env.SOLANA_KEYPAIR_PATH || '~/.config/solana/id.json')
-        .replace('~', process.env.HOME || '');
-
-      const secretKey = JSON.parse(fs.readFileSync(keypairPath, 'utf-8')) as number[];
+      // Load keypair from env var (JSON string) or file
+      let secretKey: number[];
+      if (process.env.SOLANA_KEYPAIR_JSON) {
+        secretKey = JSON.parse(process.env.SOLANA_KEYPAIR_JSON);
+      } else {
+        const keypairPath = (process.env.SOLANA_KEYPAIR_PATH || '~/.config/solana/id.json')
+          .replace('~', process.env.HOME || '');
+        secretKey = JSON.parse(fs.readFileSync(keypairPath, 'utf-8')) as number[];
+      }
       this.payer = await this.kit.createKeyPairSignerFromBytes(Uint8Array.from(secretKey));
 
       this.useFallback = false;

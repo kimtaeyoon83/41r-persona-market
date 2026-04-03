@@ -4,6 +4,7 @@ import path from 'path';
 import { db, schema } from '../db/index.js';
 import { generateAutoTestReport, generatePersonaActions } from './llm.js';
 import { solanaService } from './solana.js';
+import { uploadToR2 } from './r2.js';
 import type { GeneratedTestCases, PersonaVector } from '@41rpm/shared';
 
 const SCREENSHOTS_DIR = path.resolve('../../screenshots');
@@ -49,8 +50,10 @@ async function captureStep(
     const buf = await page.screenshot({ fullPage: false });
     base64Arr.push(buf.toString('base64'));
     const file = `autotest_${jobId}_step${String(stepNum).padStart(2, '0')}.png`;
-    fs.writeFileSync(path.join(SCREENSHOTS_DIR, file), buf);
-    stepArr.push({ file, label, step: stepNum, phase });
+    // Upload to R2 (non-blocking), fall back to local fs
+    const url = await uploadToR2(`screenshots/${file}`, buf);
+    fs.writeFileSync(path.join(SCREENSHOTS_DIR, file), buf); // Local backup
+    stepArr.push({ file: url, label, step: stepNum, phase });
   } catch {
     // Non-blocking
   }
@@ -122,7 +125,16 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     const stagehand = new Stagehand({
       env: 'LOCAL',
       model: { modelName: 'anthropic/claude-sonnet-4-6', apiKey: process.env.ANTHROPIC_API_KEY! },
-      localBrowserLaunchOptions: { headless: true },
+      localBrowserLaunchOptions: {
+        headless: true,
+        executablePath: process.env.CHROMIUM_PATH || undefined,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+        ],
+      },
     });
     await stagehand.init();
     stagehandInstance = stagehand;
