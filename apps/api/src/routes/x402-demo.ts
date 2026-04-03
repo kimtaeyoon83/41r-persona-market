@@ -108,27 +108,29 @@ router.get('/test-paid', async (_req, res) => {
   const targetUrl = `http://localhost:${port}/api/hello`;
 
   try {
-    // ---- Load Solana keypair ----
-    const rawKeypairPath =
-      process.env.SOLANA_KEYPAIR_PATH ||
-      path.join(os.homedir(), '.config', 'solana', 'id.json');
-    const keypairPath = rawKeypairPath.startsWith('~')
-      ? path.join(os.homedir(), rawKeypairPath.slice(1))
-      : rawKeypairPath;
+    // ---- Load Solana keypair from env var or file ----
+    let keypairBytes: Uint8Array;
+    if (process.env.SOLANA_KEYPAIR_JSON) {
+      keypairBytes = new Uint8Array(JSON.parse(process.env.SOLANA_KEYPAIR_JSON));
+    } else {
+      const rawKeypairPath =
+        process.env.SOLANA_KEYPAIR_PATH ||
+        path.join(os.homedir(), '.config', 'solana', 'id.json');
+      const keypairPath = rawKeypairPath.startsWith('~')
+        ? path.join(os.homedir(), rawKeypairPath.slice(1))
+        : rawKeypairPath;
 
-    if (!fs.existsSync(keypairPath)) {
-      res.status(500).json({
-        error: 'Solana keypair file not found',
-        path: keypairPath,
-        hint:
-          'Set SOLANA_KEYPAIR_PATH env var or run `solana-keygen new` to create a default keypair.',
-      });
-      return;
+      if (!fs.existsSync(keypairPath)) {
+        res.status(500).json({
+          error: 'Solana keypair file not found',
+          path: keypairPath,
+          hint:
+            'Set SOLANA_KEYPAIR_JSON env var or SOLANA_KEYPAIR_PATH to a valid keypair file.',
+        });
+        return;
+      }
+      keypairBytes = new Uint8Array(JSON.parse(fs.readFileSync(keypairPath, 'utf-8')));
     }
-
-    const keypairBytes = new Uint8Array(
-      JSON.parse(fs.readFileSync(keypairPath, 'utf-8')),
-    );
 
     // ---- Build x402 client ----
     const signer = await createKeyPairSignerFromBytes(keypairBytes);

@@ -15,9 +15,10 @@ import {
 } from './middleware/x402.js';
 
 dotenv.config({ path: '../../.env' });
+// In production (Docker), env vars are injected directly — dotenv is a no-op
 
 const app: Express = express();
-const PORT = process.env.API_PORT || 4100;
+const PORT = process.env.PORT || process.env.API_PORT || 4100;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -58,8 +59,10 @@ app.use('/api/personas', personaRouter);
 app.use('/api/autotest', autotestRouter);
 app.use('/api/x402-demo', x402DemoRouter);
 
-// Static file serving for screenshots
-app.use('/screenshots', express.static(path.resolve('../../screenshots')));
+// Static file serving for screenshots (local dev fallback, production uses R2 CDN)
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/screenshots', express.static(path.resolve('../../screenshots')));
+}
 
 app.listen(PORT, () => {
   console.log(`[api] listening on http://localhost:${PORT}`);

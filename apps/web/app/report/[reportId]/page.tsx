@@ -242,30 +242,33 @@ export default function ReportDetailPage() {
         <div className="mb-8">
           <h2 className="font-display text-lg font-semibold mb-3">Screenshots</h2>
           <div className="grid grid-cols-2 gap-3">
-            {report.screenshots.map((ss, i) => (
-              <div key={i} className="rounded-xl overflow-hidden border border-border-dim bg-surface">
-                {ss.startsWith("autotest_") || ss.endsWith(".png") ? (
-                  <div className="p-3">
-                    <a
-                      href={`${API_BASE}/screenshots/${ss}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-sol-blue hover:text-sol-blue/80"
-                    >
-                      {ss}
-                    </a>
-                    <img
-                      src={`${API_BASE}/screenshots/${ss}`}
-                      alt={`Screenshot ${i + 1}`}
-                      className="mt-2 rounded-lg w-full"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                    />
-                  </div>
-                ) : (
-                  <p className="p-3 text-xs text-[var(--text-tertiary)]">{ss}</p>
-                )}
-              </div>
-            ))}
+            {report.screenshots.map((ss, i) => {
+              const imgUrl = ss.startsWith("http") ? ss : `${API_BASE}/screenshots/${ss}`;
+              return (
+                <div key={i} className="rounded-xl overflow-hidden border border-border-dim bg-surface">
+                  {ss.endsWith(".png") || ss.startsWith("http") ? (
+                    <div className="p-3">
+                      <a
+                        href={imgUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-sol-blue hover:text-sol-blue/80"
+                      >
+                        {ss.startsWith("http") ? ss.split("/").pop() : ss}
+                      </a>
+                      <img
+                        src={imgUrl}
+                        alt={`Screenshot ${i + 1}`}
+                        className="mt-2 rounded-lg w-full"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    </div>
+                  ) : (
+                    <p className="p-3 text-xs text-[var(--text-tertiary)]">{ss}</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

@@ -28,12 +28,16 @@ class SolanaService {
     const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
     this.connection = new Connection(rpcUrl, 'confirmed');
 
-    // Load keypair from file
-    const keypairPath = process.env.SOLANA_KEYPAIR_PATH?.replace('~', process.env.HOME || '')
-      || path.join(process.env.HOME || '', '.config', 'solana', 'id.json');
-
+    // Load keypair from env var (JSON string) or file
     try {
-      const secretKey = JSON.parse(fs.readFileSync(keypairPath, 'utf-8'));
+      let secretKey: number[];
+      if (process.env.SOLANA_KEYPAIR_JSON) {
+        secretKey = JSON.parse(process.env.SOLANA_KEYPAIR_JSON);
+      } else {
+        const keypairPath = process.env.SOLANA_KEYPAIR_PATH?.replace('~', process.env.HOME || '')
+          || path.join(process.env.HOME || '', '.config', 'solana', 'id.json');
+        secretKey = JSON.parse(fs.readFileSync(keypairPath, 'utf-8'));
+      }
       this.payer = Keypair.fromSecretKey(Uint8Array.from(secretKey));
     } catch {
       console.warn('[Solana] No keypair found, using random keypair');

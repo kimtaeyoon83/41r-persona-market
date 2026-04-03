@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: 41rpm
+      POSTGRES_USER: 41rpm
+      POSTGRES_PASSWORD: 41rpm_local
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "4101:4100"
+    environment:
+      DATABASE_URL: postgresql://41rpm:41rpm_local@db:5432/41rpm
+      API_PORT: 4100
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      SKIP_PAYMENT_VERIFY: "true"
+    depends_on:
+      - db
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:4101
+    ports:
+      - "3001:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
