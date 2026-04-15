@@ -1,9 +1,15 @@
-"""Upload session screenshots to Cloudflare R2 (S3-compatible).
+"""OPTIONAL utility — Upload session screenshots to Cloudflare R2.
 
-Use when the Express API wants public URLs for frontend display.
+**This is not called by main.py** and is intentionally decoupled from the
+engine's request flow. Upload responsibility belongs to the embedding
+server (41rpm apps/api via its existing services/r2.ts). This file is
+kept as a reference Python implementation for callers who want to upload
+from the engine side instead.
+
 persona_agent's browser_runner saves screenshots under
-``workspace/sessions/<session_id>/screenshots/`` — this helper walks
-that dir and uploads each file.
+``workspace/sessions/<session_id>/screenshots/``. The engine's JobResult
+returns ``screenshot_paths`` (absolute filesystem paths) — the consumer
+picks them up.
 """
 from __future__ import annotations
 

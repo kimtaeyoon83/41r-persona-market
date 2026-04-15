@@ -13,6 +13,7 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
+    "@41rpm/persona-client": "workspace:*",
     "@41rpm/shared": "workspace:*",
     "@41rpm/solana-utils": "workspace:*",
     "@anthropic-ai/sdk": "^0.78.0",

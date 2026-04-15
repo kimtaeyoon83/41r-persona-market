@@ -50,6 +50,14 @@ export interface JobResult {
   report_path: string | null;
   error: string | null;
   new_observations: number;
+  session_id: string | null;
+  /**
+   * Absolute filesystem paths to per-turn screenshot PNGs on the engine
+   * host. The caller (apps/api) is responsible for uploading these to R2
+   * or any other object store and translating to public URLs. The engine
+   * itself does not upload.
+   */
+  screenshot_paths: string[];
 }
 
 export interface AnalysisRequest {
@@ -133,6 +141,41 @@ export class PersonaEngineClient {
 
   async getResult(jobId: string): Promise<JobResult> {
     return this.request('GET', `/analyses/${encodeURIComponent(jobId)}/result`);
+  }
+
+  async listSessionScreenshots(
+    sessionId: string,
+  ): Promise<{ session_id: string; count: number; filenames: string[] }> {
+    return this.request('GET', `/sessions/${encodeURIComponent(sessionId)}/screenshots`);
+  }
+
+  /**
+   * Fetch a single screenshot PNG. Returns raw bytes so the caller can pipe
+   * to R2 / local disk / elsewhere.
+   */
+  async fetchScreenshot(sessionId: string, filename: string): Promise<Uint8Array> {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), this.timeoutMs);
+    try {
+      const res = await this._fetch(
+        `${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/screenshots/${encodeURIComponent(filename)}`,
+        {
+          method: 'GET',
+          headers: this.authToken ? { authorization: `Bearer ${this.authToken}` } : {},
+          signal: ctl.signal,
+        },
+      );
+      if (!res.ok) {
+        throw new PersonaEngineError(
+          `fetchScreenshot ${filename} → ${res.status}`,
+          res.status,
+        );
+      }
+      const buf = await res.arrayBuffer();
+      return new Uint8Array(buf);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**

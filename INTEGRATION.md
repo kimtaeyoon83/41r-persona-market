@@ -72,11 +72,24 @@ pnpm --filter @41rpm/persona-client build
 pnpm --filter api add @41rpm/persona-client
 ```
 
+## 책임 분리
+
+| 레이어 | 책임 |
+|---|---|
+| `persona_agent` | 스크린샷을 `workspace/sessions/<id>/screenshots/turn_NN.png`에 저장 + `SessionLog.session_id` 반환 |
+| `persona-engine` | 세션 후 파일 경로를 walk해서 `JobResult.screenshot_paths`에 포함 — **업로드 안 함** |
+| `apps/api` (Express) | 경로 받아 기존 `services/r2.ts`로 R2 업로드 후 `test_reports.screenshots[]`에 URL 저장 |
+
+엔진과 R2 사이의 업로드 로직은 이미 `apps/api/src/services/r2.ts`에 있으므로 중복 구현 없음.
+
 ## Express 통합 예시 (apps/api/src/services/autotest.ts 대체 경로)
 
 ```ts
 // apps/api/src/services/persona_engine.ts (new)
+import fs from 'node:fs/promises';
 import { PersonaEngineClient } from '@41rpm/persona-client';
+import { uploadToR2 } from './r2.js';        // 기존 업로더 재사용
+import { db, schema } from '../db/index.js';
 
 const engine = new PersonaEngineClient({
   baseUrl: process.env.PERSONA_ENGINE_URL ?? 'http://persona-engine:4200',
@@ -85,12 +98,12 @@ const engine = new PersonaEngineClient({
 export async function runAutoTestWithEngine(args: {
   testId: string;
   personaId: string;
-  testerProfile: TesterProfile;  // from DB
+  testerProfile: TesterProfile;
   url: string;
   task: string;
-}): Promise<{ outcome: string; totalTurns: number; reportId: string | null }> {
+}): Promise<{ outcome: string; totalTurns: number; screenshotUrls: string[] }> {
 
-  // 1) 페르소나가 엔진에 없으면 등록
+  // 1) 페르소나가 엔진에 없으면 등록 (TesterProfile → Soul)
   const { personas } = await engine.listPersonas();
   if (!personas.includes(args.personaId)) {
     await engine.createPersona({
@@ -99,34 +112,56 @@ export async function runAutoTestWithEngine(args: {
     });
   }
 
-  // 2) 분석 submit
+  // 2) 분석 submit (browser 모드 — 엔진이 스크린샷 파일로 저장)
   const { job_id } = await engine.submitAnalysis({
     persona_id: args.personaId,
     url: args.url,
     task: args.task,
-    mode: 'browser',
   });
 
-  // 3) 완료 대기 (10분 한도)
+  // 3) 완료 대기
   const result = await engine.waitForResult(job_id, { maxWaitMs: 10 * 60_000 });
 
-  // 4) DB에 결과 저장 (기존 Drizzle 스키마 재사용)
+  // 4) ★ Express가 스크린샷 파일 경로들을 받아 R2 업로드
+  //    엔진 컨테이너 파일시스템 → r2.ts → public CDN URL
+  const screenshotUrls: string[] = [];
+  for (let i = 0; i < (result.screenshot_paths ?? []).length; i++) {
+    const p = result.screenshot_paths[i];
+    try {
+      const buf = await fs.readFile(p);       // 엔진과 api가 볼륨 공유하거나
+                                               // api가 엔진에서 fetch해야 함
+      const key = `autotest_${result.session_id}_turn${String(i).padStart(2, '0')}.png`;
+      const url = await uploadToR2(`screenshots/${key}`, buf);
+      screenshotUrls.push(url);
+    } catch (e) {
+      console.warn('screenshot upload failed', p, e);
+    }
+  }
+
+  // 5) DB에 결과 + URLs 저장 (기존 schema)
   await db.insert(schema.testReports).values({
     testId: args.testId,
     testerAddr: args.personaId,
     outcome: result.outcome ?? 'unknown',
     totalTurns: result.total_turns ?? 0,
     reportId: result.report_id,
-    // screenshots: later via r2_upload adapter
+    screenshots: screenshotUrls,
   });
 
   return {
     outcome: result.outcome ?? 'unknown',
     totalTurns: result.total_turns ?? 0,
-    reportId: result.report_id,
+    screenshotUrls,
   };
 }
 ```
+
+### 볼륨 공유 참고
+
+엔진과 Express가 **같은 물리 디스크**에 screenshot을 읽을 수 있어야 합니다. 선택지:
+
+- **docker-compose**: `persona_jobs` 볼륨을 `api`에도 마운트 (`/var/persona_jobs:/var/persona_jobs:ro`)
+- **Railway**: 공유 볼륨 어려우면, 엔진이 HTTP로 스크린샷을 제공하는 `GET /analyses/{id}/screenshots/{n}` 엔드포인트 추가 (향후 PR)
 
 ## 기존 `startAutoTest` 마이그레이션 단계 (제안)
 

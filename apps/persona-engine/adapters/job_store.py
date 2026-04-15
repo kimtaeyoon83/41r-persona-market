@@ -28,6 +28,8 @@ class JobState:
     report_path: str | None = None
     error: str | None = None
     new_observations: int = 0
+    session_id: str | None = None
+    screenshot_paths: list[str] = field(default_factory=list)
 
 
 class JobStore:

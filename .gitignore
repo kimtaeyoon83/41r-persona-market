@@ -33,3 +33,4 @@ screenshots/
 # Logs
 *.log
 npm-debug.log*
+__pycache__/

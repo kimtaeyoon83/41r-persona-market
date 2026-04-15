@@ -14,9 +14,11 @@ Express API remains the source of truth for test_reports, personas, etc.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -51,6 +53,7 @@ configure(Workspace(
 
 # Now safe to pull in the rest.
 from fastapi import BackgroundTasks, FastAPI, HTTPException, status  # noqa: E402
+from fastapi.responses import FileResponse  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 import persona_agent as pa  # noqa: E402
@@ -58,6 +61,7 @@ from persona_agent.lowlevel import (  # noqa: E402
     create_persona,
     generate_cohort_report,
     list_personas,
+    list_session_screenshots,
     run_cohort,
     run_session,
 )
@@ -69,16 +73,31 @@ logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
 PORT = int(os.environ.get("PORT", "4200"))
+WORKER_THREADS = int(os.environ.get("PERSONA_ENGINE_WORKERS", "4"))
 
 _job_store: JobStore | None = None
+# Browser sessions are CPU/IO heavy and synchronous (run_session calls
+# asyncio.run_until_complete internally). They must NOT run in the FastAPI
+# event loop or uvicorn becomes unresponsive to status polls. Push them
+# to a dedicated thread pool.
+_executor: ThreadPoolExecutor | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _job_store
+    global _job_store, _executor
     _job_store = JobStore(WORKSPACE_ROOT / "jobs")
-    logger.info("persona-engine lifespan started (workspace=%s)", WORKSPACE_ROOT)
+    _executor = ThreadPoolExecutor(
+        max_workers=WORKER_THREADS,
+        thread_name_prefix="pe-worker",
+    )
+    logger.info(
+        "persona-engine lifespan started (workspace=%s, worker_threads=%d)",
+        WORKSPACE_ROOT, WORKER_THREADS,
+    )
     yield
+    if _executor:
+        _executor.shutdown(wait=False, cancel_futures=False)
 
 
 app = FastAPI(
@@ -137,6 +156,13 @@ class JobResultResponse(BaseModel):
     error: str | None = None
     # session observations appended during this run
     new_observations: int = 0
+    # Absolute filesystem paths to per-turn PNG screenshots (browser mode
+    # only). The embedding server (41rpm Express) is responsible for
+    # uploading these to R2/S3 and translating to public URLs before
+    # storing in its own DB. persona-engine does NOT upload.
+    screenshot_paths: list[str] = []
+    # Session id the screenshots belong to (= log.session_id from run_session)
+    session_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -150,11 +176,17 @@ def _run_session_job(job_id: str, req: AnalysisRequest) -> None:
     try:
         _job_store.update(job_id, status="running", progress=10)
         log = run_session(req.persona_id, req.url, req.task)
+        session_id = getattr(log, "session_id", None)
+        shot_paths: list[str] = []
+        if session_id:
+            shot_paths = [str(p) for p in list_session_screenshots(session_id)]
         _job_store.update(job_id,
             status="completed", progress=100,
             outcome=getattr(log, "outcome", "task_complete"),
             total_turns=getattr(log, "total_turns", None),
             duration_sec=getattr(log, "duration_sec", None),
+            session_id=session_id,
+            screenshot_paths=shot_paths,
         )
     except pa.PersonaAgentError as e:
         logger.exception("job %s failed with PersonaAgentError", job_id)
@@ -220,24 +252,28 @@ def post_persona(req: CreatePersonaRequest):
 
 
 @app.post("/analyses", status_code=status.HTTP_202_ACCEPTED)
-def submit_analysis(req: AnalysisRequest, bg: BackgroundTasks):
-    """Kick off a single-persona analysis. Returns job_id immediately."""
-    assert _job_store is not None
+def submit_analysis(req: AnalysisRequest):
+    """Kick off a single-persona analysis. Returns job_id immediately.
+
+    Heavy work runs in a worker thread (NOT FastAPI's event loop) so the
+    server stays responsive to status polls.
+    """
+    assert _job_store is not None and _executor is not None
     if req.persona_id not in list_personas():
         raise HTTPException(404, f"persona {req.persona_id} not found")
     job_id = f"job_{uuid.uuid4().hex[:8]}"
     _job_store.create(job_id, kind="session", request=req.model_dump())
-    bg.add_task(_run_session_job, job_id, req)
+    _executor.submit(_run_session_job, job_id, req)
     return JobResponse(job_id=job_id, status="queued")
 
 
 @app.post("/cohort-analyses", status_code=status.HTTP_202_ACCEPTED)
-def submit_cohort(req: CohortAnalysisRequest, bg: BackgroundTasks):
+def submit_cohort(req: CohortAnalysisRequest):
     """Run an existing generated cohort (multi-persona)."""
-    assert _job_store is not None
+    assert _job_store is not None and _executor is not None
     job_id = f"job_{uuid.uuid4().hex[:8]}"
     _job_store.create(job_id, kind="cohort", request=req.model_dump())
-    bg.add_task(_run_cohort_job, job_id, req)
+    _executor.submit(_run_cohort_job, job_id, req)
     return JobResponse(job_id=job_id, status="queued")
 
 
@@ -267,6 +303,52 @@ def get_result(job_id: str):
         report_id=job.report_id,
         report_path=job.report_path,
         new_observations=job.new_observations,
+        session_id=job.session_id,
+        screenshot_paths=job.screenshot_paths,
+    )
+
+
+@app.get("/sessions/{session_id}/screenshots")
+def list_screenshots_for_session(session_id: str):
+    """List screenshot filenames for a session (so Express can iterate)."""
+    if not _safe_session_id(session_id):
+        raise HTTPException(400, "invalid session_id")
+    paths = list_session_screenshots(session_id)
+    return {
+        "session_id": session_id,
+        "count": len(paths),
+        "filenames": [p.name for p in paths],
+    }
+
+
+@app.get("/sessions/{session_id}/screenshots/{filename}")
+def get_screenshot(session_id: str, filename: str):
+    """Return a single screenshot PNG.
+
+    Express (apps/api) fetches these over HTTP and uploads to R2 using its
+    existing services/r2.ts — the engine does NOT upload.
+    """
+    if not _safe_session_id(session_id):
+        raise HTTPException(400, "invalid session_id")
+    if not _safe_filename(filename):
+        raise HTTPException(400, "invalid filename")
+    path = WORKSPACE_ROOT / "sessions" / session_id / "screenshots" / filename
+    if not path.exists() or not path.is_file():
+        raise HTTPException(404, f"screenshot not found: {filename}")
+    return FileResponse(path, media_type="image/png")
+
+
+def _safe_session_id(sid: str) -> bool:
+    return bool(sid) and all(c.isalnum() or c == "_" for c in sid) and len(sid) < 64
+
+
+def _safe_filename(name: str) -> bool:
+    return (
+        name.endswith(".png")
+        and all(c.isalnum() or c in "._-" for c in name)
+        and ".." not in name
+        and "/" not in name
+        and len(name) < 64
     )
 
 
