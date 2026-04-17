@@ -8,6 +8,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.js
 COPY apps/api/package.json ./apps/api/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/solana-utils/package.json ./packages/solana-utils/
+COPY packages/persona-client/package.json ./packages/persona-client/
 RUN pnpm install --frozen-lockfile
 
 # --- Build ---
@@ -17,9 +18,11 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
 COPY --from=deps /app/packages/solana-utils/node_modules ./packages/solana-utils/node_modules
+COPY --from=deps /app/packages/persona-client/node_modules ./packages/persona-client/node_modules
 COPY . .
 RUN pnpm --filter @41rpm/shared build && \
     pnpm --filter @41rpm/solana-utils build && \
+    pnpm --filter @41rpm/persona-client build && \
     pnpm --filter @41rpm/api build
 
 # --- Production ---
@@ -55,12 +58,15 @@ COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
 COPY --from=deps /app/packages/solana-utils/node_modules ./packages/solana-utils/node_modules
 RUN cd node_modules/bigint-buffer && npm rebuild 2>/dev/null || true
+COPY --from=deps /app/packages/persona-client/node_modules ./packages/persona-client/node_modules
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/packages/shared/dist ./packages/shared/dist
 COPY --from=build /app/packages/solana-utils/dist ./packages/solana-utils/dist
+COPY --from=build /app/packages/persona-client/dist ./packages/persona-client/dist
 COPY apps/api/package.json ./apps/api/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/solana-utils/package.json ./packages/solana-utils/
+COPY packages/persona-client/package.json ./packages/persona-client/
 COPY package.json pnpm-workspace.yaml ./
 
 EXPOSE 4100
