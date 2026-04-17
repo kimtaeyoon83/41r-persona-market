@@ -63,3 +63,27 @@ export const autoTestApi = {
 
   status: (jobId: string) => request(`/api/autotest/status/${jobId}`),
 };
+
+// ─── Auto Test BSC (x402 EVM) APIs ───────────────────
+export const autoTestBscApi = {
+  /** Fetch payment requirements — price, payee, USDC contract. */
+  requirements: () => request('/api/autotest-bsc/requirements'),
+
+  /** Post with an x402 X-Payment header (base64-encoded). */
+  run: async (data: { test_id: string; persona_id: string }, xPayment: string) => {
+    const res = await fetch(`${API_BASE}/api/autotest-bsc/run`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Payment': xPayment,
+        'ngrok-skip-browser-warning': '1',
+      },
+      body: JSON.stringify(data),
+    });
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    if (!res.ok) throw new Error(body.reason || body.error || `Run failed: ${res.status}`);
+    return body;
+  },
+
+  status: (jobId: string) => request(`/api/autotest-bsc/status/${jobId}`),
+};

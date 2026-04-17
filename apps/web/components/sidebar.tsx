@@ -60,6 +60,15 @@ const navItems = [
     ),
   },
   {
+    label: "Auto Test (BSC)",
+    href: "/autotest-bsc",
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 2l2.39 7.36H22l-6.2 4.5 2.39 7.36L12 16.72l-6.19 4.5 2.39-7.36L2 9.36h7.61L12 2z" />
+      </svg>
+    ),
+  },
+  {
     label: "x402 Demo",
     href: "/x402",
     icon: (

@@ -3,6 +3,7 @@ import { Syne, DM_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
 import { SolanaWalletProvider } from "@/components/wallet-provider";
+import { EvmWalletProvider } from "@/components/evm-wallet-provider";
 
 const syne = Syne({
   subsets: ["latin"],
@@ -41,14 +42,16 @@ export default function RootLayout({
         className={`${syne.variable} ${dmSans.variable} ${jetbrainsMono.variable} font-sans antialiased bg-surface-base text-[var(--text-primary)]`}
       >
         <SolanaWalletProvider>
-          <div className="flex min-h-screen">
-            <Sidebar />
-            <main className="flex-1 ml-[260px] min-h-screen">
-              <div className="max-w-[1200px] mx-auto px-8 py-8">
-                {children}
-              </div>
-            </main>
-          </div>
+          <EvmWalletProvider>
+            <div className="flex min-h-screen">
+              <Sidebar />
+              <main className="flex-1 ml-[260px] min-h-screen">
+                <div className="max-w-[1200px] mx-auto px-8 py-8">
+                  {children}
+                </div>
+              </main>
+            </div>
+          </EvmWalletProvider>
         </SolanaWalletProvider>
       </body>
     </html>

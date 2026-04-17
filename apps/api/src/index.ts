@@ -7,6 +7,7 @@ import testerRouter from './routes/tester.js';
 import reportRouter from './routes/report.js';
 import personaRouter from './routes/persona.js';
 import autotestRouter from './routes/autotest.js';
+import autotestBscRouter from './routes/autotest-bsc.js';
 import helloRouter from './routes/hello.js';
 import x402DemoRouter from './routes/x402-demo.js';
 import {
@@ -57,6 +58,7 @@ app.use('/api/reports', reportRouter);
 app.use('/api/persona', personaRouter);
 app.use('/api/personas', personaRouter);
 app.use('/api/autotest', autotestRouter);
+app.use('/api/autotest-bsc', autotestBscRouter);
 app.use('/api/x402-demo', x402DemoRouter);
 
 // Static file serving for screenshots (local dev fallback, production uses R2 CDN)
