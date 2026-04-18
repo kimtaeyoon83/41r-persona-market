@@ -1,7 +1,7 @@
 import { Router, type Router as RouterType } from 'express';
 import { eq, and } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
-import { calculateQualityScore, type QualityResult } from '../services/llm.js';
+import { calculateQualityScore, QualityScoreTimeout, type QualityResult } from '../services/llm.js';
 import type { SubmitReportRequest } from '@41rpm/shared';
 
 const router: RouterType = Router();
@@ -63,7 +63,14 @@ router.post('/submit', async (req, res) => {
       return;
     }
 
-    // Calculate quality score + reward via LLM
+    // Calculate quality score + reward via LLM. Two failure modes:
+    //  - QualityScoreTimeout: transient (Anthropic slow/network). Return
+    //    503 so the tester can retry without the duplicate-index blocking
+    //    them (no report row was inserted yet).
+    //  - Other errors: shouldn't happen — calculateQualityScore falls
+    //    back to a deterministic heuristic internally. A thrown error
+    //    means something deeper is wrong; surface it so it doesn't
+    //    silently pay out a bogus reward.
     let quality: QualityResult;
     try {
       quality = await calculateQualityScore({
@@ -71,9 +78,22 @@ router.post('/submit', async (req, res) => {
         scenario_log,
         questionnaire_answers,
       });
-    } catch {
-      // Fallback: simple heuristic — should not happen since heuristic is built-in
-      quality = { score: 2.0, rewardUsdc: 2, reason: 'Fallback scoring', rejected: false };
+    } catch (scoringErr) {
+      if (scoringErr instanceof QualityScoreTimeout) {
+        console.warn(`[Report] scoring timeout (${scoringErr.elapsedMs}ms), asking client to retry`);
+        res.status(503).json({
+          error: 'scoring_timeout',
+          message: 'Scoring service is slow. Please retry in a moment.',
+          retryable: true,
+        });
+        return;
+      }
+      console.error('[Report] unexpected scoring failure:', scoringErr);
+      res.status(500).json({
+        error: 'scoring_failed',
+        message: 'Could not score report. Please retry.',
+      });
+      return;
     }
 
     // Override reward using test's rewardPerTester and quality score
@@ -154,14 +174,27 @@ router.post('/submit', async (req, res) => {
       .set({ testsDone: newTestsDone })
       .where(eq(schema.testers.walletAddress, tester_addr));
 
-    // Attempt USDC transfer
+    // Attempt USDC transfer. InsufficientFundsError is a hard event-level
+    // problem (whole payer wallet is dry) — log at ERROR level so ops
+    // sees it immediately. Other errors remain transient and recorded
+    // as `pending_` until C3's retry worker is in place.
     let txSignature = `pending_${Date.now()}`;
     try {
       const { solanaService } = await import('../services/solana.js');
       const txResult = await solanaService.transferUsdc(tester_addr, quality.rewardUsdc);
       txSignature = txResult.txSignature;
     } catch (solanaErr) {
-      console.warn('[Report] USDC transfer failed (recording pending):', solanaErr instanceof Error ? solanaErr.message : solanaErr);
+      const { InsufficientFundsError } = await import('../services/solana.js');
+      if (solanaErr instanceof InsufficientFundsError) {
+        console.error(
+          `[Report] PAYER_DRY needed=${solanaErr.needed} available=${solanaErr.available} mint=${solanaErr.mint}`,
+        );
+      } else {
+        console.warn(
+          '[Report] USDC transfer failed (recording pending):',
+          solanaErr instanceof Error ? solanaErr.message : solanaErr,
+        );
+      }
     }
 
     // Record settlement

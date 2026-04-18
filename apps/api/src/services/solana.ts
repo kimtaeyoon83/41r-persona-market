@@ -19,6 +19,19 @@ import {
 import fs from 'fs';
 import path from 'path';
 
+export class InsufficientFundsError extends Error {
+  constructor(
+    public readonly needed: number,
+    public readonly available: number,
+    public readonly mint: string,
+  ) {
+    super(
+      `Payer wallet has insufficient funds: needed ${needed}, available ${available} (mint ${mint})`,
+    );
+    this.name = 'InsufficientFundsError';
+  }
+}
+
 class SolanaService {
   private connection: Connection;
   private payer: Keypair;
@@ -56,6 +69,24 @@ class SolanaService {
     return this.payer.publicKey;
   }
 
+  /**
+   * Read the current USDC balance of the payer wallet. Used as a
+   * preflight before reward disbursement so we fail fast with a
+   * structured error instead of submitting a doomed transaction.
+   *
+   * Returns the balance in whole USDC (not base units).
+   */
+  async getPayerUsdcBalance(usdcMint?: string): Promise<number> {
+    const mint = new PublicKey(
+      usdcMint || process.env.USDC_MINT || '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    );
+    const ata = await getOrCreateAssociatedTokenAccount(
+      this.connection, this.payer, mint, this.payer.publicKey,
+    );
+    const bal = await this.connection.getTokenAccountBalance(ata.address);
+    return Number(bal.value.uiAmount ?? 0);
+  }
+
   // Transfer USDC to a tester (manual test reward)
   async transferUsdc(
     recipientWallet: string,
@@ -72,6 +103,16 @@ class SolanaService {
     const destAta = await getOrCreateAssociatedTokenAccount(
       this.connection, this.payer, mint, recipient,
     );
+
+    // Preflight: fail fast with a structured error if the payer can't
+    // cover this transfer. Without this, the RPC would still reject the
+    // tx but with a generic simulation error that's harder to diagnose
+    // at 300-tester scale.
+    const bal = await this.connection.getTokenAccountBalance(sourceAta.address);
+    const available = Number(bal.value.uiAmount ?? 0);
+    if (available < amountUsdc) {
+      throw new InsufficientFundsError(amountUsdc, available, mint.toBase58());
+    }
 
     // USDC has 6 decimals
     const amount = BigInt(Math.round(amountUsdc * 1_000_000));

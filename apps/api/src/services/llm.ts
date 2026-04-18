@@ -452,9 +452,19 @@ export interface QualityResult {
   rejected: boolean;    // true = no payment
 }
 
+export class QualityScoreTimeout extends Error {
+  constructor(public readonly elapsedMs: number) {
+    super(`LLM quality scoring timed out after ${elapsedMs}ms`);
+    this.name = 'QualityScoreTimeout';
+  }
+}
+
+const QUALITY_SCORE_TIMEOUT_MS = Number(process.env.QUALITY_SCORE_TIMEOUT_MS ?? 30_000);
+
 export async function calculateQualityScore(
   report: Record<string, unknown>,
 ): Promise<QualityResult> {
+  const started = Date.now();
   const response = await client.messages.create({
     model: HAIKU,
     max_tokens: 300,
@@ -488,12 +498,28 @@ ${JSON.stringify(report)}
 Return ONLY valid JSON:
 {"score": 3.5, "reason": "brief explanation", "rejected": false}`,
     }],
+  }, {
+    // AbortSignal → SDK cancels the request and throws APIUserAbortError.
+    // We re-raise as QualityScoreTimeout so report.ts can distinguish
+    // transient timeouts (retryable) from truly malformed responses.
+    signal: AbortSignal.timeout(QUALITY_SCORE_TIMEOUT_MS),
+  }).catch((err: unknown) => {
+    const elapsed = Date.now() - started;
+    const name = err instanceof Error ? err.name : '';
+    if (name === 'AbortError' || name === 'APIUserAbortError' || name === 'TimeoutError') {
+      throw new QualityScoreTimeout(elapsed);
+    }
+    throw err;
   });
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
   try {
     const parsed = parseJsonSafe(text);
-    const score = Math.min(5, Math.max(0, Number(parsed.score) || 0));
+    const rawScore = Number(parsed.score);
+    if (!Number.isFinite(rawScore)) {
+      throw new Error('LLM returned non-numeric score');
+    }
+    const score = Math.min(5, Math.max(0, rawScore));
     const rejected = score < 1.5 || parsed.rejected === true;
     return {
       score,
@@ -502,7 +528,11 @@ Return ONLY valid JSON:
       rejected,
     };
   } catch {
-    // Fallback: heuristic scoring
+    // Malformed response (not a timeout) → fall back to rule-based
+    // heuristic. The heuristic inspects the actual report content, so
+    // it's safe to keep as a deterministic fallback. A blanket score=2.0
+    // default used to live here; it was removed because it silently paid
+    // spam submissions ~25% of the reward.
     return heuristicQualityScore(report);
   }
 }

@@ -50,8 +50,13 @@ class SASService {
     this.schemaPda = process.env.SAS_SCHEMA_PDA || null;
 
     if (!this.credentialPda || !this.schemaPda) {
-      console.warn('[SAS] SAS_CREDENTIAL_PDA or SAS_SCHEMA_PDA not set — using fallback');
-      console.warn('[SAS] Run `pnpm tsx scripts/setup-sas.ts` to create on-chain schema');
+      // DEMO_FALLBACK_MODE: not an error in dev, but a serious misconfig in
+      // any environment that claims "on-chain verified testers". Promote
+      // above warn so Railway/Docker logs surface it at startup and ops
+      // can gate the 300-person event on seeing this line or not.
+      console.error('[SAS] DEMO_FALLBACK_MODE — SAS_CREDENTIAL_PDA/SAS_SCHEMA_PDA missing');
+      console.error('[SAS] Attestations will carry sas_demo_* IDs with onChain=false');
+      console.error('[SAS] Fix: run `pnpm tsx scripts/setup-sas.ts` and set the env vars');
       return;
     }
 
@@ -79,8 +84,18 @@ class SASService {
       this.useFallback = false;
       console.log(`[SAS] Initialized — credential=${this.credentialPda.slice(0, 8)}… schema=${this.schemaPda.slice(0, 8)}…`);
     } catch (err) {
-      console.warn('[SAS] SDK init failed, using fallback:', err instanceof Error ? err.message : err);
+      console.error('[SAS] DEMO_FALLBACK_MODE — SDK init failed:', err instanceof Error ? err.message : err);
     }
+  }
+
+  /**
+   * Expose fallback status so callers (routes/persona.ts, monitoring
+   * endpoints) can refuse to claim "on-chain verified" in UI/responses
+   * when the service degraded to demo mode.
+   */
+  async isFallbackMode(): Promise<boolean> {
+    await this.init();
+    return this.useFallback;
   }
 
   /**
@@ -201,7 +216,9 @@ class SASService {
     data: SASPerformanceData,
   ): { attestationId: string; onChain: boolean } {
     const attestId = `sas_demo_${data.trust_tier.toLowerCase()}_${testerWallet.slice(0, 8)}`;
-    console.log(`[SAS] Fallback attestation: ${attestId}`, {
+    // Explicit marker so log grep finds every demo-path attestation. The
+    // 300-person event should show zero occurrences if SAS is configured.
+    console.warn(`[SAS] DEMO_ATTESTATION ${attestId}`, {
       tester: testerWallet,
       ...data,
     });

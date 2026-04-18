@@ -93,6 +93,7 @@ router.post('/generate', async (req, res) => {
     // Issue SAS attestation
     const avgQuality = reports.reduce((sum, r) => sum + (r.qualityScore || 3), 0) / reports.length;
     let sasAttestId: string | undefined;
+    let sasOnChain = false;
     try {
       const attestResult = await sasService.issueAttestation(tester_addr, {
         tests_completed: tester.testsDone,
@@ -103,16 +104,23 @@ router.post('/generate', async (req, res) => {
         persona_activated: true,
       });
       sasAttestId = attestResult.attestationId;
+      sasOnChain = attestResult.onChain;
 
       // Update persona with SAS attestation
       await db.update(schema.personas)
         .set({ sasAttestId })
         .where(eq(schema.personas.id, persona.id));
     } catch (sasError) {
-      console.warn('[SAS] Attestation failed (non-blocking):', sasError);
+      console.error('[SAS] Attestation failed (persona still created without attestation):', sasError);
     }
 
-    res.status(201).json({ persona: { ...persona, sasAttestId } });
+    // Surface sas_on_chain so frontend can show a real "on-chain verified"
+    // badge only when the attestation is actually on Solana. Demo-mode
+    // attestations carry sas_demo_* ids and must not claim verification.
+    res.status(201).json({
+      persona: { ...persona, sasAttestId },
+      sas_on_chain: sasOnChain,
+    });
   } catch (error) {
     console.error('[POST /api/persona/generate]', error);
     res.status(500).json({ error: 'Internal server error' });
