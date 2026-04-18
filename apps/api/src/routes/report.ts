@@ -11,6 +11,7 @@ import {
   spearman,
   type ChecklistStatus,
 } from '../services/comparison.js';
+import { deriveFindings } from '../services/findings.js';
 import type { SubmitReportRequest } from '@41rpm/shared';
 
 const router: RouterType = Router();
@@ -464,6 +465,22 @@ router.get('/compare/:testId', async (req, res) => {
     const personaSorted = [...personaScores].slice(0, Math.min(manualScores.length, personaScores.length));
     const convergence = convergenceCurve(manualSorted, personaSorted);
 
+    const findings = deriveFindings({
+      manualCount: manual.length,
+      personaCount: persona.length,
+      itemAgreementRate: overallAgreementRate,
+      itemAgreement,
+      correlation: {
+        pearson: correlation.pearson,
+        spearman: correlation.spearman,
+        pairedCount: correlation.paired_count,
+      },
+      ratingKs: ratingDistribution.ks_statistic,
+      ratingManualMean: ratingDistribution.manual_mean,
+      ratingPersonaMean: ratingDistribution.persona_mean,
+      convergence,
+    });
+
     res.json({
       test_id: testId,
       manual: {
@@ -485,6 +502,7 @@ router.get('/compare/:testId', async (req, res) => {
         correlation,
         rating_distribution: ratingDistribution,
         convergence,
+        findings,
       },
     });
   } catch (error) {
