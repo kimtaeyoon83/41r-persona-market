@@ -17,6 +17,20 @@ router.post('/submit', async (req, res) => {
       return;
     }
 
+    // Reject empty reports up-front so the LLM scoring path doesn't get
+    // hit by spam. An empty submission previously fell through to the
+    // fallback score=2.0 branch and still paid ~25% of the reward.
+    const hasChecklist = Array.isArray(checklist_results) && checklist_results.length > 0;
+    const hasQuestionnaire = Array.isArray(questionnaire_answers) && questionnaire_answers.length > 0;
+    const hasScenario = Array.isArray(scenario_log) && scenario_log.length > 0;
+    if (!hasChecklist && !hasQuestionnaire && !hasScenario) {
+      res.status(400).json({
+        error: 'Empty report',
+        message: 'At least one of checklist_results, questionnaire_answers, or scenario_log must be non-empty.',
+      });
+      return;
+    }
+
     // Verify tester exists
     const [tester] = await db.select().from(schema.testers).where(eq(schema.testers.walletAddress, tester_addr));
     if (!tester) {
@@ -35,7 +49,9 @@ router.post('/submit', async (req, res) => {
       return;
     }
 
-    // Duplicate submission guard
+    // Fast-path duplicate guard — avoids wasting an LLM call when a
+    // non-concurrent duplicate is submitted. The real safety net is the
+    // UNIQUE (tester_addr, test_id) index enforced at INSERT time below.
     const [existingReport] = await db.select({ id: schema.testReports.id })
       .from(schema.testReports)
       .where(and(
@@ -90,8 +106,11 @@ router.post('/submit', async (req, res) => {
 
     console.log(`[Report] Quality: ${quality.score}/5.0 (${rewardTier}), Reward: $${quality.rewardUsdc}/${baseReward}, Rejected: ${quality.rejected}, Reason: ${quality.reason}`);
 
-    // Create report (even if rejected, for record)
-    const [report] = await db.insert(schema.testReports).values({
+    // Create report (even if rejected, for record). onConflictDoNothing
+    // catches the SELECT→INSERT race: if a concurrent request already
+    // inserted, inserted.length === 0 and we return 409 without charging
+    // anyone or decrementing budget.
+    const inserted = await db.insert(schema.testReports).values({
       testerAddr: tester_addr,
       testId: test_id,
       checklistResults: checklist_results || [],
@@ -100,7 +119,17 @@ router.post('/submit', async (req, res) => {
       qualityScore: quality.score,
       isPersonaTest: false,
       screenshots: screenshots || [],
-    }).returning();
+    })
+      .onConflictDoNothing({
+        target: [schema.testReports.testerAddr, schema.testReports.testId],
+      })
+      .returning();
+
+    if (inserted.length === 0) {
+      res.status(409).json({ error: 'Report already submitted for this test' });
+      return;
+    }
+    const [report] = inserted;
 
     // If rejected → no payment, no testsDone increment
     if (quality.rejected) {

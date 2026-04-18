@@ -115,20 +115,32 @@ router.post('/register', async (req, res) => {
       }
     }
 
-    // Check if already exists
-    const existing = await db.select().from(schema.testers).where(eq(schema.testers.walletAddress, wallet_address));
-    if (existing.length > 0) {
-      res.status(409).json({ error: 'Tester already registered', tester: existing[0] });
+    // Atomic upsert-or-fail: single INSERT with PK conflict skip.
+    // Needed because two concurrent /register requests for the same
+    // wallet could both pass a prior SELECT check and both INSERT —
+    // the second would PK-fail without a clear error path.
+    const inserted = await db
+      .insert(schema.testers)
+      .values({
+        walletAddress: wallet_address,
+        displayName: display_name,
+        profile: profile || null,
+      })
+      .onConflictDoNothing({ target: schema.testers.walletAddress })
+      .returning();
+
+    if (inserted.length === 0) {
+      // Row already existed — return 409 with current record so the
+      // client can treat it like an idempotent re-register.
+      const [existing] = await db
+        .select()
+        .from(schema.testers)
+        .where(eq(schema.testers.walletAddress, wallet_address));
+      res.status(409).json({ error: 'Tester already registered', tester: existing });
       return;
     }
 
-    const [tester] = await db.insert(schema.testers).values({
-      walletAddress: wallet_address,
-      displayName: display_name,
-      profile: profile || null,
-    }).returning();
-
-    res.status(201).json(tester);
+    res.status(201).json(inserted[0]);
   } catch (error) {
     console.error('[POST /api/tester/register]', error);
     res.status(500).json({ error: 'Internal server error' });
