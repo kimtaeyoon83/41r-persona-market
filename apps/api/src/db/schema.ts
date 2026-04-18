@@ -124,6 +124,28 @@ export const personas = pgTable('personas', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// ─── Persona Versions (append-only history) ─────────
+// Every time a persona is (re)computed from a fresh report set, we
+// append a row here with the resulting vector and the reports it was
+// built from. ``personas`` keeps the current snapshot for fast lookups;
+// ``persona_versions`` provides the audit trail needed for the
+// calibration-flywheel hypothesis (see docs/pivot-strategy.md §3.1).
+export const personaVersions = pgTable('persona_versions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  personaId: uuid('persona_id').notNull().references(() => personas.id),
+  testerAddr: varchar('tester_addr', { length: 64 }).notNull().references(() => testers.walletAddress),
+  versionNum: integer('version_num').notNull(), // 1, 2, 3, ... per personaId
+  vector: jsonb('vector').notNull(), // same shape as personas.vector
+  sourceReportIds: jsonb('source_report_ids').$type<string[]>().notNull().default([]),
+  qualityScoreAvg: real('quality_score_avg'), // avg of sourceReports at time of computation
+  trigger: varchar('trigger', { length: 32 }).notNull().default('manual'), // 'manual' | 'report_submit' | 'admin'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  // Look-up "give me the history for persona X in order" is the common
+  // read pattern; a composite index is cheaper than two separate ones.
+  personaVersionIdx: uniqueIndex('persona_versions_persona_version_uniq').on(t.personaId, t.versionNum),
+}));
+
 // ─── Settlements ─────────────────────────────────────
 export const settlements = pgTable('settlements', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -134,7 +156,13 @@ export const settlements = pgTable('settlements', {
   amountToken: real('amount_token').notNull(),
   feeCollected: real('fee_collected').default(0),
   hookTxSig: text('hook_tx_sig'),
+  // txSignature uses string prefixes as state: 'pending_<ts>' for
+  // queued retries, 'failed_<ts>' once retries are exhausted, any other
+  // value is the real Solana signature. The background worker
+  // (services/settlement-worker.ts) scans for 'pending_' rows.
   txSignature: text('tx_signature'),
+  retryCount: integer('retry_count').notNull().default(0),
+  lastRetryAt: timestamp('last_retry_at'),
   settlementType: varchar('settlement_type', { length: 20 }).notNull().default('usdc'), // usdc | 41r
   settledAt: timestamp('settled_at').defaultNow().notNull(),
 });

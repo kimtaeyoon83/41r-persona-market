@@ -14,6 +14,7 @@ import {
   createX402Middleware,
   createFallbackPaymentMiddleware,
 } from './middleware/x402.js';
+import { startSettlementWorker } from './services/settlement-worker.js';
 
 dotenv.config({ path: '../../.env' });
 // In production (Docker), env vars are injected directly — dotenv is a no-op
@@ -68,6 +69,13 @@ if (process.env.NODE_ENV !== 'production') {
 
 app.listen(PORT, () => {
   console.log(`[api] listening on http://localhost:${PORT}`);
+
+  // Kick off the settlement retry worker. Safe to call at boot even if
+  // no pending rows exist — the first tick is a no-op in that case.
+  // Disable with SETTLEMENT_WORKER_DISABLED=1 (e.g. during tests).
+  if (process.env.SETTLEMENT_WORKER_DISABLED !== '1') {
+    startSettlementWorker();
+  }
 });
 
 export default app;

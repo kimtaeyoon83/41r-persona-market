@@ -227,6 +227,29 @@ router.post('/submit', async (req, res) => {
       persona_triggered: personaTriggered,
       rejected: false,
     });
+
+    // Fire-and-forget persona recompute. Response is already sent, so
+    // the tester doesn't wait on the LLM call; failures only land in
+    // logs. recomputePersona no-ops when testsDone < 3 so early reports
+    // are free. See services/persona.ts for the full pipeline.
+    if (newTestsDone >= 3) {
+      setImmediate(() => {
+        (async () => {
+          try {
+            const { recomputePersona } = await import('../services/persona.js');
+            const result = await recomputePersona(tester_addr, 'report_submit');
+            if (result) {
+              console.log(
+                `[persona] recomputed ${tester_addr.slice(0, 8)}… → v${result.versionNum}` +
+                `${result.isFirstVersion ? ' (first)' : ''}${result.sasOnChain ? ' on-chain' : ' demo'}`,
+              );
+            }
+          } catch (err) {
+            console.error('[persona] async recompute failed:', err instanceof Error ? err.message : err);
+          }
+        })();
+      });
+    }
   } catch (error) {
     console.error('[POST /api/report/submit]', error);
     res.status(500).json({ error: 'Internal server error' });
