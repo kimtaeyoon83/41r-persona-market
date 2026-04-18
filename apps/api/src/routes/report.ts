@@ -2,6 +2,15 @@ import { Router, type Router as RouterType } from 'express';
 import { eq, and } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { calculateQualityScore, QualityScoreTimeout, type QualityResult } from '../services/llm.js';
+import {
+  buildConfusionMatrix,
+  computePerItemAgreement,
+  convergenceCurve,
+  ksStatistic,
+  pearson,
+  spearman,
+  type ChecklistStatus,
+} from '../services/comparison.js';
 import type { SubmitReportRequest } from '@41rpm/shared';
 
 const router: RouterType = Router();
@@ -344,33 +353,43 @@ router.get('/test/:testId', async (req, res) => {
   }
 });
 
-// GET /api/reports/compare/:testId — Compare manual vs persona reports for a test
+// GET /api/reports/compare/:testId — AI persona vs human comparison
+// powering the investor dashboard (docs/persona-engine-integration-
+// gaps.md context). Returns per-item checklist agreement, quality-score
+// correlation, questionnaire-rating distribution similarity, and the
+// N-based convergence curve that shows persona means approaching
+// human means as sample size grows.
 router.get('/compare/:testId', async (req, res) => {
   try {
     const { testId } = req.params;
-    const allReports = await db.select().from(schema.testReports).where(eq(schema.testReports.testId, testId));
+    const reports = await db.select().from(schema.testReports).where(eq(schema.testReports.testId, testId));
 
-    // Exclude rejected reports (qualityScore < 1.5) from comparison
-    const reports = allReports.filter(r => (r.qualityScore ?? 0) >= 1.5);
-
+    // The comparison endpoint used to filter reports with quality_score
+    // < 1.5 ("rejected"), which made sense for a "show me useful
+    // reports" view but hides persona runs whose whole story is a low
+    // score. The experiment dashboard needs every sample from both
+    // sides — low scores are a legitimate datapoint for "does persona
+    // give up where humans give up?". Callers who want a curated view
+    // should filter client-side.
     if (reports.length === 0) {
-      res.status(404).json({ error: 'No valid reports found for this test' });
+      res.status(404).json({ error: 'No reports found for this test' });
       return;
     }
 
     const manual = reports.filter(r => !r.isPersonaTest);
     const persona = reports.filter(r => r.isPersonaTest);
 
-    // Aggregate stats
     const avg = (arr: number[]) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+    const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+    // ─── Aggregate headline numbers (unchanged; dashboard keeps using these) ──
     const manualScores = manual.map(r => r.qualityScore || 0);
     const personaScores = persona.map(r => r.qualityScore || 0);
 
-    // Count checklist issues
-    const countIssues = (reports: typeof manual) => {
+    const countIssues = (rs: typeof manual) => {
       let passed = 0, failed = 0, blocked = 0;
-      for (const r of reports) {
-        const results = r.checklistResults as Array<{ status: string }> || [];
+      for (const r of rs) {
+        const results = (r.checklistResults as Array<{ status: string }> | null) || [];
         for (const c of results) {
           if (c.status === 'passed') passed++;
           else if (c.status === 'failed') failed++;
@@ -379,6 +398,71 @@ router.get('/compare/:testId', async (req, res) => {
       }
       return { passed, failed, blocked };
     };
+
+    // ─── Per-item checklist agreement + confusion matrix ───────────────
+    const manualChecklists = manual.map((r) =>
+      (r.checklistResults as Array<{ id: string; status: ChecklistStatus }> | null) || [],
+    );
+    const personaChecklists = persona.map((r) =>
+      (r.checklistResults as Array<{ id: string; status: ChecklistStatus }> | null) || [],
+    );
+    const { items: itemAgreement, overallAgreementRate } =
+      computePerItemAgreement(manualChecklists, personaChecklists);
+    const confusion = buildConfusionMatrix(itemAgreement);
+
+    // ─── Quality-score correlation ────────────────────────────────────
+    // Pair by tester_addr so a persona run is compared to the same
+    // tester's manual run (both sides ideally evaluated the same site).
+    const manualByTester = new Map<string, number>();
+    for (const r of manual) manualByTester.set(r.testerAddr, r.qualityScore ?? 0);
+    const pairedManual: number[] = [];
+    const pairedPersona: number[] = [];
+    for (const p of persona) {
+      const m = manualByTester.get(p.testerAddr);
+      if (typeof m === 'number') {
+        pairedManual.push(m);
+        pairedPersona.push(p.qualityScore ?? 0);
+      }
+    }
+    const correlation = {
+      pearson: round3(pearson(pairedManual, pairedPersona)),
+      spearman: round3(spearman(pairedManual, pairedPersona)),
+      paired_count: pairedManual.length,
+    };
+
+    // ─── Rating distribution (rating_1_5 questionnaire items) ─────────
+    // We sample a numeric rating from each report's first rating answer
+    // and compute a KS statistic. For N<10 this is noisy but still a
+    // useful direction indicator.
+    const extractRatings = (rs: typeof manual): number[] => {
+      const out: number[] = [];
+      for (const r of rs) {
+        const answers = (r.questionnaireAnswers as Array<{ id: string; answer: string | number }> | null) || [];
+        for (const a of answers) {
+          if (typeof a.answer === 'number' && a.answer >= 1 && a.answer <= 10) {
+            out.push(a.answer);
+            break; // only first numeric rating per report
+          }
+        }
+      }
+      return out;
+    };
+    const manualRatings = extractRatings(manual);
+    const personaRatings = extractRatings(persona);
+    const ratingDistribution = {
+      ks_statistic: round3(ksStatistic(manualRatings, personaRatings)),
+      manual_count: manualRatings.length,
+      persona_count: personaRatings.length,
+      manual_mean: round3(avg(manualRatings)),
+      persona_mean: round3(avg(personaRatings)),
+    };
+
+    // ─── Convergence curve ────────────────────────────────────────────
+    // "As N grows, persona mean approaches human mean." Samples reports
+    // in chronological order so the curve mirrors a live event.
+    const manualSorted = [...manualScores].slice(0, Math.min(manualScores.length, personaScores.length));
+    const personaSorted = [...personaScores].slice(0, Math.min(manualScores.length, personaScores.length));
+    const convergence = convergenceCurve(manualSorted, personaSorted);
 
     res.json({
       test_id: testId,
@@ -393,6 +477,14 @@ router.get('/compare/:testId', async (req, res) => {
         reports: persona,
         avg_quality: Math.round(avg(personaScores) * 10) / 10,
         issues: countIssues(persona),
+      },
+      comparison: {
+        item_agreement_rate: round3(overallAgreementRate),
+        item_agreement: itemAgreement,
+        confusion_matrix: confusion,
+        correlation,
+        rating_distribution: ratingDistribution,
+        convergence,
       },
     });
   } catch (error) {
