@@ -46,3 +46,8 @@ __pycache__/
 .venv/
 *.egg-info/
 .pytest_cache/
+
+# LLM usage tracking (runtime data)
+/tmp/llm-usage.jsonl
+apps/persona-engine/sample-usage.jsonl
+*.usage.jsonl

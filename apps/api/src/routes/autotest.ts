@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { Connection } from '@solana/web3.js';
 import { db, schema } from '../db/index.js';
 import { startAutoTest, getAutoTestStatus } from '../services/autotest.js';
+import { withRequestId } from '../services/anthropic_client.js';
 import {
   isEngineEnabled,
   runAutoTestWithEngine,
@@ -115,11 +116,13 @@ router.post('/run', async (req, res) => {
     if (isEngineEnabled()) {
       const mode = ((req.body.mode as string) === 'text' ? 'text' : 'browser') as 'text' | 'browser';
       try {
-        const result = await runAutoTestAndPersist({
-          testId: test_id,
-          personaId: persona_id,
-          mode,
-        });
+        // Tag every Anthropic call this request makes with a stable
+        // request_id so scripts/usage-summary.ts can roll up "how many
+        // tokens did one /autotest/run burn?".
+        const result = await withRequestId(
+          `autotest:${test_id.slice(0, 8)}:${persona_id.slice(0, 8)}`,
+          () => runAutoTestAndPersist({ testId: test_id, personaId: persona_id, mode }),
+        );
         res.json({
           job_id: result.reportId,
           status: 'completed',

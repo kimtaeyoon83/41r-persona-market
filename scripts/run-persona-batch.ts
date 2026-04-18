@@ -27,6 +27,10 @@ const { Client } = pg;
 const API_URL = process.env.API_URL || 'http://localhost:4100';
 const DB_URL = process.env.DATABASE_URL;
 const CONCURRENCY = Number(process.env.CONCURRENCY ?? 2);
+// --limit N truncates to the first N pairs — useful for token-tracking
+// experiments where you don't want to burn the full 40-run batch.
+const LIMIT_IDX = process.argv.indexOf('--limit');
+const LIMIT = LIMIT_IDX >= 0 ? Number(process.argv[LIMIT_IDX + 1] || '0') : 0;
 
 if (!DB_URL) {
   console.error('DATABASE_URL required');
@@ -139,8 +143,13 @@ async function main() {
   const db = new Client({ connectionString: DB_URL });
   await db.connect();
   try {
-    const pairs = await listMissingPairs(db);
-    console.log(`[batch] ${pairs.length} missing (persona, test) pairs to run`);
+    let pairs = await listMissingPairs(db);
+    const total = pairs.length;
+    if (LIMIT > 0 && total > LIMIT) {
+      pairs = pairs.slice(0, LIMIT);
+      console.log(`[batch] truncating to first ${LIMIT} of ${total} missing pairs (--limit)`);
+    }
+    console.log(`[batch] ${pairs.length} (persona, test) pairs to run`);
     if (pairs.length === 0) {
       console.log('[batch] nothing to do');
       await printComparisonForEachTest(db);

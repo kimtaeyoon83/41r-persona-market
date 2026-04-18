@@ -1,8 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import type { GeneratedTestCases, PersonaVector } from '@41rpm/shared';
-
-const client = new Anthropic();
+import { client, withRoute } from './anthropic_client.js';
 
 const SONNET = process.env.CLAUDE_SONNET_MODEL || 'claude-sonnet-4-6';
 const HAIKU = process.env.CLAUDE_HAIKU_MODEL || 'claude-haiku-4-5-20251001';
@@ -198,11 +197,11 @@ ${hasCustomRequirements ? `- At least 1-2 questions MUST specifically address th
 Return ONLY the JSON, wrapped in \`\`\`json code block.`,
   });
 
-  const response = await client.messages.create({
+  const response = await withRoute('test_cases', () => client.messages.create({
     model: SONNET,
     max_tokens: 8192,
     messages: [{ role: 'user', content }],
-  });
+  }));
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
   const parsed = parseJsonSafe(text);
@@ -288,11 +287,11 @@ IMPORTANT: Use the profile's demographic data (age_range, region, occupation, cr
 
 Return ONLY the JSON, wrapped in \`\`\`json code block.`;
 
-  const response = await client.messages.create({
+  const response = await withRoute('persona_vector', () => client.messages.create({
     model: SONNET,
     max_tokens: 1500,
     messages: [{ role: 'user', content: prompt }],
-  });
+  }));
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
   const parsed = parseJsonSafe(text);
@@ -413,11 +412,11 @@ CRITICAL RULES:
 - NEVER write generic feedback like "the site works well" or "overall good experience". Be detailed and opinionated.`,
   });
 
-  const response = await client.messages.create({
+  const response = await withRoute('autotest_report', () => client.messages.create({
     model: SONNET,
     max_tokens: 4096,
     messages: [{ role: 'user', content }],
-  });
+  }));
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
   const parsed = parseJsonSafe(text);
@@ -465,7 +464,7 @@ export async function calculateQualityScore(
   report: Record<string, unknown>,
 ): Promise<QualityResult> {
   const started = Date.now();
-  const response = await client.messages.create({
+  const response = await withRoute('quality_judge', () => client.messages.create({
     model: HAIKU,
     max_tokens: 300,
     messages: [{
@@ -510,7 +509,7 @@ Return ONLY valid JSON:
       throw new QualityScoreTimeout(elapsed);
     }
     throw err;
-  });
+  }));
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
   try {
@@ -589,7 +588,7 @@ function heuristicQualityScore(report: Record<string, unknown>): QualityResult {
 
 // ─── Keyword Extraction (Haiku - fast) ───────────────
 export async function extractKeywords(text: string): Promise<string[]> {
-  const response = await client.messages.create({
+  const response = await withRoute('keywords', () => client.messages.create({
     model: HAIKU,
     max_tokens: 200,
     messages: [{
@@ -598,7 +597,7 @@ export async function extractKeywords(text: string): Promise<string[]> {
 Text: ${text}
 Return ONLY: ["keyword1", "keyword2", ...]`,
     }],
-  });
+  }));
 
   const respText = response.content[0].type === 'text' ? response.content[0].text : '[]';
   return parseJsonSafe(respText);
@@ -696,11 +695,11 @@ Return as JSON array:
 ]
 \`\`\``;
 
-  const response = await client.messages.create({
+  const response = await withRoute('persona_actions', () => client.messages.create({
     model: HAIKU,
     max_tokens: 1000,
     messages: [{ role: 'user', content: prompt }],
-  });
+  }));
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '[]';
   try {

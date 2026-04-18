@@ -72,6 +72,13 @@ from adapters.questionnaire_generator import answer_questionnaire  # noqa: E402
 from adapters.tester_to_soul import TesterProfile, tester_profile_to_soul_with_traits  # noqa: E402
 from report_generator import generate_structured_report  # noqa: E402
 from scorers import compute_quality_score  # noqa: E402
+from usage_logger import install_tracking, set_service, with_request_id, with_route  # noqa: E402
+
+# Turn on Anthropic usage logging for every LLM call the engine makes —
+# covers persona_agent's internal provider_router too, since we patch
+# the SDK at the class level.
+install_tracking()
+set_service("persona-engine")
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
@@ -214,8 +221,13 @@ def _run_session_job(job_id: str, req: AnalysisRequest) -> None:
     computed."""
     assert _job_store is not None
     try:
+      # All downstream Anthropic calls made during this job will share
+      # request_id=job_id in the usage log, so scripts/usage-summary.ts
+      # can ask "how many LLM calls did one /analyses/run cost?".
+      with with_request_id(job_id):
         _job_store.update(job_id, status="running", progress=10)
-        log = run_session(req.persona_id, req.url, req.task, mode=req.mode)
+        with with_route("run_session"):
+            log = run_session(req.persona_id, req.url, req.task, mode=req.mode)
         session_id = getattr(log, "session_id", None)
         shot_paths: list[str] = []
         if session_id and req.mode == "browser":
@@ -229,27 +241,32 @@ def _run_session_job(job_id: str, req: AnalysisRequest) -> None:
         scored = None
         if req.checklist:
             checklist_raw = [c.model_dump() for c in req.checklist]
-            scored = score_checklist(checklist_raw, log, use_llm=True)
+            with with_route("checklist"):
+                scored = score_checklist(checklist_raw, log, use_llm=True)
             checklist_dicts = [r.to_dict() for r in scored]
-            breakdown = compute_quality_score(log, req.persona_id, scored)
+            with with_route("quality_score"):
+                breakdown = compute_quality_score(log, req.persona_id, scored)
         else:
             # No checklist → still compute a faithfulness/outcome-only score
             # so callers always get a single headline number.
-            breakdown = compute_quality_score(log, req.persona_id, None)
+            with with_route("quality_score"):
+                breakdown = compute_quality_score(log, req.persona_id, None)
         quality_score = breakdown.quality_score
         quality_breakdown = breakdown.to_dict()
 
         questionnaire_dicts: list[dict] = []
         if req.questionnaire:
             q_items = [q.model_dump() for q in req.questionnaire]
-            answers = answer_questionnaire(q_items, log, req.persona_id, use_llm=True)
+            with with_route("questionnaire"):
+                answers = answer_questionnaire(q_items, log, req.persona_id, use_llm=True)
             questionnaire_dicts = [a.to_dict() for a in answers]
 
         report_dict: dict = {}
         if req.generate_report:
-            report = generate_structured_report(
-                log, req.persona_id, scored, use_llm=True,
-            )
+            with with_route("structured_report"):
+                report = generate_structured_report(
+                    log, req.persona_id, scored, use_llm=True,
+                )
             report_dict = report.to_dict()
 
         _job_store.update(job_id,
