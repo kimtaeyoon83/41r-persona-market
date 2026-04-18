@@ -1,6 +1,12 @@
 import { Router, type Router as RouterType } from 'express';
+import { eq } from 'drizzle-orm';
 import { Connection } from '@solana/web3.js';
+import { db, schema } from '../db/index.js';
 import { startAutoTest, getAutoTestStatus } from '../services/autotest.js';
+import {
+  isEngineEnabled,
+  runAutoTestWithEngine,
+} from '../services/persona_engine.js';
 
 const router: RouterType = Router();
 
@@ -100,6 +106,43 @@ router.post('/run', async (req, res) => {
 
     console.log(`[autotest] Payment verified: ${payment_tx}`);
 
+    // When USE_PERSONA_ENGINE=1, route through the persona-engine HTTP
+    // service (soul-based agent loop + structured report) instead of
+    // the legacy Stagehand pipeline. Synchronous in this branch —
+    // engine.waitForResult handles polling internally. Text mode is
+    // fast (~15s); browser mode can take ~2min, so scripted batch runs
+    // should control concurrency client-side.
+    if (isEngineEnabled()) {
+      const mode = ((req.body.mode as string) === 'text' ? 'text' : 'browser') as 'text' | 'browser';
+      try {
+        const result = await runAutoTestAndPersist({
+          testId: test_id,
+          personaId: persona_id,
+          mode,
+        });
+        res.json({
+          job_id: result.reportId,
+          status: 'completed',
+          payment_tx,
+          engine: true,
+          mode,
+          report_id: result.reportId,
+          outcome: result.outcome,
+          quality_score: result.qualityScore,
+          screenshots: result.screenshotUrls,
+          session_id: result.sessionId,
+        });
+        return;
+      } catch (engineErr) {
+        console.error('[autotest] engine run failed:', engineErr);
+        res.status(500).json({
+          error: 'engine_run_failed',
+          details: engineErr instanceof Error ? engineErr.message : String(engineErr),
+        });
+        return;
+      }
+    }
+
     const job = await startAutoTest(test_id, persona_id);
     res.json({
       job_id: job.id,
@@ -112,6 +155,106 @@ router.post('/run', async (req, res) => {
     res.status(500).json({ error: 'Failed to start auto test' });
   }
 });
+
+/**
+ * Run a persona-engine-backed autotest and persist the result to
+ * ``test_reports``. Mirrors the Stagehand path's write shape so
+ * ``/api/reports/compare/:testId`` can treat both sources
+ * interchangeably for the AI-vs-human comparison dashboard.
+ */
+async function runAutoTestAndPersist(args: {
+  testId: string;
+  personaId: string;
+  mode: 'text' | 'browser';
+}): Promise<{
+  reportId: string;
+  outcome: string;
+  qualityScore: number | null;
+  screenshotUrls: string[];
+  sessionId: string | null;
+}> {
+  const [test] = await db.select().from(schema.tests).where(eq(schema.tests.id, args.testId));
+  if (!test) throw new Error(`test ${args.testId} not found`);
+
+  const [persona] = await db.select().from(schema.personas)
+    .where(eq(schema.personas.id, args.personaId));
+  if (!persona) throw new Error(`persona ${args.personaId} not found`);
+
+  const [tester] = await db.select().from(schema.testers)
+    .where(eq(schema.testers.walletAddress, persona.testerAddr));
+
+  // Load the checklist + questionnaire the humans saw, so both paths
+  // evaluate the same items (crucial for the dashboard comparison).
+  const cases = await db.select().from(schema.testCases)
+    .where(eq(schema.testCases.testId, args.testId));
+  const checklist = cases
+    .filter((c) => c.type === 'checklist')
+    .map((c) => c.content as { id: string; task: string; expected?: string });
+  const questionnaire = cases
+    .filter((c) => c.type === 'questionnaire')
+    .map((c) => c.content as {
+      id: string;
+      question: string;
+      type?: 'rating_1_5' | 'rating_1_10' | 'free_text';
+    });
+
+  const engineResult = await runAutoTestWithEngine({
+    personaId: args.personaId,
+    testerProfile: (tester?.profile ?? {}) as Record<string, unknown>,
+    url: test.targetUrl,
+    task: test.requirements || `Evaluate the UX at ${test.targetUrl}`,
+    mode: args.mode,
+    checklist,
+    questionnaire,
+    generateReport: true,
+  });
+
+  // Persist to test_reports with isPersonaTest=true so the compare
+  // endpoint can partition manual vs persona runs. structured_report +
+  // quality_breakdown live in questionnaireAnswers-adjacent jsonb —
+  // we store them in scenarioLog.uxFeedback-style convention pending
+  // a dedicated column. For MVP, append structured_report into the
+  // questionnaire_answers free-text slot under a sentinel id.
+  const enrichedAnswers = [
+    ...engineResult.questionnaireAnswers,
+    ...(Object.keys(engineResult.structuredReport).length > 0
+      ? [{ id: '_structured_report', answer: JSON.stringify(engineResult.structuredReport) }]
+      : []),
+    ...(Object.keys(engineResult.qualityBreakdown).length > 0
+      ? [{ id: '_quality_breakdown', answer: JSON.stringify(engineResult.qualityBreakdown) }]
+      : []),
+  ];
+
+  const [inserted] = await db.insert(schema.testReports).values({
+    testerAddr: persona.testerAddr,
+    testId: args.testId,
+    checklistResults: engineResult.checklistResults.map((r) => ({
+      id: r.id, status: r.status, memo: r.memo,
+    })),
+    scenarioLog: [],
+    questionnaireAnswers: enrichedAnswers,
+    qualityScore: engineResult.qualityScore,
+    isPersonaTest: true,
+    screenshots: engineResult.screenshotUrls,
+  }).onConflictDoNothing({
+    target: [schema.testReports.testerAddr, schema.testReports.testId],
+  }).returning();
+
+  if (!inserted) {
+    throw new Error(
+      `persona ${args.personaId} already has a report for test ${args.testId}` +
+      ` — /reports/compare uses (testerAddr, testId) pairs, pick a different persona`,
+    );
+  }
+
+  return {
+    reportId: inserted.id,
+    outcome: engineResult.outcome,
+    qualityScore: engineResult.qualityScore,
+    screenshotUrls: engineResult.screenshotUrls,
+    sessionId: engineResult.sessionId,
+  };
+}
 
 // GET /api/autotest/status/:jobId — Get job status
 router.get('/status/:jobId', async (req, res) => {

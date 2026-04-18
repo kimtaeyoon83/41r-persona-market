@@ -40,6 +40,63 @@ export interface JobResponse {
   progress: number;
 }
 
+export interface ChecklistInput {
+  id: string;
+  task: string;
+  expected?: string;
+}
+
+export interface QuestionnaireInput {
+  id: string;
+  question: string;
+  type?: 'rating_1_5' | 'rating_1_10' | 'free_text';
+}
+
+export interface ChecklistResult {
+  id: string;
+  status: 'passed' | 'failed' | 'blocked';
+  memo: string;
+  matched_turn_idx: number | null;
+}
+
+export interface QuestionnaireAnswer {
+  id: string;
+  answer: string | number;
+}
+
+export interface UxScores {
+  clarity: number;
+  trust: number;
+  efficiency: number;
+  overall: number;
+}
+
+export interface PainPoint {
+  severity: 'high' | 'medium' | 'low';
+  description: string;
+  evidence_turn: number | null;
+}
+
+export interface StructuredReport {
+  summary: string;
+  ux_scores: UxScores;
+  pain_points: PainPoint[];
+  positive_signals: string[];
+  recommendations: string[];
+  persona_id: string;
+  session_id: string;
+}
+
+export interface QualityBreakdown {
+  quality_score: number;
+  raw_score: number;
+  persona_faithfulness: number;
+  outcome_weight: number;
+  checklist_pass_rate: number;
+  has_predicates: boolean;
+  weights: { faithfulness: number; outcome: number; checklist: number };
+}
+
 export interface JobResult {
   job_id: string;
   status: JobStatus;
@@ -58,6 +115,16 @@ export interface JobResult {
    * itself does not upload.
    */
   screenshot_paths: string[];
+  /** Per-checklist-item verdict — empty when no checklist was submitted. */
+  checklist_results: ChecklistResult[];
+  /** 1..5 aggregate derived from outcome + checklist + persona faithfulness. */
+  quality_score: number | null;
+  /** Sub-metrics that fed quality_score (for persistence / debugging). */
+  quality_breakdown: QualityBreakdown | Record<string, never>;
+  /** Persona-voiced answers for each questionnaire item. */
+  questionnaire_answers: QuestionnaireAnswer[];
+  /** Full UX report (ux_scores + pain_points + recommendations). */
+  structured_report: StructuredReport | Record<string, never>;
 }
 
 export interface AnalysisRequest {
@@ -65,6 +132,20 @@ export interface AnalysisRequest {
   url: string;
   task: string;
   mode?: RunMode;
+  /**
+   * Checklist items the persona should evaluate against the session.
+   * Results come back as ``JobResult.checklist_results``.
+   */
+  checklist?: ChecklistInput[];
+  /**
+   * Questionnaire items for the persona to answer in character.
+   * Answers come back as ``JobResult.questionnaire_answers``.
+   */
+  questionnaire?: QuestionnaireInput[];
+  /**
+   * When true, the engine additionally produces a StructuredReport.
+   */
+  generate_report?: boolean;
 }
 
 export interface CohortAnalysisRequest {
@@ -128,7 +209,12 @@ export class PersonaEngineClient {
   }
 
   async submitAnalysis(req: AnalysisRequest): Promise<JobResponse> {
-    return this.request('POST', '/analyses', { mode: 'text', ...req });
+    // Default mode is "browser" to match the engine (previously defaulted
+    // to "text" here, causing a silent mismatch: callers that wanted a
+    // real Playwright session got LLM-only predictions unless they set
+    // mode explicitly). checklist/questionnaire/generate_report are
+    // forwarded as-is; engine treats missing arrays as empty.
+    return this.request('POST', '/analyses', { mode: 'browser', ...req });
   }
 
   async submitCohort(req: CohortAnalysisRequest): Promise<JobResponse> {

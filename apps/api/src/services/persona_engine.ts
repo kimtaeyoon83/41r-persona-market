@@ -9,7 +9,18 @@
  * 전환 전략: 새 autotest 요청은 env flag (`USE_PERSONA_ENGINE=1`)일 때 이
  * 서비스로 라우팅. 기본은 기존 Stagehand 경로 유지.
  */
-import { PersonaEngineClient, type TesterProfile, type JobResult } from '@41rpm/persona-client';
+import {
+  PersonaEngineClient,
+  type AnalysisRequest,
+  type ChecklistInput,
+  type ChecklistResult,
+  type JobResult,
+  type QualityBreakdown,
+  type QuestionnaireAnswer,
+  type QuestionnaireInput,
+  type StructuredReport,
+  type TesterProfile,
+} from '@41rpm/persona-client';
 import { uploadToR2 } from './r2.js';
 
 const ENGINE_URL = process.env.PERSONA_ENGINE_URL ?? 'http://persona-engine:4200';
@@ -38,6 +49,17 @@ export interface RunAutoTestArgs {
   task: string;
   /** Max wait before giving up. Defaults 10min. */
   maxWaitMs?: number;
+  /**
+   * browser: real Playwright session with screenshots (~2min, expensive).
+   * text: LLM-only prediction (~10s, no screenshots).
+   */
+  mode?: 'browser' | 'text';
+  /** Checklist items to have the persona evaluate. */
+  checklist?: ChecklistInput[];
+  /** Questionnaire items for the persona to answer in character. */
+  questionnaire?: QuestionnaireInput[];
+  /** Ask the engine to also produce a structured UX report. */
+  generateReport?: boolean;
 }
 
 export interface AutoTestResult {
@@ -48,6 +70,16 @@ export interface AutoTestResult {
   sessionId: string | null;
   /** R2 URLs after upload (ready for test_reports.screenshots[]). */
   screenshotUrls: string[];
+  /** Per-item checklist verdict (empty when no checklist was submitted). */
+  checklistResults: ChecklistResult[];
+  /** 1..5 aggregate score. */
+  qualityScore: number | null;
+  /** Sub-metrics that fed qualityScore. */
+  qualityBreakdown: QualityBreakdown | Record<string, never>;
+  /** Persona-voiced questionnaire answers. */
+  questionnaireAnswers: QuestionnaireAnswer[];
+  /** Full UX report (pain_points, recommendations, ux_scores). */
+  structuredReport: StructuredReport | Record<string, never>;
   /** Raw engine response for audit. */
   raw: JobResult;
 }
@@ -81,20 +113,27 @@ export async function runAutoTestWithEngine(
     });
   }
 
-  // 2. Submit + wait
-  const { job_id } = await c.submitAnalysis({
+  // 2. Submit + wait. Forward checklist/questionnaire/generate_report
+  // so the engine returns scoring + structured report in the same job.
+  const analysisReq: AnalysisRequest = {
     persona_id: args.personaId,
     url: args.url,
     task: args.task,
-  });
+    mode: args.mode ?? 'browser',
+    checklist: args.checklist,
+    questionnaire: args.questionnaire,
+    generate_report: args.generateReport ?? false,
+  };
+  const { job_id } = await c.submitAnalysis(analysisReq);
   const result = await c.waitForResult(job_id, {
     maxWaitMs: args.maxWaitMs ?? 10 * 60_000,
     pollIntervalMs: 3_000,
   });
 
-  // 3. Fetch + upload screenshots (engine host → R2)
+  // 3. Fetch + upload screenshots (engine host → R2). Only browser mode
+  // produces screenshots; text mode returns [] and we skip the loop.
   const screenshotUrls: string[] = [];
-  if (result.session_id) {
+  if (result.session_id && (args.mode ?? 'browser') === 'browser') {
     const { filenames } = await c.listSessionScreenshots(result.session_id);
     for (const fn of filenames) {
       try {
@@ -114,6 +153,11 @@ export async function runAutoTestWithEngine(
     durationSec: result.duration_sec,
     sessionId: result.session_id,
     screenshotUrls,
+    checklistResults: result.checklist_results ?? [],
+    qualityScore: result.quality_score,
+    qualityBreakdown: result.quality_breakdown ?? {},
+    questionnaireAnswers: result.questionnaire_answers ?? [],
+    structuredReport: result.structured_report ?? {},
     raw: result,
   };
 }
