@@ -66,8 +66,12 @@ from persona_agent.lowlevel import (  # noqa: E402
     run_session,
 )
 
+from adapters.checklist_adapter import score_checklist  # noqa: E402
 from adapters.job_store import JobStore  # noqa: E402
+from adapters.questionnaire_generator import answer_questionnaire  # noqa: E402
 from adapters.tester_to_soul import TesterProfile, tester_profile_to_soul_with_traits  # noqa: E402
+from report_generator import generate_structured_report  # noqa: E402
+from scorers import compute_quality_score  # noqa: E402
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
@@ -113,17 +117,40 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 
 
-class AnalysisRequest(BaseModel):
-    """Single-persona autotest — always browser mode (real Playwright session).
+class ChecklistInput(BaseModel):
+    id: str
+    task: str
+    expected: str = ""
 
-    For multi-persona text-mode prediction, use /cohort-analyses instead.
-    Triggered after 41rpm API has verified USDC payment. `persona_id` must
-    exist in workspace or bundled built-ins.
+
+class QuestionnaireInput(BaseModel):
+    id: str
+    question: str
+    type: Literal["rating_1_5", "rating_1_10", "free_text"] = "free_text"
+
+
+class AnalysisRequest(BaseModel):
+    """Single-persona autotest.
+
+    `mode="browser"` runs a real Playwright session with screenshots (slow,
+    expensive). `mode="text"` runs LLM-only prediction (fast, cheap, no
+    screenshots). Triggered after 41rpm API has verified USDC payment.
+    `persona_id` must exist in workspace or bundled built-ins.
+
+    If ``checklist`` is provided, the engine scores each item against the
+    resulting session log and includes per-item status + an aggregate
+    quality_score (1-5) in the result. ``questionnaire`` items yield
+    persona-voiced answers. ``generate_report=True`` also produces a
+    structured UX report (ux_scores, pain_points, recommendations).
     """
 
     persona_id: str = Field(..., description="e.g. 'p_pragmatic' or 'tester_abc123'")
     url: str
     task: str
+    mode: Literal["text", "browser"] = "browser"
+    checklist: list[ChecklistInput] = Field(default_factory=list)
+    questionnaire: list[QuestionnaireInput] = Field(default_factory=list)
+    generate_report: bool = False
 
 
 class CohortAnalysisRequest(BaseModel):
@@ -163,6 +190,15 @@ class JobResultResponse(BaseModel):
     screenshot_paths: list[str] = []
     # Session id the screenshots belong to (= log.session_id from run_session)
     session_id: str | None = None
+    # Per-item checklist outcome + aggregated 1-5 quality score. Both are
+    # empty/None when the request omits a checklist.
+    checklist_results: list[dict] = []
+    quality_score: int | None = None
+    quality_breakdown: dict = {}
+    # Persona-voiced questionnaire answers (empty if no items submitted).
+    questionnaire_answers: list[dict] = []
+    # Structured UX report (empty dict when generate_report=False).
+    structured_report: dict = {}
 
 
 # ---------------------------------------------------------------------------
@@ -171,15 +207,51 @@ class JobResultResponse(BaseModel):
 
 
 def _run_session_job(job_id: str, req: AnalysisRequest) -> None:
-    """Execute a single-persona browser session in background."""
+    """Execute a single-persona session in background. mode=browser runs a
+    Playwright session with per-turn screenshots; mode=text runs LLM-only
+    prediction with no screenshots. When ``req.checklist`` is non-empty,
+    the session log is scored per-item and an aggregate quality score is
+    computed."""
     assert _job_store is not None
     try:
         _job_store.update(job_id, status="running", progress=10)
-        log = run_session(req.persona_id, req.url, req.task)
+        log = run_session(req.persona_id, req.url, req.task, mode=req.mode)
         session_id = getattr(log, "session_id", None)
         shot_paths: list[str] = []
-        if session_id:
+        if session_id and req.mode == "browser":
             shot_paths = [str(p) for p in list_session_screenshots(session_id)]
+
+        _job_store.update(job_id, status="running", progress=80)
+
+        checklist_dicts: list[dict] = []
+        quality_score: int | None = None
+        quality_breakdown: dict = {}
+        scored = None
+        if req.checklist:
+            checklist_raw = [c.model_dump() for c in req.checklist]
+            scored = score_checklist(checklist_raw, log, use_llm=True)
+            checklist_dicts = [r.to_dict() for r in scored]
+            breakdown = compute_quality_score(log, req.persona_id, scored)
+        else:
+            # No checklist → still compute a faithfulness/outcome-only score
+            # so callers always get a single headline number.
+            breakdown = compute_quality_score(log, req.persona_id, None)
+        quality_score = breakdown.quality_score
+        quality_breakdown = breakdown.to_dict()
+
+        questionnaire_dicts: list[dict] = []
+        if req.questionnaire:
+            q_items = [q.model_dump() for q in req.questionnaire]
+            answers = answer_questionnaire(q_items, log, req.persona_id, use_llm=True)
+            questionnaire_dicts = [a.to_dict() for a in answers]
+
+        report_dict: dict = {}
+        if req.generate_report:
+            report = generate_structured_report(
+                log, req.persona_id, scored, use_llm=True,
+            )
+            report_dict = report.to_dict()
+
         _job_store.update(job_id,
             status="completed", progress=100,
             outcome=getattr(log, "outcome", "task_complete"),
@@ -187,6 +259,11 @@ def _run_session_job(job_id: str, req: AnalysisRequest) -> None:
             duration_sec=getattr(log, "duration_sec", None),
             session_id=session_id,
             screenshot_paths=shot_paths,
+            checklist_results=checklist_dicts,
+            quality_score=quality_score,
+            quality_breakdown=quality_breakdown,
+            questionnaire_answers=questionnaire_dicts,
+            structured_report=report_dict,
         )
     except pa.PersonaAgentError as e:
         logger.exception("job %s failed with PersonaAgentError", job_id)
@@ -305,6 +382,11 @@ def get_result(job_id: str):
         new_observations=job.new_observations,
         session_id=job.session_id,
         screenshot_paths=job.screenshot_paths,
+        checklist_results=job.checklist_results,
+        quality_score=job.quality_score,
+        quality_breakdown=job.quality_breakdown,
+        questionnaire_answers=job.questionnaire_answers,
+        structured_report=job.structured_report,
     )
 
 

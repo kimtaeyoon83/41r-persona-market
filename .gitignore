@@ -41,3 +41,8 @@ ngrok.yml
 npm-debug.log*
 __pycache__/
 .keys/
+
+# Python
+.venv/
+*.egg-info/
+.pytest_cache/

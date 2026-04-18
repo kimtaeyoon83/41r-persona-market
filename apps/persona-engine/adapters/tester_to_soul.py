@@ -5,7 +5,7 @@ conversion picks sensible defaults for missing fields — tuning later.
 """
 from __future__ import annotations
 
-from typing import TypedDict
+from typing_extensions import TypedDict  # py<3.12 compat for pydantic
 
 
 class TesterProfile(TypedDict, total=False):
