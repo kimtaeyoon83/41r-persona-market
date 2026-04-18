@@ -228,8 +228,11 @@ export interface ConvergencePoint {
  * running mean difference at each cut. Shows the "as N grows, persona
  * ≈ human" story.
  *
- * ``steps`` picks which prefix sizes to include. Default: logarithmic
- * progression 10, 20, 50, 100, 200, 500, 1000 (clamped to min(lenA,lenB)).
+ * ``steps`` picks which prefix sizes to include. Default: fine-grained
+ * under N=10 (so the curve is visible at demo scale), then log-spaced
+ * above that — [1, 2, 3, 5, 10, 20, 50, 100, 200, 500]. All entries
+ * are clamped to ``min(lenA, lenB)`` and the total is appended so the
+ * curve always terminates at the full sample.
  */
 export function convergenceCurve(
   human: number[],
@@ -237,12 +240,15 @@ export function convergenceCurve(
   steps?: number[],
 ): ConvergencePoint[] {
   const maxN = Math.min(human.length, persona.length);
-  const defaultSteps = [10, 20, 50, 100, 200, 500, 1000];
+  const defaultSteps = [1, 2, 3, 5, 10, 20, 50, 100, 200, 500];
   const picks = (steps ?? defaultSteps).filter((n) => n <= maxN);
-  if (picks[picks.length - 1] !== maxN && maxN > 0) picks.push(maxN);
+  if (maxN > 0 && (picks.length === 0 || picks[picks.length - 1] !== maxN)) picks.push(maxN);
+
+  // De-dup in case maxN matched a default step exactly.
+  const uniq = Array.from(new Set(picks)).sort((a, b) => a - b);
 
   const out: ConvergencePoint[] = [];
-  for (const n of picks) {
+  for (const n of uniq) {
     const hMean = mean(human.slice(0, n));
     const pMean = mean(persona.slice(0, n));
     out.push({

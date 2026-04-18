@@ -173,9 +173,17 @@ describe('convergenceCurve', () => {
     expect(last.absDiff).toBeLessThan(first!.absDiff);
   });
 
-  it('returns empty when samples too short for default steps', () => {
+  it('emits fine-grained points under N=5 then the total', () => {
     const pts = convergenceCurve([1, 2, 3], [4, 5, 6]);
-    // only "total" gets appended when no default step fits
-    expect(pts.map((p) => p.n)).toEqual([3]);
+    // defaults include 1,2,3 under maxN=3 and 3 is also the total.
+    expect(pts.map((p) => p.n)).toEqual([1, 2, 3]);
+  });
+
+  it('dedups when maxN matches a default step', () => {
+    const arr = Array.from({ length: 10 }, () => 3);
+    const pts = convergenceCurve(arr, arr);
+    const ns = pts.map((p) => p.n);
+    // must not include 10 twice
+    expect(ns.filter((n) => n === 10)).toHaveLength(1);
   });
 });
