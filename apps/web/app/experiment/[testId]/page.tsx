@@ -48,6 +48,13 @@ interface PerItemAgreement {
   personaVotes: Record<ChecklistStatus, number>;
 }
 
+interface Finding {
+  id: string;
+  severity: 'positive' | 'neutral' | 'negative';
+  headline: string;
+  detail?: string;
+}
+
 interface CompareResponse {
   test_id: string;
   manual: {
@@ -83,6 +90,7 @@ interface CompareResponse {
       persona_mean: number;
     };
     convergence: Array<{ n: number; humanMean: number; personaMean: number; absDiff: number }>;
+    findings?: Finding[];
   };
 }
 
@@ -151,11 +159,19 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
 
   return (
     <div className="max-w-6xl p-6 space-y-8">
-      <header>
-        <h1 className="font-display text-2xl font-bold">AI Persona vs Human — Agreement Dashboard</h1>
-        <p className="text-sm text-[var(--text-secondary)] mt-1 font-mono">
-          test_id: {params.testId}
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-bold">AI Persona vs Human — Agreement Dashboard</h1>
+          <p className="text-sm text-[var(--text-secondary)] mt-1 font-mono">
+            test_id: {params.testId}
+          </p>
+        </div>
+        <button
+          onClick={() => downloadJson(params.testId, data)}
+          className="shrink-0 px-3 py-2 rounded-lg text-sm border border-border-dim bg-surface hover:border-sol-green/50 hover:bg-surface-elevated font-mono"
+        >
+          Export JSON
+        </button>
       </header>
 
       {/* ─── Headline numbers ─────────────────────────────────────── */}
@@ -181,6 +197,34 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
           sub={`${comparison.rating_distribution.manual_count} vs ${comparison.rating_distribution.persona_count}`}
         />
       </section>
+
+      {/* ─── Findings — plain-English investor summary ───────────── */}
+      {comparison.findings && comparison.findings.length > 0 && (
+        <section className="rounded-xl border border-border-dim bg-surface p-5">
+          <h2 className="font-display font-semibold mb-3">Key findings</h2>
+          <ul className="space-y-3">
+            {comparison.findings.map((f) => (
+              <li key={f.id} className="flex gap-3">
+                <span
+                  className={`shrink-0 w-2 h-2 mt-2 rounded-full ${
+                    f.severity === 'positive'
+                      ? 'bg-sol-green'
+                      : f.severity === 'negative'
+                      ? 'bg-amber-500'
+                      : 'bg-sol-blue'
+                  }`}
+                />
+                <div>
+                  <div className="text-sm">{f.headline}</div>
+                  {f.detail && (
+                    <div className="text-xs text-[var(--text-secondary)] mt-1">{f.detail}</div>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* ─── Convergence ─────────────────────────────────────────── */}
       <section className="rounded-xl border border-border-dim bg-surface p-5">
@@ -318,6 +362,18 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
       </section>
     </div>
   );
+}
+
+function downloadJson(testId: string, data: CompareResponse) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `experiment-${testId}-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function Stat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
