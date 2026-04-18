@@ -48,21 +48,31 @@ async function main() {
     }
     const test = tests[0];
 
-    // Pick a persona that does NOT already have a report for this test
-    // (UNIQUE(tester_addr, test_id) would otherwise block the insert).
+    // Pick a persona whose tester already has a MANUAL report for this
+    // test but no PERSONA report yet — that's the sweet spot for the
+    // AI-vs-human comparison (same test run through both paths). The
+    // UNIQUE (tester_addr, test_id, is_persona_test) index permits it.
     const { rows: personas } = await db.query<{ id: string; tester_addr: string }>(
       `SELECT p.id, p.tester_addr
          FROM personas p
          WHERE p.is_active = true
+           AND EXISTS (
+             SELECT 1 FROM test_reports r
+              WHERE r.tester_addr = p.tester_addr
+                AND r.test_id = $1
+                AND r.is_persona_test = false
+           )
            AND NOT EXISTS (
              SELECT 1 FROM test_reports r
-              WHERE r.tester_addr = p.tester_addr AND r.test_id = $1
+              WHERE r.tester_addr = p.tester_addr
+                AND r.test_id = $1
+                AND r.is_persona_test = true
            )
          LIMIT 1`,
       [test.id],
     );
     if (personas.length === 0) {
-      throw new Error('No persona left without a report for this test — seed more or drop existing reports');
+      throw new Error('No eligible persona — need a tester with a manual report and no persona report for this test');
     }
     const persona = personas[0];
 

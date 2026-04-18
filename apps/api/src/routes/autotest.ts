@@ -237,7 +237,11 @@ async function runAutoTestAndPersist(args: {
     isPersonaTest: true,
     screenshots: engineResult.screenshotUrls,
   }).onConflictDoNothing({
-    target: [schema.testReports.testerAddr, schema.testReports.testId],
+    target: [
+      schema.testReports.testerAddr,
+      schema.testReports.testId,
+      schema.testReports.isPersonaTest,
+    ],
   }).returning();
 
   if (!inserted) {

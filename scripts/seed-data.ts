@@ -583,10 +583,11 @@ async function main() {
 
     const reportIds: { reportId: string; testerAddr: string; testId: string; qualityScore: number }[] = [];
 
-    // Each of the 3 active testers gets:
-    //   - 1 report for the DEX test
-    //   - 1 report for the NFT test
-    //   - 1 additional report for the DEX test (second round)
+    // Each active tester gets 1 report per test. UNIQUE (tester_addr,
+    // test_id, is_persona_test) blocks a same-tester "retake" on the
+    // same test — previously the seed inserted two DEX rows per tester
+    // to demonstrate resubmission, but that was a demo artifact and is
+    // now disallowed. To bulk up DEX counts, use different personas.
     for (const testerKey of ['alice', 'bob', 'charlie', 'fiona', 'grace'] as const) {
       // Report 1: DEX test
       const r1 = generateReportForTest(testerKey, TEST_IDS.dex, 'dex');
@@ -616,24 +617,12 @@ async function main() {
       ]);
       reportIds.push({ reportId: r2.reportId, testerAddr: r2.testerAddr, testId: r2.testId, qualityScore: r2.qualityScore });
 
-      // Report 3: DEX test (second round with slightly different data)
-      const r3 = generateReportForTest(testerKey, TEST_IDS.dex, 'dex');
-      await client.query(`
-        INSERT INTO test_reports (id, tester_addr, test_id, checklist_results, scenario_log, questionnaire_answers, quality_score, is_persona_test)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      `, [
-        r3.reportId, r3.testerAddr, r3.testId,
-        JSON.stringify(r3.checklistResults),
-        JSON.stringify(r3.scenarioLog),
-        JSON.stringify(r3.questionnaireAnswers),
-        r3.qualityScore, r3.isPersonaTest,
-      ]);
-      reportIds.push({ reportId: r3.reportId, testerAddr: r3.testerAddr, testId: r3.testId, qualityScore: r3.qualityScore });
-
-      console.log(`  ${TESTER_PROFILES[testerKey].displayName}: 3 reports (quality: ${r1.qualityScore})`);
+      console.log(`  ${TESTER_PROFILES[testerKey].displayName}: 2 reports (quality: ${r1.qualityScore})`);
     }
 
-    // Diana's 3 reports (she has testsDone=3 but no persona yet — demo will generate it live)
+    // Diana: 2 unique reports (DEX + NFT). testers.tests_done is still
+    // 3 per the hardcoded seed above — that column is independent of
+    // the test_reports row count and drives the persona-generation gate.
     {
       // Report 1: DEX test
       const dr1 = generateReportForTest('diana', TEST_IDS.dex, 'dex');
@@ -649,21 +638,7 @@ async function main() {
       ]);
       reportIds.push({ reportId: dr1.reportId, testerAddr: dr1.testerAddr, testId: dr1.testId, qualityScore: dr1.qualityScore });
 
-      // Report 2: DEX test (second round)
-      const dr2 = generateReportForTest('diana', TEST_IDS.dex, 'dex');
-      await client.query(`
-        INSERT INTO test_reports (id, tester_addr, test_id, checklist_results, scenario_log, questionnaire_answers, quality_score, is_persona_test)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      `, [
-        dr2.reportId, dr2.testerAddr, dr2.testId,
-        JSON.stringify(dr2.checklistResults),
-        JSON.stringify(dr2.scenarioLog),
-        JSON.stringify(dr2.questionnaireAnswers),
-        dr2.qualityScore, dr2.isPersonaTest,
-      ]);
-      reportIds.push({ reportId: dr2.reportId, testerAddr: dr2.testerAddr, testId: dr2.testId, qualityScore: dr2.qualityScore });
-
-      // Report 3: NFT test
+      // Report 2: NFT test
       const dr3 = generateReportForTest('diana', TEST_IDS.nft, 'nft');
       await client.query(`
         INSERT INTO test_reports (id, tester_addr, test_id, checklist_results, scenario_log, questionnaire_answers, quality_score, is_persona_test)

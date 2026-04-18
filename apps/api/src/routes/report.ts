@@ -141,7 +141,11 @@ router.post('/submit', async (req, res) => {
       screenshots: screenshots || [],
     })
       .onConflictDoNothing({
-        target: [schema.testReports.testerAddr, schema.testReports.testId],
+        target: [
+          schema.testReports.testerAddr,
+          schema.testReports.testId,
+          schema.testReports.isPersonaTest,
+        ],
       })
       .returning();
 

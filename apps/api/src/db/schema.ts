@@ -86,10 +86,13 @@ export const testReports = pgTable('test_reports', {
   screenshots: jsonb('screenshots').$type<string[]>(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (t) => ({
-  // Prevents a tester submitting the same test twice; also closes the
-  // SELECT→INSERT race window in routes/report.ts where two concurrent
-  // requests could both pass the duplicate check.
-  uniqTesterTest: uniqueIndex('test_reports_tester_test_uniq').on(t.testerAddr, t.testId),
+  // Prevents a tester submitting the same test twice (and closes the
+  // SELECT→INSERT race in routes/report.ts). ``is_persona_test`` is in
+  // the key so the same wallet can carry both a manual report and a
+  // persona-generated report for the same test — that pair is the
+  // basis of the AI-vs-human comparison dashboard.
+  uniqTesterTest: uniqueIndex('test_reports_tester_test_kind_uniq')
+    .on(t.testerAddr, t.testId, t.isPersonaTest),
 }));
 
 // ─── Personas ────────────────────────────────────────
