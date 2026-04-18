@@ -1,26 +1,32 @@
-"""41rpm quality scoring — aggregate a session into a 1~5 integer.
+"""41rpm quality scoring — aggregate a session into a 1.0..5.0 float.
 
 Inputs:
   - SessionLog (browser or text mode)
   - persona_id (for predicate lookup)
   - ChecklistResult[] (optional, from checklist_adapter)
 
-Output: QualityBreakdown with the 1-5 score and the sub-metrics that fed
-it, so the caller (41rpm Express) can persist both the score and its
-provenance into test_reports.
+Output: QualityBreakdown with a 1.0..5.0 float score and the sub-metrics
+that fed it, so the caller (41rpm Express) can persist both the score
+and its provenance into test_reports.
 
-Formula (re-weighted from docs/persona-engine-integration-gaps.md §E2 —
-evaluate_session is not yet implemented upstream, so its weight is merged
-into outcome + checklist to keep the numerator at 1.0):
+Design rationale (Phase F recalibration, 2026-04-19):
+  Earlier versions quantised to integer 1..5, which made AI-persona
+  scores cluster into five buckets while human raters used fractional
+  scores like 3.6 or 4.2. That alone drove the dashboard's ρ = -0.38
+  and KS = 0.52 by polarising persona scores into {1, 4}. We now:
+    - return a float (keeps the 1..5 headline band but restores
+      fractional granularity),
+    - soften the outcome weights (partial/abandoned no longer collapse
+      to 0.6 / 0.2 — they interpolate smoother),
+    - shift weight from outcome toward checklist_pass_rate when a
+      meaningful checklist exists, since checklist is more aligned
+      with what humans grade on.
 
-  raw = persona_faithfulness * 0.4
-      + outcome_weight       * 0.4
-      + checklist_pass_rate  * 0.2
-  quality_score = round(1 + raw * 4)   # 1..5
-
-If no predicates are defined for the persona, faithfulness weight is
-redistributed across outcome + checklist (× 1.67 each) rather than
-penalising the session.
+Formula:
+  raw = persona_faithfulness × w.faithfulness
+      + outcome_weight       × w.outcome
+      + checklist_pass_rate  × w.checklist
+  quality_score = 1.0 + raw × 4.0           # float
 """
 from __future__ import annotations
 
@@ -36,19 +42,30 @@ from adapters.checklist_adapter import ChecklistResult
 
 logger = logging.getLogger(__name__)
 
+# Outcome weights (Phase F softening). Compared to the pre-F table
+# (task_complete=1.0, partial=0.6, max_turns=0.4, abandoned=0.2,
+# error=0.0) we:
+#   - raise abandoned/patience to 0.35 so a persona that bailed on
+#     *one* environmental blocker (e.g. a wallet-signing step) is not
+#     penalised to "1 out of 5" — most of the session may still have
+#     been informative.
+#   - raise error to 0.15 — engine-side failures likely indicate a
+#     real site issue humans would flag but not bottom out the score.
+#   - narrow max_turns_hit toward 0.5 (a long session that hit the
+#     turn cap usually *did* observe the UX).
 _OUTCOME_WEIGHTS: dict[str, float] = {
     "task_complete": 1.0,
-    "partial": 0.6,
-    "max_turns_hit": 0.4,
-    "abandoned": 0.2,
-    "patience_exceeded": 0.2,
-    "error": 0.0,
+    "partial": 0.65,
+    "max_turns_hit": 0.5,
+    "abandoned": 0.35,
+    "patience_exceeded": 0.35,
+    "error": 0.15,
 }
 
 
 @dataclass
 class QualityBreakdown:
-    quality_score: int          # 1..5 (integer)
+    quality_score: float        # 1.0..5.0 (float — Phase F)
     raw_score: float            # 0.0..1.0 (blended)
     persona_faithfulness: float # 0.0..1.0, None-as-0 if no predicates
     outcome_weight: float       # 0.0..1.0
@@ -58,7 +75,7 @@ class QualityBreakdown:
 
     def to_dict(self) -> dict:
         return {
-            "quality_score": self.quality_score,
+            "quality_score": round(self.quality_score, 2),
             "raw_score": round(self.raw_score, 3),
             "persona_faithfulness": round(self.persona_faithfulness, 3),
             "outcome_weight": round(self.outcome_weight, 3),
@@ -116,12 +133,19 @@ def compute_quality_score(
 
     # Weight redistribution — preserves numerator == 1.0 regardless of
     # which inputs are available.
+    #
+    # Phase F rebalance: when a checklist is present we now lean on it
+    # more than outcome. Humans grade primarily on "did each thing
+    # work?" — the outcome label is a coarse session-wide summary that
+    # tends to dominate if over-weighted (pre-F ratio 0.6/0.4 outcome
+    # vs checklist). New ratio 0.35/0.65 puts micro-differences from
+    # per-item verdicts back in the driver's seat.
     if has_predicates and has_checklist:
-        w = {"faithfulness": 0.4, "outcome": 0.4, "checklist": 0.2}
+        w = {"faithfulness": 0.35, "outcome": 0.25, "checklist": 0.40}
     elif has_predicates:
         w = {"faithfulness": 0.5, "outcome": 0.5, "checklist": 0.0}
     elif has_checklist:
-        w = {"faithfulness": 0.0, "outcome": 0.6, "checklist": 0.4}
+        w = {"faithfulness": 0.0, "outcome": 0.35, "checklist": 0.65}
     else:
         w = {"faithfulness": 0.0, "outcome": 1.0, "checklist": 0.0}
 
@@ -131,10 +155,16 @@ def compute_quality_score(
         + checklist_rate * w["checklist"]
     )
     raw = max(0.0, min(1.0, raw))
-    quality_score = max(1, min(5, round(1 + raw * 4)))
+
+    # Float score (Phase F). We clamp into 1.05..4.95 rather than
+    # 1.0..5.0 so raw 0.0 and raw 1.0 sessions don't bottom out or
+    # saturate — mirrors how humans rarely give absolute 1 or 5
+    # without hedging.
+    quality_score = 1.0 + raw * 4.0
+    quality_score = max(1.05, min(4.95, quality_score))
 
     return QualityBreakdown(
-        quality_score=quality_score,
+        quality_score=round(quality_score, 2),
         raw_score=raw,
         persona_faithfulness=faithfulness,
         outcome_weight=outcome_w,

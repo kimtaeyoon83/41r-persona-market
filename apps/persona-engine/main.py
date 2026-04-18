@@ -193,7 +193,7 @@ class JobResultResponse(BaseModel):
     # Per-item checklist outcome + aggregated 1-5 quality score. Both are
     # empty/None when the request omits a checklist.
     checklist_results: list[dict] = []
-    quality_score: int | None = None
+    quality_score: float | None = None
     quality_breakdown: dict = {}
     # Persona-voiced questionnaire answers (empty if no items submitted).
     questionnaire_answers: list[dict] = []
@@ -224,7 +224,7 @@ def _run_session_job(job_id: str, req: AnalysisRequest) -> None:
         _job_store.update(job_id, status="running", progress=80)
 
         checklist_dicts: list[dict] = []
-        quality_score: int | None = None
+        quality_score: float | None = None
         quality_breakdown: dict = {}
         scored = None
         if req.checklist:

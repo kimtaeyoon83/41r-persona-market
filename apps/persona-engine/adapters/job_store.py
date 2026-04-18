@@ -31,7 +31,7 @@ class JobState:
     session_id: str | None = None
     screenshot_paths: list[str] = field(default_factory=list)
     checklist_results: list[dict] = field(default_factory=list)
-    quality_score: int | None = None
+    quality_score: float | None = None
     quality_breakdown: dict[str, Any] = field(default_factory=dict)
     questionnaire_answers: list[dict] = field(default_factory=list)
     structured_report: dict[str, Any] = field(default_factory=dict)
