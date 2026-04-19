@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { Router, type Router as RouterType } from 'express';
 import { eq } from 'drizzle-orm';
 import { Connection } from '@solana/web3.js';
@@ -8,6 +10,10 @@ import {
   isEngineEnabled,
   runAutoTestWithEngine,
 } from '../services/persona_engine.js';
+import { runStagehandHybrid } from '../services/stagehand_hybrid.js';
+import { uploadToR2 } from '../services/r2.js';
+
+const PERSONA_ENGINE_URL = process.env.PERSONA_ENGINE_URL ?? 'http://persona-engine:4200';
 
 const router: RouterType = Router();
 
@@ -113,8 +119,43 @@ router.post('/run', async (req, res) => {
     // engine.waitForResult handles polling internally. Text mode is
     // fast (~15s); browser mode can take ~2min, so scripted batch runs
     // should control concurrency client-side.
+    const rawMode = req.body.mode as string | undefined;
+
+    // Hybrid path: Node-side Stagehand drives the browser session,
+    // persona-engine only runs the evaluation adapters. Separate
+    // branch from isEngineEnabled() since some ops will want hybrid
+    // on while the default mode=browser still uses persona_agent.
+    if (rawMode === 'stagehand_hybrid' || rawMode === 'hybrid') {
+      try {
+        const result = await withRequestId(
+          `hybrid:${test_id.slice(0, 8)}:${persona_id.slice(0, 8)}`,
+          () => runStagehandHybridAndPersist({ testId: test_id, personaId: persona_id }),
+        );
+        res.json({
+          job_id: result.reportId,
+          status: 'completed',
+          payment_tx,
+          engine: true,
+          mode: 'stagehand_hybrid',
+          report_id: result.reportId,
+          outcome: result.outcome,
+          quality_score: result.qualityScore,
+          screenshots: result.screenshotUrls,
+          session_id: result.sessionId,
+        });
+        return;
+      } catch (hybridErr) {
+        console.error('[autotest] stagehand_hybrid failed:', hybridErr);
+        res.status(500).json({
+          error: 'hybrid_run_failed',
+          details: hybridErr instanceof Error ? hybridErr.message : String(hybridErr),
+        });
+        return;
+      }
+    }
+
     if (isEngineEnabled()) {
-      const mode = ((req.body.mode as string) === 'text' ? 'text' : 'browser') as 'text' | 'browser';
+      const mode = (rawMode === 'text' ? 'text' : 'browser') as 'text' | 'browser';
       try {
         // Tag every Anthropic call this request makes with a stable
         // request_id so scripts/usage-summary.ts can roll up "how many
@@ -260,6 +301,161 @@ async function runAutoTestAndPersist(args: {
     qualityScore: engineResult.qualityScore,
     screenshotUrls: engineResult.screenshotUrls,
     sessionId: engineResult.sessionId,
+  };
+}
+
+/**
+ * Stagehand-hybrid variant. The browser session itself runs Node-side
+ * through Stagehand's agent loop (cheaper than persona_agent's vision
+ * pipeline) and we POST the resulting SessionLog to persona-engine's
+ * /analyses/score endpoint to get the same
+ * {checklist, quality, questionnaire, report} bundle the normal path
+ * produces. Net result lands in test_reports with the same shape, so
+ * /compare sees hybrid runs uniformly.
+ */
+async function runStagehandHybridAndPersist(args: {
+  testId: string;
+  personaId: string;
+}): Promise<{
+  reportId: string;
+  outcome: string;
+  qualityScore: number | null;
+  screenshotUrls: string[];
+  sessionId: string | null;
+}> {
+  const [test] = await db.select().from(schema.tests).where(eq(schema.tests.id, args.testId));
+  if (!test) throw new Error(`test ${args.testId} not found`);
+
+  const [persona] = await db.select().from(schema.personas)
+    .where(eq(schema.personas.id, args.personaId));
+  if (!persona) throw new Error(`persona ${args.personaId} not found`);
+
+  const [tester] = await db.select().from(schema.testers)
+    .where(eq(schema.testers.walletAddress, persona.testerAddr));
+
+  const cases = await db.select().from(schema.testCases)
+    .where(eq(schema.testCases.testId, args.testId));
+  const checklist = cases
+    .filter((c) => c.type === 'checklist')
+    .map((c) => c.content as { id: string; task: string; expected?: string });
+  const questionnaire = cases
+    .filter((c) => c.type === 'questionnaire')
+    .map((c) => c.content as {
+      id: string;
+      question: string;
+      type?: 'rating_1_5' | 'rating_1_10' | 'free_text';
+    });
+
+  // Build a terse persona one-liner for Stagehand's systemPrompt —
+  // we don't send the whole soul here, the evaluation stage (which
+  // runs on persona_agent's side) is where the full persona detail
+  // kicks in.
+  const profile = (tester?.profile ?? {}) as Record<string, unknown>;
+  const personaOneliner = [
+    profile.age_range && `${profile.age_range} age`,
+    profile.occupation,
+    profile.region,
+    profile.crypto_experience && `${profile.crypto_experience} crypto`,
+    profile.primary_device && `on ${profile.primary_device}`,
+  ].filter(Boolean).join(', ') || 'a typical end-user';
+
+  const screenshotsDir = path.resolve(
+    process.env.STAGEHAND_SCREENSHOTS_DIR
+      || `/tmp/stagehand-shots/${args.testId.slice(0, 8)}-${args.personaId.slice(0, 8)}-${Date.now()}`,
+  );
+
+  const { sessionLog, screenshotPaths } = await runStagehandHybrid({
+    personaId: args.personaId,
+    personaOneliner,
+    url: test.targetUrl,
+    task: test.requirements || `Evaluate the UX at ${test.targetUrl}`,
+    screenshotsDir,
+    maxSteps: 8,
+  });
+
+  // Best-effort screenshot upload to R2. If that fails we still
+  // record the local fs paths so the report is at least inspectable
+  // locally.
+  const screenshotUrls: string[] = [];
+  for (const p of screenshotPaths) {
+    try {
+      const bytes = fs.readFileSync(p);
+      const key = `screenshots/stagehand_${sessionLog.session_id}_${path.basename(p)}`;
+      const url = await uploadToR2(key, bytes);
+      screenshotUrls.push(url);
+    } catch (err) {
+      console.warn(`[hybrid] r2 upload failed for ${p}:`, err instanceof Error ? err.message : err);
+      screenshotUrls.push(p);
+    }
+  }
+
+  // Ship the SessionLog to persona-engine for scoring. Must run after
+  // the browser session completes; no job polling needed since /score
+  // is synchronous.
+  const scoreResp = await fetch(`${PERSONA_ENGINE_URL}/analyses/score`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      session_log: sessionLog,
+      persona_id: args.personaId,
+      checklist,
+      questionnaire,
+      generate_report: true,
+    }),
+  });
+  if (!scoreResp.ok) {
+    throw new Error(`/analyses/score → ${scoreResp.status}: ${await scoreResp.text()}`);
+  }
+  const score = (await scoreResp.json()) as {
+    checklist_results: Array<{ id: string; status: string; memo: string }>;
+    quality_score: number | null;
+    quality_breakdown: Record<string, unknown>;
+    questionnaire_answers: Array<{ id: string; answer: string | number }>;
+    structured_report: Record<string, unknown>;
+  };
+
+  const enrichedAnswers = [
+    ...score.questionnaire_answers,
+    ...(Object.keys(score.structured_report).length > 0
+      ? [{ id: '_structured_report', answer: JSON.stringify(score.structured_report) }]
+      : []),
+    ...(Object.keys(score.quality_breakdown).length > 0
+      ? [{ id: '_quality_breakdown', answer: JSON.stringify(score.quality_breakdown) }]
+      : []),
+    { id: '_source', answer: 'stagehand_hybrid' },
+  ];
+
+  const [inserted] = await db.insert(schema.testReports).values({
+    testerAddr: persona.testerAddr,
+    testId: args.testId,
+    checklistResults: score.checklist_results.map((r) => ({
+      id: r.id, status: r.status as 'passed' | 'failed' | 'blocked', memo: r.memo,
+    })),
+    scenarioLog: [],
+    questionnaireAnswers: enrichedAnswers,
+    qualityScore: score.quality_score,
+    isPersonaTest: true,
+    screenshots: screenshotUrls,
+  }).onConflictDoNothing({
+    target: [
+      schema.testReports.testerAddr,
+      schema.testReports.testId,
+      schema.testReports.isPersonaTest,
+    ],
+  }).returning();
+
+  if (!inserted) {
+    throw new Error(
+      `persona ${args.personaId} already has a persona report for test ${args.testId}`,
+    );
+  }
+
+  return {
+    reportId: inserted.id,
+    outcome: sessionLog.outcome,
+    qualityScore: score.quality_score,
+    screenshotUrls,
+    sessionId: sessionLog.session_id,
   };
 }
 

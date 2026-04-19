@@ -21,7 +21,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 # NOTE: persona_agent MUST be configured before ``lowlevel`` is imported.
 # Several internal modules read ``_EVENTS_DIR = get_workspace().events_dir``
@@ -158,6 +158,32 @@ class AnalysisRequest(BaseModel):
     checklist: list[ChecklistInput] = Field(default_factory=list)
     questionnaire: list[QuestionnaireInput] = Field(default_factory=list)
     generate_report: bool = False
+
+
+class ScoreRequest(BaseModel):
+    """Score a pre-executed SessionLog (dict form). Use when the action
+    loop ran somewhere else — e.g. the api-side Stagehand hybrid path —
+    and we just need the adapters (checklist / questionnaire /
+    structured_report) applied to the resulting trace. Synchronous:
+    no job queue, no background thread.
+
+    ``session_log`` must at least contain outcome + turns[]; the
+    adapters tolerate missing fields and degrade gracefully.
+    """
+
+    session_log: dict[str, Any]
+    persona_id: str
+    checklist: list[ChecklistInput] = Field(default_factory=list)
+    questionnaire: list[QuestionnaireInput] = Field(default_factory=list)
+    generate_report: bool = False
+
+
+class ScoreResponse(BaseModel):
+    checklist_results: list[dict] = []
+    quality_score: float | None = None
+    quality_breakdown: dict = {}
+    questionnaire_answers: list[dict] = []
+    structured_report: dict = {}
 
 
 class CohortAnalysisRequest(BaseModel):
@@ -404,6 +430,55 @@ def get_result(job_id: str):
         quality_breakdown=job.quality_breakdown,
         questionnaire_answers=job.questionnaire_answers,
         structured_report=job.structured_report,
+    )
+
+
+@app.post("/analyses/score", response_model=ScoreResponse)
+def score_pre_run_session(req: ScoreRequest) -> ScoreResponse:
+    """Apply the scoring adapters to a SessionLog that was generated
+    somewhere other than here — e.g. the 41rpm API's Stagehand hybrid
+    runner. Synchronous. No job store row, no background thread.
+
+    The persona_id is used for faithfulness predicate lookup (if any)
+    and for the questionnaire role-play. Everything else is derived
+    from the session_log dict the caller provides.
+    """
+    session = req.session_log  # raw dict, adapters tolerate missing fields
+    with with_request_id(session.get("session_id") or "pre-run"):
+        scored = None
+        checklist_dicts: list[dict] = []
+        if req.checklist:
+            checklist_raw = [c.model_dump() for c in req.checklist]
+            with with_route("checklist"):
+                scored = score_checklist(checklist_raw, session, use_llm=True)
+            checklist_dicts = [r.to_dict() for r in scored]
+
+        with with_route("quality_score"):
+            breakdown = compute_quality_score(session, req.persona_id, scored)
+
+        questionnaire_dicts: list[dict] = []
+        if req.questionnaire:
+            q_items = [q.model_dump() for q in req.questionnaire]
+            with with_route("questionnaire"):
+                answers = answer_questionnaire(
+                    q_items, session, req.persona_id, use_llm=True,
+                )
+            questionnaire_dicts = [a.to_dict() for a in answers]
+
+        report_dict: dict = {}
+        if req.generate_report:
+            with with_route("structured_report"):
+                report = generate_structured_report(
+                    session, req.persona_id, scored, use_llm=True,
+                )
+            report_dict = report.to_dict()
+
+    return ScoreResponse(
+        checklist_results=checklist_dicts,
+        quality_score=breakdown.quality_score,
+        quality_breakdown=breakdown.to_dict(),
+        questionnaire_answers=questionnaire_dicts,
+        structured_report=report_dict,
     )
 
 
