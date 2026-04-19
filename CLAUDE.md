@@ -8,12 +8,18 @@ Human testers complete tests → earn USDC rewards → generate AI Personas → 
 ## Architecture
 
 ```
-apps/api  (Express :4100)  — 22 endpoints, 6 services, 7 DB tables
-apps/web  (Next.js :3000)  — 17 pages, 7 components, Tailwind dark theme
+apps/api             (Express :4100)  — routes, services, x402, Solana, Stagehand runner
+apps/web             (Next.js :3000)  — app-router pages + /experiment dashboard
+apps/persona-engine  (FastAPI :4200)  — Python wrapper over persona_agent, scoring adapters
 packages/shared            — TypeScript interfaces (@41rpm/shared)
 packages/solana-utils      — Token-2022 utilities (@41rpm/solana-utils)
-scripts/                   — 10 setup/test/seed scripts
+packages/persona-client    — TypeScript client for persona-engine HTTP
+scripts/                   — setup / seed / batch / usage-summary / render-check
 ```
+
+`persona-engine` depends on upstream `persona_agent` (separate repo at
+`/Users/freddie/dev/repo/personal/41r-advisor/persona_agent`). Keep both
+in sync when editing browser_runner / agent_loop.
 
 ## Deployment (Railway + Cloudflare R2)
 
@@ -59,10 +65,20 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 ```bash
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
-pnpm --filter web dev       # Web only
-pnpm --filter api test      # Run vitest (19 tests)
+pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
+pnpm --filter api test      # Run vitest (59 tests)
 pnpm --filter api db:push   # Push schema to DB
-pnpm tsx scripts/seed-data.ts  # Populate demo data
+pnpm tsx scripts/seed-data.ts              # Base seed (5 hand-written + 2 tests)
+pnpm tsx scripts/append-diverse-personas.ts  # +15 diverse profiles (total 20 personas)
+pnpm tsx scripts/run-persona-batch.ts --limit N   # Batch persona runs (default mode=text)
+pnpm tsx scripts/usage-summary.ts          # Analyze /tmp/llm-usage.jsonl
+```
+
+### persona-engine (Python)
+```bash
+cd apps/persona-engine
+.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 4200 --app-dir .
+# Requires Python 3.11+ and persona_agent installed via pip install -e
 ```
 
 ## Key Conventions
@@ -95,9 +111,77 @@ pnpm tsx scripts/seed-data.ts  # Populate demo data
 - Keypair: loaded from `SOLANA_KEYPAIR_JSON` env var (production) or `~/.config/solana/id.json` (local)
 
 ### Testing
-- Vitest for API unit tests (`apps/api/src/__tests__/`)
+- Vitest for API unit tests (`apps/api/src/__tests__/`) — 59 tests
+- Pytest for persona-engine (`apps/persona-engine/tests/`) — 35 tests
 - No frontend tests (hackathon scope)
-- E2E: manual walkthrough or `scripts/e2e-flow.ts`
+- E2E: `scripts/e2e-persona-engine.ts` (autotest+engine+DB path)
+- Dashboard render check: `scripts/check-dashboard-render.py` (headless chromium)
+
+## Autotest Modes (`POST /api/autotest/run`)
+
+Route table (default is now **stagehand_hybrid** as of 2026-04-19):
+
+| `mode` value                            | Path                          | Cost/run | Use case                     |
+|-----------------------------------------|-------------------------------|----------|------------------------------|
+| `"browser"` / `"hybrid"` / (omitted)    | stagehand_hybrid              | ~24¢     | **Default** — deep UX reports |
+| `"text"`                                | persona-engine text mode      | ~5¢      | Bulk experiments, fast       |
+| `"persona_agent"` / `"persona_agent_browser"` | persona_agent native browser | ~17¢     | Persona-fidelity research    |
+
+- **stagehand_hybrid**: Node-side Stagehand drives Playwright, persona-engine
+  `/analyses/score` runs checklist/questionnaire/report adapters. Produces
+  actionable pain_points tied to real UI elements.
+- **persona_agent native**: In-process vision+decision loop with patience
+  budget. Kept for research but trips mid-flow on complex SPAs.
+- Legacy `services/autotest.ts` path still exists when `USE_PERSONA_ENGINE=0`.
+
+## Experiment Dashboard
+
+- `/experiment` — list of active tests with manual/persona/paired counts
+- `/experiment/[testId]` — 6 charts + Key findings + By-cohort breakdown
+- `/api/reports/compare/:testId` — aggregates headline + cohort metrics + findings
+- Cohort key defaults to `crypto_experience` (4 buckets). Matching personas to
+  humans within same demographic reveals "persona ≈ human at 100% in novice
+  cohort, diverges in expert cohort" — the real investor story.
+
+## LLM Usage Tracking
+
+- Unified JSONL log at `USAGE_LOG_PATH` (default `/tmp/llm-usage.jsonl`)
+- Python side: `apps/persona-engine/usage_logger.py` monkey-patches
+  `anthropic.Messages.create`; tag routes via `with_route("...")` + request
+  ids via `with_request_id(...)`
+- Node side: `apps/api/src/services/anthropic_client.ts` wraps the SDK via
+  AsyncLocalStorage; tag via `withRoute('...', () => client.messages.create(...))`
+- `scripts/usage-summary.ts` — totals by model/service/route, heaviest calls,
+  duplicate-prompt detection
+
+## Cost Optimization Notes (persona-engine)
+
+- `structured_report` uses tier `review_inspection` (Haiku) with
+  `max_tokens=1400` — lower cap (800) truncated JSON. See
+  `apps/persona-engine/report_generator.py`.
+- `persona_agent.browser_runner` resizes screenshots to 900px long-side
+  before sending to vision LLM (`PERSONA_AGENT_VISION_MAX_DIM`).
+- `persona_agent.agent_loop._decide` uses Anthropic prompt caching —
+  stable prefix (persona soul + plan + system) marked
+  `cache_control: ephemeral`. Disable via `PERSONA_AGENT_PROMPT_CACHE=0`.
+- `persona_agent.agent_loop._summarize_page` caps a11y tree at 20 nodes
+  (was 50) via `PERSONA_AGENT_A11Y_NODES`.
+
+## Local Dev Gotchas
+
+- **macOS EMFILE "too many open files" on Next.js**: raise ulimit and
+  force polling:
+  ```bash
+  ulimit -n 65536
+  WATCHPACK_POLLING=true CHOKIDAR_USEPOLLING=true pnpm --filter web dev
+  ```
+- **Python 3.11+ required** for persona-engine (pydantic `dict | None` syntax).
+  If you see `TypeError: unsupported operand type(s) for |`, install 3.11
+  via `brew install python@3.11`.
+- **TypedDict in persona-engine/adapters/tester_to_soul.py** must come from
+  `typing_extensions` (not `typing`) for pydantic v2 on py<3.12.
+- **persona_agent workspace** must be configured before any `_internal`
+  import — see `apps/persona-engine/main.py` top-of-file setup.
 
 ## Environment Variables
 
@@ -150,3 +234,23 @@ CHROMIUM_PATH=/usr/bin/chromium  # Set in Docker for Stagehand
 - Create new .md docs without explicit request
 - Use `fs.writeFile` for screenshots in production — use `uploadToR2()` from `services/r2.ts`
 - Assume local file paths work in Docker — use env vars for all external paths
+- Instantiate Anthropic client directly in `apps/api` — use `client` + `withRoute`
+  from `services/anthropic_client.ts` so usage tracking keeps working
+- Change `mode=browser` default without measuring cost/quality on both paths —
+  the stagehand_hybrid default came from an A/B run (see feature/event-hardening
+  branch history)
+
+## Investor Dashboard Narrative
+
+The "persona ≈ human" claim only holds **within matched demographic cohorts**.
+Headline Spearman ρ can be weak or negative because the sample mixes cohorts
+with different agent-capability patterns. Always surface `by_cohort` numbers
+alongside aggregates — the honest finding is:
+
+> In the novice crypto-experience cohort, personas match humans at 100% item
+> agreement and |Δ|=0.25 on quality. In the advanced cohort the gap widens to
+> |Δ|=1.69. Persona simulation quality varies by user type — this is itself
+> the product insight.
+
+Keep this framing in mind when adding features or running experiments. Do not
+pitch a single aggregate ρ number without the cohort context.
