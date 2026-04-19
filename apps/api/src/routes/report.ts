@@ -511,6 +511,7 @@ router.get('/compare/:testId', async (req, res) => {
       ratingManualMean: ratingDistribution.manual_mean,
       ratingPersonaMean: ratingDistribution.persona_mean,
       convergence,
+      byCohort,
     });
 
     res.json({

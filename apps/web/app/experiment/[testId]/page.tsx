@@ -91,7 +91,19 @@ interface CompareResponse {
     };
     convergence: Array<{ n: number; humanMean: number; personaMean: number; absDiff: number }>;
     findings?: Finding[];
+    by_cohort?: CohortMetric[];
   };
+}
+
+interface CohortMetric {
+  cohort: string;
+  humanCount: number;
+  personaCount: number;
+  humanMeanQuality: number;
+  personaMeanQuality: number;
+  qualityAbsDiff: number;
+  itemAgreementRate: number;
+  ksStatisticQuality: number;
 }
 
 const MATRIX_LABELS: MatrixLabel[] = ['passed', 'failed', 'blocked', 'none'];
@@ -223,6 +235,19 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {/* ─── Cohort matching ─────────────────────────────────────── */}
+      {comparison.by_cohort && comparison.by_cohort.length > 0 && (
+        <section className="rounded-xl border border-border-dim bg-surface p-5">
+          <h2 className="font-display font-semibold mb-1">By cohort — demographic-matched agreement</h2>
+          <p className="text-xs text-[var(--text-secondary)] mb-4">
+            Reports grouped by persona profile (crypto_experience). A tight |Δ| + high agreement
+            inside a cohort is the honest "persona ≈ human" signal — the same demographic on
+            both sides.
+          </p>
+          <CohortBreakdown cohorts={comparison.by_cohort} />
         </section>
       )}
 
@@ -360,6 +385,90 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
           Vote counts: <span className="font-mono">passed/failed/blocked</span>
         </p>
       </section>
+    </div>
+  );
+}
+
+function CohortBreakdown({ cohorts }: { cohorts: CohortMetric[] }) {
+  const maxDiff = Math.max(0.01, ...cohorts.map((c) => c.qualityAbsDiff));
+  const labelFor = (k: string) => ({
+    none: 'No crypto background',
+    beginner: 'Crypto beginner',
+    intermediate: 'Crypto intermediate',
+    advanced: 'Crypto advanced',
+    unknown: 'Unknown / no profile',
+  } as Record<string, string>)[k] ?? k;
+
+  return (
+    <div className="space-y-4">
+      {/* Bar chart — visualises mean-quality gap per cohort */}
+      <div>
+        <div className="text-xs text-[var(--text-secondary)] mb-2 font-mono">
+          |human mean − persona mean| (closer to 0 = better match)
+        </div>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={cohorts} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3a" />
+            <XAxis dataKey="cohort" stroke="#8a8aa5" />
+            <YAxis stroke="#8a8aa5" domain={[0, Math.max(2, Math.ceil(maxDiff))]} />
+            <Tooltip contentStyle={{ background: '#151528', border: '1px solid #2a2a3a' }} />
+            <Bar dataKey="qualityAbsDiff" fill="#14F195" />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Table — full numbers with context */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm font-mono">
+          <thead className="text-xs uppercase text-[var(--text-secondary)]">
+            <tr className="border-b border-border-dim">
+              <th className="py-2 text-left">cohort</th>
+              <th className="text-right">n (h/p)</th>
+              <th className="text-right">human q̄</th>
+              <th className="text-right">persona q̄</th>
+              <th className="text-right">|Δ|</th>
+              <th className="text-right">agreement</th>
+              <th className="text-right">quality KS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cohorts.map((c) => {
+              const underpowered = c.humanCount < 3 || c.personaCount < 3;
+              const strong = !underpowered && c.qualityAbsDiff <= 0.5 && c.itemAgreementRate >= 0.6;
+              return (
+                <tr
+                  key={c.cohort}
+                  className={`border-b border-border-dim/40 ${strong ? 'bg-sol-green/5' : ''}`}
+                >
+                  <td className="py-2 pr-2">
+                    <div>{labelFor(c.cohort)}</div>
+                    <div className="text-[10px] text-[var(--text-secondary)]">{c.cohort}</div>
+                  </td>
+                  <td className="text-right">
+                    {c.humanCount}/{c.personaCount}
+                    {underpowered && (
+                      <span className="text-amber-500 ml-1" title="N<3 underpowered">⚠</span>
+                    )}
+                  </td>
+                  <td className="text-right">{c.humanMeanQuality.toFixed(2)}</td>
+                  <td className="text-right">{c.personaMeanQuality.toFixed(2)}</td>
+                  <td className={`text-right ${c.qualityAbsDiff < 0.5 ? 'text-sol-green' : c.qualityAbsDiff > 1.5 ? 'text-amber-500' : ''}`}>
+                    {c.qualityAbsDiff.toFixed(2)}
+                  </td>
+                  <td className={`text-right ${c.itemAgreementRate >= 0.6 ? 'text-sol-green' : ''}`}>
+                    {Math.round(c.itemAgreementRate * 100)}%
+                  </td>
+                  <td className="text-right">{c.ksStatisticQuality.toFixed(2)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <p className="text-[10px] text-[var(--text-secondary)] mt-2">
+          Rows in green highlight cohorts where persona tracks human closely (|Δ| ≤ 0.5 and
+          agreement ≥ 60%). ⚠ marks underpowered cohorts (n&lt;3 on either side).
+        </p>
+      </div>
     </div>
   );
 }

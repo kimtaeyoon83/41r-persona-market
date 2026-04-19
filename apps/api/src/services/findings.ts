@@ -17,7 +17,7 @@
  * investors.
  */
 
-import type { ConvergencePoint, PerItemAgreement } from './comparison.js';
+import type { CohortMetrics, ConvergencePoint, PerItemAgreement } from './comparison.js';
 
 export type FindingSeverity = 'positive' | 'neutral' | 'negative';
 
@@ -38,6 +38,7 @@ export interface FindingsInput {
   ratingManualMean: number;
   ratingPersonaMean: number;
   convergence: ConvergencePoint[];
+  byCohort?: CohortMetrics[];
 }
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
@@ -160,6 +161,49 @@ export function deriveFindings(inp: FindingsInput): Finding[] {
       headline: `Rating distributions diverge (KS = ${r3(ks)}, persona mean ${r3(inp.ratingPersonaMean)} vs human ${r3(inp.ratingManualMean)}).`,
       detail: 'Personas are consistently harsher or more lenient than humans — adjusting persona-voice prompting can close this gap.',
     });
+  }
+
+  // ─── Cohort-level findings (the real persona≈human story) ────
+  if (inp.byCohort && inp.byCohort.length > 0) {
+    const hasEnoughSamples = (c: CohortMetrics) => c.humanCount >= 3 && c.personaCount >= 3;
+    const powered = inp.byCohort.filter(hasEnoughSamples);
+
+    if (powered.length >= 2) {
+      // Best match — tightest |Δ| + strongest agreement.
+      const best = [...powered].sort((a, b) => {
+        const sa = a.qualityAbsDiff - a.itemAgreementRate;
+        const sb = b.qualityAbsDiff - b.itemAgreementRate;
+        return sa - sb;
+      })[0];
+      // Worst match.
+      const worst = [...powered].sort((a, b) => {
+        const sa = b.qualityAbsDiff - b.itemAgreementRate;
+        const sb = a.qualityAbsDiff - a.itemAgreementRate;
+        return sa - sb;
+      })[0];
+
+      if (best && best !== worst) {
+        out.push({
+          id: 'cohort-best',
+          severity: best.qualityAbsDiff <= 0.5 && best.itemAgreementRate >= 0.6 ? 'positive' : 'neutral',
+          headline: `Strongest match: ${best.cohort} cohort — personas track humans with |Δ|=${r3(best.qualityAbsDiff)} and ${pct(best.itemAgreementRate)} item agreement.`,
+          detail: `n=${best.humanCount} humans × ${best.personaCount} personas. Human mean quality ${r3(best.humanMeanQuality)} vs persona ${r3(best.personaMeanQuality)}.`,
+        });
+        out.push({
+          id: 'cohort-worst',
+          severity: worst.qualityAbsDiff > 1.0 ? 'negative' : 'neutral',
+          headline: `Weakest match: ${worst.cohort} cohort — |Δ|=${r3(worst.qualityAbsDiff)}, ${pct(worst.itemAgreementRate)} item agreement.`,
+          detail: `Gap between demographic groups is itself a product finding: persona simulation quality varies by user type. Focus tuning on this cohort.`,
+        });
+      }
+    } else if (inp.byCohort.length > 0) {
+      out.push({
+        id: 'cohort-underpowered',
+        severity: 'neutral',
+        headline: `Cohort analysis needs more data — only ${powered.length}/${inp.byCohort.length} cohorts have ≥3 samples on each side.`,
+        detail: 'Run more persona sessions to populate the under-represented cohorts before reading cohort-level agreement numbers.',
+      });
+    }
   }
 
   // ─── Convergence ──────────────────────────────────────────────
