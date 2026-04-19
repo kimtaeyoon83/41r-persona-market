@@ -142,6 +142,10 @@ router.post('/run', autotestRunLimiter, validateBody(autotestRunBodySchema), asy
           `hybrid:${test_id.slice(0, 8)}:${persona_id.slice(0, 8)}`,
           () => runStagehandHybridAndPersist({ testId: test_id, personaId: persona_id }),
         );
+        // Build a `result` nested field that matches the UI's expected
+        // shape (AutoTestResult in apps/web/app/autotest/page.tsx). The
+        // UI's legacy async path produced this shape via GET /status;
+        // the synchronous hybrid path has to return it inline.
         res.json({
           job_id: result.reportId,
           status: 'completed',
@@ -153,6 +157,14 @@ router.post('/run', autotestRunLimiter, validateBody(autotestRunBodySchema), asy
           quality_score: result.qualityScore,
           screenshots: result.screenshotUrls,
           session_id: result.sessionId,
+          result: {
+            screenshots: result.screenshotUrls,
+            actionLog: [],
+            textReport: result.outcome,
+            uxFeedback: {},
+            steps: [],
+            txSignature: payment_tx || '',
+          },
         });
         return;
       } catch (hybridErr) {
@@ -190,6 +202,14 @@ router.post('/run', autotestRunLimiter, validateBody(autotestRunBodySchema), asy
           quality_score: result.qualityScore,
           screenshots: result.screenshotUrls,
           session_id: result.sessionId,
+          result: {
+            screenshots: result.screenshotUrls,
+            actionLog: [],
+            textReport: result.outcome,
+            uxFeedback: {},
+            steps: [],
+            txSignature: payment_tx || '',
+          },
         });
         return;
       } catch (engineErr) {

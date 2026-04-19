@@ -168,6 +168,21 @@ export default function AutoTestPage() {
     // Step 1: USDC payment via Phantom
     setPayStep("paying");
     let txSignature: string;
+
+    // Dev-only test hook (mirrors /company/register). Browser E2E sets
+    // localStorage.__E2E_BYPASS_DEPOSIT=1 to skip the Solana tx + confirm
+    // round-trip. Dead code in production builds; the API still rejects
+    // the call when SKIP_PAYMENT_VERIFY is off in prod.
+    const e2eBypass =
+      process.env.NODE_ENV !== "production" &&
+      typeof window !== "undefined" &&
+      window.localStorage.getItem("__E2E_BYPASS_DEPOSIT") === "1";
+
+    if (e2eBypass) {
+      txSignature = `e2e_bypass_${Date.now().toString(36)}_${Math.random().toString(36).slice(2).padEnd(50, "a")}`;
+      setPaymentTx(txSignature);
+      setPayStep("confirming");
+    } else {
     try {
       const phantom = (
         window as unknown as {
@@ -216,6 +231,7 @@ export default function AutoTestPage() {
       setPayStep("idle");
       return;
     }
+    } // end e2eBypass else
 
     // Step 3: Start auto test with payment proof
     setPayStep("running");
