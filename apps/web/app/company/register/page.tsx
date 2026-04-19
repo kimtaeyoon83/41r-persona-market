@@ -182,6 +182,26 @@ export default function RegisterTest() {
     // --- Step 2: Deposit USDC via Phantom ---
     setStep("depositing");
     let signature: string;
+
+    // Dev-only test hook: localStorage.__E2E_BYPASS_DEPOSIT lets the
+    // browser E2E suite skip the Solana transaction + confirmation round
+    // trip without mocking the entire web3.js internals. The API side
+    // already accepts `deposit_tx_signature` as optional and gates real
+    // verification on NODE_ENV, so this flag is a no-op in production
+    // (window.__NEXT_DATA__ checks are available, but the simpler gate
+    // is: the surrounding code still signs the request with the wallet,
+    // so only genuine clients can take this path.)
+    const e2eBypass =
+      process.env.NODE_ENV !== "production" &&
+      typeof window !== "undefined" &&
+      window.localStorage.getItem("__E2E_BYPASS_DEPOSIT") === "1";
+    if (e2eBypass) {
+      // Fake 88-char base58-ish signature (passes schema min-length of 32)
+      signature = `e2e_bypass_${Date.now().toString(36)}_${Math.random().toString(36).slice(2).padEnd(50, "a")}`;
+      setTxSignature(signature);
+      setStep("confirming");
+      // Fall through to the API call below.
+    } else {
     try {
       const connection = new Connection(SOLANA_RPC, "confirmed");
       const senderPubkey = new PublicKey(form.company_wallet);
@@ -234,6 +254,7 @@ export default function RegisterTest() {
       setStep("idle");
       return;
     }
+    } // end e2eBypass else
 
     // --- Step 4: Register the test via API (includes LLM generation) ---
     setStep("creating");
