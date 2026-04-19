@@ -12,10 +12,40 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export type SignMessage = (msg: string) => Promise<string>;
+
+/**
+ * Perform a mutating request authenticated with a wallet-signed nonce.
+ * Caller provides the wallet address + a signMessage fn (from useWalletContext).
+ * The backend issues a short-lived nonce; the client signs it; we forward
+ * wallet/nonce/signature via headers. The nonce is single-use.
+ */
+export async function signedRequest<T>(
+  path: string,
+  init: { method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown },
+  auth: { wallet: string; signMessage: SignMessage },
+): Promise<T> {
+  const { nonce } = await request<{ nonce: string; expiresAt: number }>(
+    `/api/auth/nonce?wallet=${encodeURIComponent(auth.wallet)}`,
+  );
+  const signature = await auth.signMessage(nonce);
+  return request<T>(path, {
+    method: init.method,
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    headers: {
+      'x-wallet-address': auth.wallet,
+      'x-nonce': nonce,
+      'x-signature': signature,
+    },
+  });
+}
+
 // ─── Test APIs ───────────────────────────────────────
 export const testApi = {
-  register: (data: { target_url: string; requirements?: string; budget_usdc: number; reward_per_tester: number; company_wallet: string; deposit_tx_signature?: string; enable_auto_test?: boolean }) =>
-    request('/api/test/register', { method: 'POST', body: JSON.stringify(data) }),
+  register: (
+    data: { target_url: string; requirements?: string; budget_usdc: number; reward_per_tester: number; company_wallet: string; deposit_tx_signature?: string; enable_auto_test?: boolean },
+    signMessage: SignMessage,
+  ) => signedRequest('/api/test/register', { method: 'POST', body: data }, { wallet: data.company_wallet, signMessage }),
 
   list: () => request('/api/tests'),
 
@@ -26,16 +56,26 @@ export const testApi = {
 export const testerApi = {
   list: () => request('/api/testers'),
 
-  register: (data: { wallet_address: string; display_name: string; profile?: Record<string, unknown> }) =>
-    request('/api/tester/register', { method: 'POST', body: JSON.stringify(data) }),
+  register: (
+    data: { wallet_address: string; display_name: string; profile?: Record<string, unknown> },
+    signMessage: SignMessage,
+  ) => signedRequest('/api/tester/register', { method: 'POST', body: data }, { wallet: data.wallet_address, signMessage }),
+
+  update: (
+    wallet: string,
+    data: { display_name?: string; profile?: Record<string, unknown> },
+    signMessage: SignMessage,
+  ) => signedRequest(`/api/tester/${wallet}`, { method: 'PUT', body: data }, { wallet, signMessage }),
 
   get: (wallet: string) => request(`/api/tester/${wallet}`),
 };
 
 // ─── Report APIs ─────────────────────────────────────
 export const reportApi = {
-  submit: (data: Record<string, unknown>) =>
-    request('/api/report/submit', { method: 'POST', body: JSON.stringify(data) }),
+  submit: (
+    data: { tester_addr: string; [k: string]: unknown },
+    signMessage: SignMessage,
+  ) => signedRequest('/api/report/submit', { method: 'POST', body: data }, { wallet: data.tester_addr, signMessage }),
 
   get: (id: string) => request(`/api/report/${id}`),
 

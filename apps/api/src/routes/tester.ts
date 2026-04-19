@@ -1,6 +1,12 @@
 import { Router, type Router as RouterType } from 'express';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
+import {
+  registerTesterBodySchema,
+  updateTesterBodySchema,
+  validateBody,
+} from '../schemas/index.js';
+import { requireSignedRequest } from '../middleware/auth.js';
 
 const router: RouterType = Router();
 
@@ -74,45 +80,14 @@ router.get('/', async (_req, res) => {
 });
 
 // POST /api/tester/register — Register a new tester
-router.post('/register', async (req, res) => {
+router.post('/register', requireSignedRequest, validateBody(registerTesterBodySchema), async (req, res) => {
   try {
     const { wallet_address, display_name, profile } = req.body;
 
-    if (!wallet_address || !display_name) {
-      res.status(400).json({ error: 'wallet_address and display_name are required' });
+    const signedWallet = (req as unknown as { signedWallet: string }).signedWallet;
+    if (signedWallet !== wallet_address) {
+      res.status(403).json({ error: 'signed wallet does not match wallet_address' });
       return;
-    }
-
-    // Validate profile if provided
-    if (profile) {
-      // Required fields
-      if (!Array.isArray(profile.expertise) || profile.expertise.length === 0) {
-        res.status(400).json({ error: 'profile.expertise must be a non-empty array' });
-        return;
-      }
-      if (!profile.experience_level) {
-        res.status(400).json({ error: 'profile.experience_level is required' });
-        return;
-      }
-
-      // Validate enum fields if provided
-      const validAgeRanges = ['10s', '20s', '30s', '40s', '50s', '60+'];
-      if (profile.age_range && !validAgeRanges.includes(profile.age_range)) {
-        res.status(400).json({ error: `profile.age_range must be one of: ${validAgeRanges.join(', ')}` });
-        return;
-      }
-
-      const validCryptoExp = ['none', 'beginner', 'intermediate', 'advanced'];
-      if (profile.crypto_experience && !validCryptoExp.includes(profile.crypto_experience)) {
-        res.status(400).json({ error: `profile.crypto_experience must be one of: ${validCryptoExp.join(', ')}` });
-        return;
-      }
-
-      const validDevices = ['mobile', 'desktop'];
-      if (profile.primary_device && !validDevices.includes(profile.primary_device)) {
-        res.status(400).json({ error: `profile.primary_device must be one of: ${validDevices.join(', ')}` });
-        return;
-      }
     }
 
     // Atomic upsert-or-fail: single INSERT with PK conflict skip.
@@ -173,19 +148,20 @@ router.get('/:wallet', async (req, res) => {
 });
 
 // PUT /api/tester/:wallet — Update tester profile
-router.put('/:wallet', async (req, res) => {
+router.put('/:wallet', requireSignedRequest, validateBody(updateTesterBodySchema), async (req, res) => {
   try {
-    const { wallet } = req.params;
+    const wallet = req.params.wallet as string;
     const { display_name, profile } = req.body;
+
+    const signedWallet = (req as unknown as { signedWallet: string }).signedWallet;
+    if (signedWallet !== wallet) {
+      res.status(403).json({ error: 'signed wallet does not match route wallet' });
+      return;
+    }
 
     const updates: Record<string, unknown> = {};
     if (display_name) updates.displayName = display_name;
     if (profile) updates.profile = profile;
-
-    if (Object.keys(updates).length === 0) {
-      res.status(400).json({ error: 'No fields to update' });
-      return;
-    }
 
     const [tester] = await db.update(schema.testers)
       .set(updates)

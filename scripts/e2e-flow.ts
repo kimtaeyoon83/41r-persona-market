@@ -9,9 +9,16 @@
  * 4. Persona is generated
  * 5. Auto test is triggered
  *
+ * Each fake actor is a real ed25519 keypair so signed-request auth
+ * actually exercises the verification path.
+ *
  * Usage: npx tsx scripts/e2e-flow.ts
  * Requires: API running on localhost:4100
  */
+
+import nacl from 'tweetnacl';
+import bs58 from 'bs58';
+import { PublicKey } from '@solana/web3.js';
 
 const API = process.env.API_URL || 'http://localhost:4100';
 
@@ -23,6 +30,38 @@ async function request(path: string, options?: RequestInit) {
   const data = await res.json();
   if (!res.ok) throw new Error(`${res.status}: ${JSON.stringify(data)}`);
   return data;
+}
+
+interface Actor {
+  wallet: string;
+  secretKey: Uint8Array;
+}
+
+function makeActor(): Actor {
+  const kp = nacl.sign.keyPair();
+  return {
+    wallet: new PublicKey(kp.publicKey).toBase58(),
+    secretKey: kp.secretKey,
+  };
+}
+
+async function signedRequest(
+  path: string,
+  init: { method: 'POST' | 'PUT'; body?: unknown },
+  actor: Actor,
+) {
+  const { nonce } = await request(`/api/auth/nonce?wallet=${encodeURIComponent(actor.wallet)}`);
+  const sig = nacl.sign.detached(new TextEncoder().encode(nonce), actor.secretKey);
+  return request(path, {
+    method: init.method,
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    headers: {
+      'Content-Type': 'application/json',
+      'x-wallet-address': actor.wallet,
+      'x-nonce': nonce,
+      'x-signature': bs58.encode(sig),
+    },
+  });
 }
 
 function log(step: string, detail: string) {
@@ -50,36 +89,43 @@ async function main() {
     process.exit(1);
   }
 
-  const companyWallet = `E2ECompany${Date.now().toString(36)}11111111111111111`;
-  const testerWallet = `E2ETester${Date.now().toString(36)}111111111111111111`;
+  const company = makeActor();
+  const tester = makeActor();
+  const companyWallet = company.wallet;
+  const testerWallet = tester.wallet;
 
-  // 1. Company registers a test
-  console.log('\n--- Step 1: Company Registers Test ---');
-  let testId: string;
-  try {
-    const result = await request('/api/test/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        target_url: 'https://example.com',
-        requirements: 'Test the main page load and navigation',
-        budget_usdc: 50,
-        company_wallet: companyWallet,
-      }),
-    });
-    testId = result.test.id;
-    pass(`Test created: ${testId}`);
-    log('Test Cases', `checklist: ${result.test_cases.checklist.length}, scenarios: ${result.test_cases.scenarios.length}, questionnaire: ${result.test_cases.questionnaire.length}`);
-  } catch (err) {
-    fail('Register Test', err);
-    process.exit(1);
+  // 1. Company registers 3 tests — one per round, because the (tester,
+  // test, isPersonaTest) uniqueness prevents duplicate submissions.
+  console.log('\n--- Step 1: Company Registers 3 Tests ---');
+  const testIds: string[] = [];
+  for (let i = 1; i <= 3; i++) {
+    try {
+      const result = await signedRequest('/api/test/register', {
+        method: 'POST',
+        body: {
+          target_url: `https://example.com/flow-${i}`,
+          requirements: `Test ${i}: main page load and navigation`,
+          budget_usdc: 50,
+          reward_per_tester: 3,
+          company_wallet: companyWallet,
+        },
+      }, company);
+      testIds.push(result.test.id);
+      pass(`Test ${i}/3 created: ${result.test.id}`);
+    } catch (err) {
+      fail(`Register Test ${i}`, err);
+      process.exit(1);
+    }
   }
+  // Keep the old testId var for downstream code that reports against it.
+  const testId = testIds[0];
 
   // 2. Tester registers
   console.log('\n--- Step 2: Tester Registers ---');
   try {
-    await request('/api/tester/register', {
+    await signedRequest('/api/tester/register', {
       method: 'POST',
-      body: JSON.stringify({
+      body: {
         wallet_address: testerWallet,
         display_name: 'E2E Tester',
         profile: {
@@ -90,8 +136,8 @@ async function main() {
           languages: ['en'],
           device_types: ['desktop'],
         },
-      }),
-    });
+      },
+    }, tester);
     pass(`Tester registered: ${testerWallet.slice(0, 16)}...`);
   } catch (err) {
     fail('Register Tester', err);
@@ -104,11 +150,11 @@ async function main() {
 
   for (let i = 1; i <= 3; i++) {
     try {
-      const result = await request('/api/report/submit', {
+      const result = await signedRequest('/api/report/submit', {
         method: 'POST',
-        body: JSON.stringify({
+        body: {
           tester_addr: testerWallet,
-          test_id: testId!,
+          test_id: testIds[i - 1]!,
           checklist_results: [
             { id: 'CL01', status: 'passed', memo: `E2E test round ${i} - item 1` },
             { id: 'CL02', status: 'passed', memo: `E2E test round ${i} - item 2` },
@@ -128,8 +174,8 @@ async function main() {
             { id: 'Q03', answer: 6 + i },
             { id: 'Q04', answer: `Suggestion from round ${i}: Add loading states` },
           ],
-        }),
-      });
+        },
+      }, tester);
 
       pass(`Report ${i}/3 — quality: ${result.quality_score}, reward: $${result.reward_amount?.toFixed(2)}`);
 
@@ -150,6 +196,8 @@ async function main() {
         method: 'POST',
         body: JSON.stringify({ tester_addr: testerWallet }),
       });
+      // persona.generate is not signature-gated — it's a derive-only
+      // operation safe to invoke for any wallet that has 3 reports.
       pass(`Persona generated: ${result.persona.id}`);
       if (result.persona.sasAttestId) {
         log('SAS', `Attestation: ${result.persona.sasAttestId}`);
@@ -158,11 +206,14 @@ async function main() {
       // 5. Auto test
       console.log('\n--- Step 5: Auto Test ---');
       try {
+        // payment_tx is still required to pass the 402 gate even when
+        // SKIP_PAYMENT_VERIFY=true skips the chain verification.
         const autoResult = await request('/api/autotest/run', {
           method: 'POST',
           body: JSON.stringify({
             test_id: testId!,
             persona_id: result.persona.id,
+            payment_tx: `e2e_fake_${Date.now().toString(36)}padding000000000000000000000000`,
           }),
         });
         pass(`Auto test job started: ${autoResult.job_id}`);

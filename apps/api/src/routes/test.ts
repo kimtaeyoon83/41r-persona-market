@@ -2,17 +2,20 @@ import { Router, type Router as RouterType } from 'express';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { generateTestCases } from '../services/llm.js';
-import type { RegisterTestRequest } from '@41rpm/shared';
+import { registerTestBodySchema, validateBody } from '../schemas/index.js';
+import { requireSignedRequest } from '../middleware/auth.js';
+import { llmGenerateLimiter } from '../middleware/rate-limit.js';
 
 const router: RouterType = Router();
 
 // POST /api/test/register — Create a new test with AI-generated test cases
-router.post('/register', async (req, res) => {
+router.post('/register', llmGenerateLimiter, requireSignedRequest, validateBody(registerTestBodySchema), async (req, res) => {
   try {
-    const { target_url, requirements, budget_usdc, reward_per_tester, company_wallet, deposit_tx_signature, enable_auto_test } = req.body as RegisterTestRequest;
+    const { target_url, requirements, budget_usdc, reward_per_tester, company_wallet, deposit_tx_signature, enable_auto_test } = req.body;
 
-    if (!target_url || !company_wallet) {
-      res.status(400).json({ error: 'target_url and company_wallet are required' });
+    const signedWallet = (req as unknown as { signedWallet: string }).signedWallet;
+    if (signedWallet !== company_wallet) {
+      res.status(403).json({ error: 'signed wallet does not match company_wallet' });
       return;
     }
 

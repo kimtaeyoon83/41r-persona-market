@@ -8,6 +8,8 @@ interface WalletContextType {
   connected: boolean;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
+  /** Sign a plain-text message with the connected wallet. Returns base58 signature. */
+  signMessage: (message: string) => Promise<string>;
 }
 
 const WalletContext = createContext<WalletContextType>({
@@ -16,17 +18,43 @@ const WalletContext = createContext<WalletContextType>({
   connected: false,
   connect: async () => {},
   disconnect: async () => {},
+  signMessage: async () => { throw new Error('Wallet not connected'); },
 });
 
 export function useWalletContext() {
   return useContext(WalletContext);
 }
 
-function getPhantom(): { solana?: { isPhantom?: boolean; connect: () => Promise<{ publicKey: { toBase58: () => string } }>; disconnect: () => Promise<void>; on: (event: string, cb: () => void) => void; publicKey?: { toBase58: () => string } | null } } | undefined {
+type PhantomSolana = {
+  isPhantom?: boolean;
+  connect: () => Promise<{ publicKey: { toBase58: () => string } }>;
+  disconnect: () => Promise<void>;
+  on: (event: string, cb: () => void) => void;
+  publicKey?: { toBase58: () => string } | null;
+  signMessage?: (msg: Uint8Array, display?: 'utf8' | 'hex') => Promise<{ signature: Uint8Array }>;
+};
+
+function getPhantom(): { solana?: PhantomSolana } | undefined {
   if (typeof window !== "undefined") {
-    return (window as unknown as { phantom?: { solana?: { isPhantom?: boolean; connect: () => Promise<{ publicKey: { toBase58: () => string } }>; disconnect: () => Promise<void>; on: (event: string, cb: () => void) => void; publicKey?: { toBase58: () => string } | null } } }).phantom;
+    return (window as unknown as { phantom?: { solana?: PhantomSolana } }).phantom;
   }
   return undefined;
+}
+
+function toBase58(bytes: Uint8Array): string {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  // Minimal base58 encoder — sufficient for 64-byte ed25519 signatures.
+  let num = 0n;
+  for (const b of bytes) num = (num << 8n) + BigInt(b);
+  let out = '';
+  while (num > 0n) {
+    const rem = Number(num % 58n);
+    num = num / 58n;
+    out = alphabet[rem] + out;
+  }
+  // Preserve leading zero bytes as leading '1's.
+  for (const b of bytes) { if (b === 0) out = '1' + out; else break; }
+  return out;
 }
 
 export function SolanaWalletProvider({ children }: { children: ReactNode }) {
@@ -81,8 +109,18 @@ export function SolanaWalletProvider({ children }: { children: ReactNode }) {
     setPublicKey(null);
   }, []);
 
+  const signMessage = useCallback(async (message: string): Promise<string> => {
+    const phantom = getPhantom();
+    if (!phantom?.solana?.signMessage) {
+      throw new Error('Wallet does not support signMessage');
+    }
+    const encoded = new TextEncoder().encode(message);
+    const { signature } = await phantom.solana.signMessage(encoded, 'utf8');
+    return toBase58(signature);
+  }, []);
+
   return (
-    <WalletContext.Provider value={{ publicKey, connecting, connected: !!publicKey, connect, disconnect }}>
+    <WalletContext.Provider value={{ publicKey, connecting, connected: !!publicKey, connect, disconnect, signMessage }}>
       {children}
     </WalletContext.Provider>
   );

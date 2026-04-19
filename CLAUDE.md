@@ -66,8 +66,10 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
 pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
-pnpm --filter api test      # Run vitest (59 tests)
-pnpm --filter api db:push   # Push schema to DB
+pnpm --filter api test      # Run vitest (98 tests)
+pnpm --filter api db:generate  # Emit a new versioned migration from schema changes → apps/api/drizzle/*.sql
+pnpm --filter api db:migrate   # Apply pending migrations to DATABASE_URL (preferred for Railway deploys)
+pnpm --filter api db:push      # Dev only: push schema directly, bypassing migration files
 pnpm tsx scripts/seed-data.ts              # Base seed (5 hand-written + 2 tests)
 pnpm tsx scripts/append-diverse-personas.ts  # +15 diverse profiles (total 20 personas)
 pnpm tsx scripts/run-persona-batch.ts --limit N   # Batch persona runs (default mode=text)

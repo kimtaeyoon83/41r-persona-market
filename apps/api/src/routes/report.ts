@@ -13,32 +13,20 @@ import {
   type ChecklistStatus,
 } from '../services/comparison.js';
 import { deriveFindings } from '../services/findings.js';
-import type { SubmitReportRequest } from '@41rpm/shared';
+import { submitReportBodySchema, validateBody } from '../schemas/index.js';
+import { requireSignedRequest } from '../middleware/auth.js';
+import { reportSubmitLimiter } from '../middleware/rate-limit.js';
 
 const router: RouterType = Router();
 
 // POST /api/report/submit — Submit a test report
-router.post('/submit', async (req, res) => {
+router.post('/submit', reportSubmitLimiter, requireSignedRequest, validateBody(submitReportBodySchema), async (req, res) => {
   try {
-    const body = req.body as SubmitReportRequest;
-    const { tester_addr, test_id, checklist_results, scenario_log, questionnaire_answers, screenshots } = body;
+    const { tester_addr, test_id, checklist_results, scenario_log, questionnaire_answers, screenshots } = req.body;
 
-    if (!tester_addr || !test_id) {
-      res.status(400).json({ error: 'tester_addr and test_id are required' });
-      return;
-    }
-
-    // Reject empty reports up-front so the LLM scoring path doesn't get
-    // hit by spam. An empty submission previously fell through to the
-    // fallback score=2.0 branch and still paid ~25% of the reward.
-    const hasChecklist = Array.isArray(checklist_results) && checklist_results.length > 0;
-    const hasQuestionnaire = Array.isArray(questionnaire_answers) && questionnaire_answers.length > 0;
-    const hasScenario = Array.isArray(scenario_log) && scenario_log.length > 0;
-    if (!hasChecklist && !hasQuestionnaire && !hasScenario) {
-      res.status(400).json({
-        error: 'Empty report',
-        message: 'At least one of checklist_results, questionnaire_answers, or scenario_log must be non-empty.',
-      });
+    const signedWallet = (req as unknown as { signedWallet: string }).signedWallet;
+    if (signedWallet !== tester_addr) {
+      res.status(403).json({ error: 'signed wallet does not match tester_addr' });
       return;
     }
 

@@ -12,6 +12,9 @@ import {
 } from '../services/persona_engine.js';
 import { runStagehandHybrid } from '../services/stagehand_hybrid.js';
 import { uploadToR2 } from '../services/r2.js';
+import { skipPaymentVerify } from '../config/env.js';
+import { autotestRunBodySchema, validateBody } from '../schemas/index.js';
+import { autotestRunLimiter } from '../middleware/rate-limit.js';
 
 const PERSONA_ENGINE_URL = process.env.PERSONA_ENGINE_URL ?? 'http://persona-engine:4200';
 
@@ -69,14 +72,9 @@ async function verifyUsdcPayment(txSignature: string): Promise<{ verified: boole
 }
 
 // POST /api/autotest/run — Start an auto test job (x402-gated: $0.10 USDC)
-router.post('/run', async (req, res) => {
+router.post('/run', autotestRunLimiter, validateBody(autotestRunBodySchema), async (req, res) => {
   try {
     const { test_id, persona_id, payment_tx } = req.body;
-
-    if (!test_id || !persona_id) {
-      res.status(400).json({ error: 'test_id and persona_id are required' });
-      return;
-    }
 
     // x402-style payment gate
     if (!payment_tx) {
@@ -96,9 +94,8 @@ router.post('/run', async (req, res) => {
       return;
     }
 
-    // Verify payment on-chain (skip in devnet demo mode)
-    const skipVerification = process.env.SKIP_PAYMENT_VERIFY === 'true';
-    if (!skipVerification) {
+    // Verify payment on-chain (skip in local dev only — forced on in production)
+    if (!skipPaymentVerify) {
       const { verified, error: verifyError } = await verifyUsdcPayment(payment_tx);
       if (!verified) {
         res.status(402).json({

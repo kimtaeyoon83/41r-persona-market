@@ -10,11 +10,16 @@ import autotestRouter from './routes/autotest.js';
 import autotestBscRouter from './routes/autotest-bsc.js';
 import helloRouter from './routes/hello.js';
 import x402DemoRouter from './routes/x402-demo.js';
+import authRouter from './routes/auth.js';
 import {
   createX402Middleware,
   createFallbackPaymentMiddleware,
 } from './middleware/x402.js';
 import { startSettlementWorker } from './services/settlement-worker.js';
+import { allowedOrigins, corsOptions } from './config/cors.js';
+import { useX402Fallback, logEnvSummary } from './config/env.js';
+import { logger } from './logger.js';
+import { runHealthChecks } from './services/health.js';
 
 dotenv.config({ path: '../../.env' });
 // In production (Docker), env vars are injected directly — dotenv is a no-op
@@ -22,12 +27,26 @@ dotenv.config({ path: '../../.env' });
 const app: Express = express();
 const PORT = process.env.PORT || process.env.API_PORT || 4100;
 
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
+logger.info({ allowedOrigins }, 'CORS allowlist');
 
-// Health check
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check — shallow (process alive) + deep (dependencies).
+// GET /api/health               → shallow, 200 if the process is up
+// GET /api/health?deep=1        → pings DB, persona-engine, Solana RPC
+app.get('/api/health', async (req, res) => {
+  const timestamp = new Date().toISOString();
+  if (req.query.deep !== '1') {
+    res.json({ status: 'ok', timestamp });
+    return;
+  }
+  const checks = await runHealthChecks();
+  const healthy = Object.values(checks).every((c) => c.status === 'ok');
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? 'ok' : 'degraded',
+    timestamp,
+    dependencies: checks,
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -37,18 +56,19 @@ app.get('/api/health', (_req, res) => {
 // The middleware internally checks req.path to decide which routes need payment.
 // ---------------------------------------------------------------------------
 try {
-  const x402Mode = process.env.USE_X402_FALLBACK === 'true' ? 'fallback' : 'x402';
+  const x402Mode = useX402Fallback ? 'fallback' : 'x402';
   const x402Middleware = x402Mode === 'fallback'
     ? createFallbackPaymentMiddleware()
     : createX402Middleware();
   // Apply at root — middleware internally matches gated paths
   app.use(x402Middleware);
-  console.log(`[api] x402 middleware applied (mode: ${x402Mode}) — /api/hello, /api/test/*/results, /api/persona/*`);
+  logger.info({ mode: x402Mode }, 'x402 middleware applied');
 } catch (err) {
-  console.warn('[api] x402 middleware init failed, routes mounted without payment gate:', err instanceof Error ? err.message : err);
+  logger.warn({ err: err instanceof Error ? err.message : err }, 'x402 middleware init failed');
 }
 
 // Routes
+app.use('/api/auth', authRouter);
 app.use('/api/hello', helloRouter);
 app.use('/api/test', testRouter);
 app.use('/api/tests', testRouter);
@@ -68,7 +88,8 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 app.listen(PORT, () => {
-  console.log(`[api] listening on http://localhost:${PORT}`);
+  logger.info({ port: PORT }, 'API listening');
+  logEnvSummary();
 
   // Kick off the settlement retry worker. Safe to call at boot even if
   // no pending rows exist — the first tick is a no-op in that case.

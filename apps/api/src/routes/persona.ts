@@ -3,18 +3,15 @@ import { desc, eq } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { sasService, calculateTrustTier } from '../services/sas.js';
 import { recomputePersona } from '../services/persona.js';
+import { personaGenerateBodySchema, validateBody } from '../schemas/index.js';
+import { llmGenerateLimiter } from '../middleware/rate-limit.js';
 
 const router: RouterType = Router();
 
 // POST /api/persona/generate — Generate persona from 3 reports
-router.post('/generate', async (req, res) => {
+router.post('/generate', llmGenerateLimiter, validateBody(personaGenerateBodySchema), async (req, res) => {
   try {
     const { tester_addr } = req.body;
-
-    if (!tester_addr) {
-      res.status(400).json({ error: 'tester_addr is required' });
-      return;
-    }
 
     // Verify tester has 3+ tests
     const [tester] = await db.select().from(schema.testers).where(eq(schema.testers.walletAddress, tester_addr));
