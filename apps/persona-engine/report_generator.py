@@ -191,19 +191,18 @@ def generate_structured_report(
 
     try:
         # Cost optimisation (2026-04-19): structured_report was 38% of
-        # the Sonnet bill on a typical 5-run batch (~$0.14/run) while
-        # the dashboard currently doesn't render pain_points or
-        # recommendations — they live in test_reports.questionnaire
-        # as sentinels for a future UX report PDF. So we route this
-        # through Haiku ("review_inspection" maps to tier=low in
-        # persona_agent/routing.yaml) and cap output at 800 tokens
-        # (pre-cap the model was saturating at 1500 every call).
-        # Projected impact: ~2.8¢/call → ~0.45¢/call, ~85% cheaper.
+        # the Sonnet bill on a typical 5-run batch (~$0.14/run). We
+        # route this through Haiku ("review_inspection" = tier=low in
+        # persona_agent/routing.yaml). max_tokens: the first cut at
+        # 800 hit truncation on real pain-point lists (JSON parse
+        # errors, returning the empty skeleton). 1400 fits the typical
+        # 4-pain-points / 5-recommendations output with headroom and
+        # is still <20% the Sonnet cost at 1500.
         response = llm_call(
             "review_inspection",
             [{"role": "user", "content": user_msg}],
             system=_SYSTEM,
-            max_tokens=800,
+            max_tokens=1400,
         )
         raw = response.get("content", "") or ""
         start = raw.find("{")
