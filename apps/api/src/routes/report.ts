@@ -4,6 +4,7 @@ import { db, schema } from '../db/index.js';
 import { calculateQualityScore, QualityScoreTimeout, type QualityResult } from '../services/llm.js';
 import {
   buildConfusionMatrix,
+  computeCohortMetrics,
   computePerItemAgreement,
   convergenceCurve,
   ksStatistic,
@@ -377,6 +378,18 @@ router.get('/compare/:testId', async (req, res) => {
       return;
     }
 
+    // Load every tester's profile so we can tag each report with a
+    // cohort key. Cheap — the seed is ~25 testers. We fetch once and
+    // build an in-memory map.
+    const testerWallets = [...new Set(reports.map((r) => r.testerAddr))];
+    const testers = testerWallets.length > 0
+      ? await db.select().from(schema.testers)
+      : [];
+    const profileByWallet = new Map<string, Record<string, unknown> | null>();
+    for (const t of testers) {
+      profileByWallet.set(t.walletAddress, (t.profile as Record<string, unknown> | null) ?? null);
+    }
+
     const manual = reports.filter(r => !r.isPersonaTest);
     const persona = reports.filter(r => r.isPersonaTest);
 
@@ -465,6 +478,25 @@ router.get('/compare/:testId', async (req, res) => {
     const personaSorted = [...personaScores].slice(0, Math.min(manualScores.length, personaScores.length));
     const convergence = convergenceCurve(manualSorted, personaSorted);
 
+    // ─── Cohort breakdown (profile-based matching) ────────────────────
+    // Group human + persona reports by demographic cohort
+    // (crypto_experience by default) so the dashboard can surface
+    // per-cohort agreement separately from the wallet-paired view.
+    // Matched humans and personas of the same profile are the honest
+    // "persona ≈ human" comparison — a 20s/beginner/mobile persona
+    // running on jup.ag should look like a 20s/beginner/mobile human
+    // running on jup.ag, not like the 40s/advanced expert in the next
+    // row of the reports table.
+    const byCohort = computeCohortMetrics(
+      reports.map((r) => ({
+        testerAddr: r.testerAddr,
+        isPersonaTest: r.isPersonaTest,
+        qualityScore: r.qualityScore,
+        checklistResults: (r.checklistResults as Array<{ id: string; status: ChecklistStatus }> | null) ?? null,
+        profile: profileByWallet.get(r.testerAddr) ?? null,
+      })),
+    );
+
     const findings = deriveFindings({
       manualCount: manual.length,
       personaCount: persona.length,
@@ -503,6 +535,7 @@ router.get('/compare/:testId', async (req, res) => {
         rating_distribution: ratingDistribution,
         convergence,
         findings,
+        by_cohort: byCohort,
       },
     });
   } catch (error) {

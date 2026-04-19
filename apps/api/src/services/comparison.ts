@@ -214,6 +214,106 @@ export function jaccard<T>(a: Set<T>, b: Set<T>): number {
   return union === 0 ? 0 : inter / union;
 }
 
+// ─── Cohort matching ────────────────────────────────────────────────
+
+export type CohortKey = string; // e.g. "advanced", or "30s/advanced/desktop"
+
+/**
+ * Build a coarse-grained cohort label from a tester profile.
+ * Default projection is ``crypto_experience`` — 4 buckets that carry
+ * most of the "how will this person behave on a crypto SPA" signal
+ * while keeping cohorts populated (5-7 members each in the current
+ * seed). Override via ``dimensions`` to add ``age_range`` / ``primary_device``.
+ *
+ * Unknown / missing values bucket into "unknown" so nobody falls out
+ * of the analysis.
+ */
+export function cohortKey(
+  profile: Record<string, unknown> | null | undefined,
+  dimensions: Array<'crypto_experience' | 'age_range' | 'primary_device' | 'experience_level'> = ['crypto_experience'],
+): CohortKey {
+  if (!profile) return 'unknown';
+  const parts = dimensions.map((d) => {
+    const v = profile[d];
+    return typeof v === 'string' && v ? v : 'unknown';
+  });
+  return parts.join('/');
+}
+
+export interface CohortMetrics {
+  cohort: CohortKey;
+  humanCount: number;
+  personaCount: number;
+  humanMeanQuality: number;
+  personaMeanQuality: number;
+  qualityAbsDiff: number;
+  itemAgreementRate: number;  // majority agreement on checklist items
+  ksStatisticQuality: number; // KS between human and persona quality distributions
+}
+
+/**
+ * Group reports by cohort and compute per-cohort agreement.
+ * Reports without profiles are put in the "unknown" cohort.
+ */
+export function computeCohortMetrics(
+  reports: Array<{
+    testerAddr: string;
+    isPersonaTest: boolean;
+    qualityScore: number | null;
+    checklistResults: ChecklistItemResult[] | null;
+    profile: Record<string, unknown> | null;
+  }>,
+  dimensions?: Parameters<typeof cohortKey>[1],
+): CohortMetrics[] {
+  // Bucket by cohort.
+  const buckets = new Map<CohortKey, {
+    humanQ: number[];
+    personaQ: number[];
+    humanCL: ChecklistItemResult[][];
+    personaCL: ChecklistItemResult[][];
+  }>();
+
+  for (const r of reports) {
+    const key = cohortKey(r.profile, dimensions);
+    const b = buckets.get(key) ?? {
+      humanQ: [], personaQ: [], humanCL: [], personaCL: [],
+    };
+    const q = typeof r.qualityScore === 'number' ? r.qualityScore : null;
+    const cl = Array.isArray(r.checklistResults) ? r.checklistResults : [];
+    if (r.isPersonaTest) {
+      if (q !== null) b.personaQ.push(q);
+      b.personaCL.push(cl);
+    } else {
+      if (q !== null) b.humanQ.push(q);
+      b.humanCL.push(cl);
+    }
+    buckets.set(key, b);
+  }
+
+  const mean = (xs: number[]) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
+  const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+  const out: CohortMetrics[] = [];
+  for (const [key, b] of buckets.entries()) {
+    // Item-level agreement — majority vote on each side, count matches.
+    const { overallAgreementRate } = computePerItemAgreement(b.humanCL, b.personaCL);
+    out.push({
+      cohort: key,
+      humanCount: b.humanCL.length,
+      personaCount: b.personaCL.length,
+      humanMeanQuality: round3(mean(b.humanQ)),
+      personaMeanQuality: round3(mean(b.personaQ)),
+      qualityAbsDiff: round3(Math.abs(mean(b.humanQ) - mean(b.personaQ))),
+      itemAgreementRate: round3(overallAgreementRate),
+      ksStatisticQuality: round3(ksStatistic(b.humanQ, b.personaQ)),
+    });
+  }
+
+  // Sort by descending population — most-populated cohorts first.
+  out.sort((a, b) => (b.humanCount + b.personaCount) - (a.humanCount + a.personaCount));
+  return out;
+}
+
 // ─── Convergence curve ──────────────────────────────────────────────
 
 export interface ConvergencePoint {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildConfusionMatrix,
+  cohortKey,
+  computeCohortMetrics,
   computePerItemAgreement,
   convergenceCurve,
   jaccard,
@@ -185,5 +187,85 @@ describe('convergenceCurve', () => {
     const ns = pts.map((p) => p.n);
     // must not include 10 twice
     expect(ns.filter((n) => n === 10)).toHaveLength(1);
+  });
+});
+
+describe('cohortKey', () => {
+  it('single dimension defaults to crypto_experience', () => {
+    expect(cohortKey({ crypto_experience: 'advanced' })).toBe('advanced');
+    expect(cohortKey({ crypto_experience: 'none' })).toBe('none');
+  });
+
+  it('missing/empty fields bucket into "unknown"', () => {
+    expect(cohortKey(null)).toBe('unknown');
+    expect(cohortKey({})).toBe('unknown');
+    expect(cohortKey({ crypto_experience: '' })).toBe('unknown');
+  });
+
+  it('multi-dimension joins with /', () => {
+    const profile = { crypto_experience: 'beginner', age_range: '20s', primary_device: 'mobile' };
+    expect(cohortKey(profile, ['age_range', 'crypto_experience', 'primary_device']))
+      .toBe('20s/beginner/mobile');
+  });
+});
+
+describe('computeCohortMetrics', () => {
+  const mk = (profile: Record<string, unknown>, isPersona: boolean, q: number, cl: Array<{ id: string; status: 'passed' | 'failed' | 'blocked' }>) => ({
+    testerAddr: Math.random().toString(36).slice(2, 10),
+    isPersonaTest: isPersona,
+    qualityScore: q,
+    checklistResults: cl,
+    profile,
+  });
+
+  it('groups reports by crypto_experience cohort', () => {
+    const reports = [
+      mk({ crypto_experience: 'advanced' }, false, 4.5, [{ id: 'a', status: 'passed' }]),
+      mk({ crypto_experience: 'advanced' }, true, 4.2, [{ id: 'a', status: 'passed' }]),
+      mk({ crypto_experience: 'beginner' }, false, 3.0, [{ id: 'a', status: 'failed' }]),
+      mk({ crypto_experience: 'beginner' }, true, 2.5, [{ id: 'a', status: 'failed' }]),
+    ];
+    const cohorts = computeCohortMetrics(reports);
+    expect(cohorts.map((c) => c.cohort).sort()).toEqual(['advanced', 'beginner']);
+    const adv = cohorts.find((c) => c.cohort === 'advanced')!;
+    expect(adv.humanCount).toBe(1);
+    expect(adv.personaCount).toBe(1);
+    expect(adv.itemAgreementRate).toBe(1); // both passed
+  });
+
+  it('cohorts sorted by total population descending', () => {
+    const reports = [
+      mk({ crypto_experience: 'none' }, false, 3.0, []),
+      mk({ crypto_experience: 'advanced' }, false, 4.0, []),
+      mk({ crypto_experience: 'advanced' }, true, 4.0, []),
+      mk({ crypto_experience: 'advanced' }, true, 4.0, []),
+    ];
+    const cohorts = computeCohortMetrics(reports);
+    expect(cohorts[0].cohort).toBe('advanced');
+    expect(cohorts[0].humanCount + cohorts[0].personaCount).toBe(3);
+    expect(cohorts[1].cohort).toBe('none');
+  });
+
+  it('null profile → unknown cohort', () => {
+    const reports = [
+      mk(null as unknown as Record<string, unknown>, false, 3.0, []),
+      mk({ crypto_experience: 'advanced' }, true, 4.0, []),
+    ];
+    const cohorts = computeCohortMetrics(reports);
+    expect(cohorts.some((c) => c.cohort === 'unknown')).toBe(true);
+  });
+
+  it('computes quality mean diff per cohort', () => {
+    const reports = [
+      mk({ crypto_experience: 'x' }, false, 4.0, []),
+      mk({ crypto_experience: 'x' }, false, 5.0, []),
+      mk({ crypto_experience: 'x' }, true, 3.0, []),
+      mk({ crypto_experience: 'x' }, true, 4.0, []),
+    ];
+    const cohorts = computeCohortMetrics(reports);
+    const c = cohorts[0];
+    expect(c.humanMeanQuality).toBe(4.5);
+    expect(c.personaMeanQuality).toBe(3.5);
+    expect(c.qualityAbsDiff).toBe(1);
   });
 });
