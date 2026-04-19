@@ -113,19 +113,33 @@ router.post('/run', async (req, res) => {
 
     console.log(`[autotest] Payment verified: ${payment_tx}`);
 
-    // When USE_PERSONA_ENGINE=1, route through the persona-engine HTTP
-    // service (soul-based agent loop + structured report) instead of
-    // the legacy Stagehand pipeline. Synchronous in this branch —
-    // engine.waitForResult handles polling internally. Text mode is
-    // fast (~15s); browser mode can take ~2min, so scripted batch runs
-    // should control concurrency client-side.
+    // Mode routing (2026-04-19 default):
+    //
+    //   mode="browser" | "stagehand_hybrid" | "hybrid" | undefined
+    //     → Node-side Stagehand drives the session, persona-engine only
+    //       runs the scoring adapters (checklist / questionnaire /
+    //       structured_report). Promoted to the default browser path
+    //       because it produces noticeably richer pain-point evidence
+    //       on complex SPAs where persona_agent's patience budget
+    //       trips mid-flow. See comparison notes in the
+    //       feature/event-hardening branch.
+    //
+    //   mode="text"
+    //     → persona-engine text mode (LLM-only prediction, no browser).
+    //
+    //   mode="persona_agent" | "persona_agent_browser"
+    //     → legacy persona_agent browser mode kept for persona-fidelity
+    //       research (patience budget, soul-driven abandonment). Use
+    //       explicitly when the experiment needs that behaviour.
+    //
+    //   fallback (USE_PERSONA_ENGINE=0)
+    //     → legacy startAutoTest pipeline from services/autotest.ts.
     const rawMode = req.body.mode as string | undefined;
+    const hybridModeAliases = new Set<string>(['stagehand_hybrid', 'hybrid', 'browser']);
+    const personaAgentAliases = new Set<string>(['persona_agent', 'persona_agent_browser']);
+    const isHybridMode = rawMode === undefined || hybridModeAliases.has(rawMode);
 
-    // Hybrid path: Node-side Stagehand drives the browser session,
-    // persona-engine only runs the evaluation adapters. Separate
-    // branch from isEngineEnabled() since some ops will want hybrid
-    // on while the default mode=browser still uses persona_agent.
-    if (rawMode === 'stagehand_hybrid' || rawMode === 'hybrid') {
+    if (isHybridMode) {
       try {
         const result = await withRequestId(
           `hybrid:${test_id.slice(0, 8)}:${persona_id.slice(0, 8)}`,
@@ -155,11 +169,15 @@ router.post('/run', async (req, res) => {
     }
 
     if (isEngineEnabled()) {
-      const mode = (rawMode === 'text' ? 'text' : 'browser') as 'text' | 'browser';
+      // text mode or explicit persona_agent opt-in go through the
+      // persona-engine path. Everything else (undefined / "browser")
+      // never lands here — the hybrid branch above already returned.
+      const mode: 'text' | 'browser' = rawMode === 'text'
+        ? 'text'
+        : rawMode !== undefined && personaAgentAliases.has(rawMode)
+          ? 'browser'
+          : 'text';
       try {
-        // Tag every Anthropic call this request makes with a stable
-        // request_id so scripts/usage-summary.ts can roll up "how many
-        // tokens did one /autotest/run burn?".
         const result = await withRequestId(
           `autotest:${test_id.slice(0, 8)}:${persona_id.slice(0, 8)}`,
           () => runAutoTestAndPersist({ testId: test_id, personaId: persona_id, mode }),
