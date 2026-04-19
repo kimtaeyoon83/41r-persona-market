@@ -68,7 +68,7 @@ export default function ExperimentIndex() {
   return (
     <div className="max-w-5xl p-6 space-y-6">
       <header>
-        <h1 className="font-display text-2xl font-bold">Experiments</h1>
+        <h1 className="t-display-m">Experiments</h1>
         <p className="text-sm text-[var(--text-secondary)] mt-1">
           Each test below carries a manual+persona pair. Click to see the full agreement dashboard.
         </p>
@@ -89,7 +89,7 @@ export default function ExperimentIndex() {
             <Link
               key={t.id}
               href={`/experiment/${t.id}`}
-              className="block p-5 rounded-xl border border-border-dim bg-surface hover:border-sol-green/30 hover:bg-surface-elevated transition-all"
+              className="block hf-card p-5 hover:border-sol-green/30 hover:bg-surface-elevated transition-all"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
@@ -120,7 +120,7 @@ export default function ExperimentIndex() {
 function Pill({ label, value }: { label: string; value: number }) {
   return (
     <div>
-      <div className="font-display text-xl font-bold">{value}</div>
+      <div className="t-display-s">{value}</div>
       <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-mono">
         {label}
       </div>

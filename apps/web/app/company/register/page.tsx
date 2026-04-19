@@ -131,7 +131,7 @@ function AiLoadingIndicator({ step }: { step: SubmitStep }) {
 
 export default function RegisterTest() {
   const router = useRouter();
-  const { publicKey } = useWalletContext();
+  const { publicKey, signMessage } = useWalletContext();
   const [step, setStep] = useState<SubmitStep>("idle");
   const [error, setError] = useState("");
   const [txSignature, setTxSignature] = useState("");
@@ -246,7 +246,7 @@ export default function RegisterTest() {
         company_wallet: form.company_wallet,
         deposit_tx_signature: signature,
         enable_auto_test: form.enable_auto_test,
-      })) as { test: { id: string } };
+      }, signMessage)) as { test: { id: string } };
 
       setStep("done");
 
@@ -276,7 +276,8 @@ export default function RegisterTest() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="font-display text-2xl font-bold mb-8">Register New Test</h1>
+      <h1 className="t-display-m mb-1">Register New Test</h1>
+      <p className="t-caption mb-7">URL + budget → AI-drafted test cases in ~15s</p>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>

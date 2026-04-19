@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { API_BASE } from "@/lib/api";
+import { DevDemoBanner } from "@/components/dev-demo-banner";
 
 const API = API_BASE;
 
@@ -91,6 +92,8 @@ export default function X402Page() {
 
   return (
     <div className="max-w-5xl">
+      <DevDemoBanner subtitle="Sandbox for the x402 micropayment protocol. End users do not reach this page." />
+
       {/* Header */}
       <h1 className="font-display text-2xl font-bold mb-2">x402 Micropayment Demo</h1>
       <p className="text-[var(--text-secondary)] text-sm mb-8">

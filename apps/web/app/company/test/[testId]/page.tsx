@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { testApi, reportApi } from "@/lib/api";
 import { LoadingSpinner } from "@/components/loading";
 import { ErrorDisplay } from "@/components/error-display";
+import { VarTabs } from "@/components/var-tabs";
 
 interface TestDetail {
   test: {
@@ -28,6 +29,7 @@ export default function TestDetailPage() {
   const [data, setData] = useState<TestDetail | null>(null);
   const [reports, setReports] = useState<Array<Record<string, unknown>>>([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const loadData = () => {
@@ -59,41 +61,54 @@ export default function TestDetailPage() {
 
   return (
     <div className="max-w-4xl">
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <h1 className="font-display text-2xl font-bold">Test Details</h1>
-          <span className={`px-2 py-0.5 rounded-md text-[11px] font-mono ${
-            test.status === 'active' ? 'bg-sol-green/10 text-sol-green border border-sol-green/20' : 'bg-surface-elevated text-[var(--text-tertiary)] border border-border-dim'
-          }`}>
+      <div className="mb-7">
+        <div className="flex items-center gap-2 mb-2">
+          <h1 className="t-display-m">Test Details</h1>
+          <span className={`chip ${test.status === 'active' ? 'success' : ''}`}>
+            {test.status === 'active' && <span className="chip-dot" />}
             {test.status}
           </span>
         </div>
-        <p className="text-[var(--text-secondary)] font-mono text-sm">{test.targetUrl}</p>
+        <p className="addr">{test.targetUrl}</p>
       </div>
 
-      <div className="grid grid-cols-4 gap-4 mb-8">
-        <div className="p-4 rounded-xl bg-surface border border-border-dim">
-          <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider">Budget</p>
-          <p className="text-lg font-display font-semibold mt-1">${test.budgetUsdc} USDC</p>
+      <div className="grid grid-cols-5 gap-4 mb-8">
+        <div className="hf-card p-4">
+          <div className="t-label">Budget</div>
+          <p className="money text-lg font-semibold mt-1">${test.budgetUsdc} <span className="text-[11px] text-[var(--fg-3)] font-normal">USDC</span></p>
         </div>
-        <div className="p-4 rounded-xl bg-surface border border-border-dim">
-          <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider">Reports</p>
-          <p className="text-lg font-display font-semibold mt-1">{reports.length}</p>
+        <div className="hf-card p-4">
+          <div className="t-label">Reports</div>
+          <p className="money text-lg font-semibold mt-1">{reports.length}</p>
         </div>
-        <div className="p-4 rounded-xl bg-surface border border-border-dim">
-          <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider">Total Paid</p>
-          <p className="text-lg font-display font-semibold mt-1 text-sol-green">
+        <div className="hf-card p-4">
+          <div className="t-label">Avg Quality</div>
+          {(() => {
+            const scored = reports.filter(r => typeof r.qualityScore === 'number');
+            if (scored.length === 0) {
+              return <p className="money text-lg font-semibold mt-1 text-[var(--fg-3)]">—</p>;
+            }
+            const avg = scored.reduce((a, r) => a + Number(r.qualityScore), 0) / scored.length;
+            const tone = avg >= 4 ? 'text-sol-green' : avg >= 3 ? 'text-[var(--warn)]' : 'text-[var(--danger)]';
+            return (
+              <p className={`money text-lg font-semibold mt-1 ${tone}`}>{avg.toFixed(1)}<span className="text-[11px] text-[var(--fg-3)] ml-1 font-normal">/ 5</span></p>
+            );
+          })()}
+        </div>
+        <div className="hf-card p-4">
+          <div className="t-label">Total Paid</div>
+          <p className="money text-lg font-semibold mt-1 text-sol-green">
             {reports.reduce((sum, r) => {
               const ss = ((r.settlements || []) as Array<{ amountToken?: number; settlementType?: string }>);
               const usdcTotal = ss.filter(s => s.settlementType !== '41r').reduce((a, s) => a + (s.amountToken || 0), 0);
               return sum + usdcTotal;
             }, 0).toFixed(1)}
-            <span className="text-xs text-[var(--text-tertiary)] ml-1">USDC</span>
+            <span className="text-[11px] text-[var(--fg-3)] ml-1 font-normal">USDC</span>
           </p>
         </div>
-        <div className="p-4 rounded-xl bg-surface border border-border-dim">
-          <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider">Created</p>
-          <p className="text-sm mt-1">{new Date(test.createdAt).toLocaleDateString()}</p>
+        <div className="hf-card p-4">
+          <div className="t-label">Created</div>
+          <p className="t-body mt-1">{new Date(test.createdAt).toLocaleDateString()}</p>
         </div>
       </div>
 
@@ -107,9 +122,111 @@ export default function TestDetailPage() {
         </a>
       )}
 
-      {reports.length > 0 && (
+      <div className="mb-5">
+        <VarTabs
+          variants={["Reports", "Issues", "Test cases"]}
+          active={tab}
+          onChange={setTab}
+        />
+      </div>
+
+      {tab === 1 && (() => {
+        type CheckTally = { id: string; task: string; failed: number; blocked: number };
+        const taskById = new Map<string, string>();
+        for (const c of test_cases.checklist || []) taskById.set(c.id, c.task);
+        const tally = new Map<string, CheckTally>();
+        for (const r of reports) {
+          const items = (r.checklistResults as Array<{ id: string; status: string }> | null) || [];
+          for (const it of items) {
+            if (!tally.has(it.id)) {
+              tally.set(it.id, { id: it.id, task: taskById.get(it.id) ?? it.id, failed: 0, blocked: 0 });
+            }
+            const t = tally.get(it.id)!;
+            if (it.status === 'failed') t.failed += 1;
+            else if (it.status === 'blocked') t.blocked += 1;
+          }
+        }
+        const critical: CheckTally[] = [];
+        const medium: CheckTally[] = [];
+        const nits: CheckTally[] = [];
+        for (const t of tally.values()) {
+          if (t.failed >= 2) critical.push(t);
+          else if (t.failed === 1 || t.blocked >= 2) medium.push(t);
+          else if (t.blocked === 1) nits.push(t);
+        }
+        // Low-rating questionnaire answers (numeric, <= 2 on any scale up to 5) become Medium signals
+        const lowRatings: string[] = [];
+        for (const r of reports) {
+          const qa = (r.questionnaireAnswers as Array<{ id: string; answer: string | number }> | null) || [];
+          for (const a of qa) {
+            if (typeof a.answer === 'number' && a.answer > 0 && a.answer <= 2) {
+              lowRatings.push(a.id);
+            }
+          }
+        }
+
+        const hasAny = critical.length + medium.length + nits.length + lowRatings.length > 0;
+        if (!hasAny) return null;
+
+        return (
+          <div className="mb-8">
+            <h2 className="t-display-s mb-3">Issues by severity</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="p-4 rounded-xl border border-[var(--status-error)]/25 bg-[var(--status-error)]/5">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-2 h-2 rounded-full bg-[var(--status-error)]" />
+                  <h3 className="text-sm font-display font-semibold text-[var(--status-error)]">Critical ({critical.length})</h3>
+                </div>
+                {critical.length === 0 && <p className="text-xs text-[var(--text-tertiary)]">No items failed by multiple testers.</p>}
+                <ul className="space-y-1.5 text-xs text-[var(--text-secondary)]">
+                  {critical.map((t) => (
+                    <li key={t.id}>
+                      <span className="font-mono text-[var(--text-tertiary)]">{t.id}</span> {t.task}
+                      <span className="ml-1 text-[var(--status-error)]">· failed ×{t.failed}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="p-4 rounded-xl border border-[var(--status-warning)]/25 bg-[var(--status-warning)]/5">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-2 h-2 rounded-full bg-[var(--status-warning)]" />
+                  <h3 className="text-sm font-display font-semibold text-[var(--status-warning)]">Medium ({medium.length + lowRatings.length})</h3>
+                </div>
+                {medium.length + lowRatings.length === 0 && <p className="text-xs text-[var(--text-tertiary)]">No medium-severity signals.</p>}
+                <ul className="space-y-1.5 text-xs text-[var(--text-secondary)]">
+                  {medium.map((t) => (
+                    <li key={t.id}>
+                      <span className="font-mono text-[var(--text-tertiary)]">{t.id}</span> {t.task}
+                      <span className="ml-1 text-[var(--status-warning)]">· failed ×{t.failed} · blocked ×{t.blocked}</span>
+                    </li>
+                  ))}
+                  {lowRatings.length > 0 && (
+                    <li className="text-[var(--text-tertiary)]">+ {lowRatings.length} low rating{lowRatings.length === 1 ? '' : 's'} (≤ 2)</li>
+                  )}
+                </ul>
+              </div>
+              <div className="p-4 rounded-xl border border-sol-green/20 bg-sol-green/5">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-2 h-2 rounded-full bg-sol-green" />
+                  <h3 className="text-sm font-display font-semibold text-sol-green">Nits ({nits.length})</h3>
+                </div>
+                {nits.length === 0 && <p className="text-xs text-[var(--text-tertiary)]">Nothing minor either.</p>}
+                <ul className="space-y-1.5 text-xs text-[var(--text-secondary)]">
+                  {nits.map((t) => (
+                    <li key={t.id}>
+                      <span className="font-mono text-[var(--text-tertiary)]">{t.id}</span> {t.task}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {tab === 0 && reports.length > 0 && (
         <div className="mb-8">
-          <h2 className="font-display text-lg font-semibold mb-3">Submitted Reports</h2>
+          <h2 className="t-display-s mb-3">Submitted Reports</h2>
           <div className="space-y-2">
             {reports.map((r) => {
               const rSettlements = (r.settlements || []) as Array<{ amountToken?: number; settlementType?: string; txSignature?: string }>;
@@ -118,49 +235,37 @@ export default function TestDetailPage() {
                 <a
                   key={String(r.id)}
                   href={`/report/${r.id}`}
-                  className={`block p-3 rounded-xl border transition-colors ${
-                    rejected
-                      ? 'bg-[var(--status-error)]/5 border-[var(--status-error)]/15 opacity-60 hover:opacity-80'
-                      : 'bg-surface border-border-dim hover:border-border-hover'
-                  }`}
+                  className={`hf-card block p-3 transition-colors hover:border-[var(--line-2)] ${rejected ? 'opacity-60' : ''}`}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
                       {rejected ? (
-                        <span className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-[var(--status-error)]/10 text-[var(--status-error)] border border-[var(--status-error)]/20">
-                          Rejected
-                        </span>
+                        <span className="chip danger">Rejected</span>
                       ) : (
-                        <span className={`px-2 py-0.5 rounded-md text-[11px] font-mono ${
-                          r.isPersonaTest ? 'bg-sol-green/10 text-sol-green border border-sol-green/20' : 'bg-sol-blue/10 text-sol-blue border border-sol-blue/20'
-                        }`}>
+                        <span className={`chip ${r.isPersonaTest ? 'success' : 'info'}`}>
                           {r.isPersonaTest ? 'AI Persona' : 'Manual'}
                         </span>
                       )}
-                      <span className="text-sm text-[var(--text-secondary)] font-mono">{String(r.testerAddr).slice(0, 16)}...</span>
+                      <span className="addr">{String(r.testerAddr).slice(0, 16)}…</span>
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3 shrink-0">
                       {!rejected && rSettlements.length > 0 && (
-                        <span className="flex items-center gap-2 text-xs font-mono">
+                        <span className="flex items-center gap-2">
                           {rSettlements.map((s, si) => (
-                            <span key={si} className={`flex items-center gap-1 ${s.settlementType === '41r' ? 'text-sol-purple' : 'text-sol-green'}`}>
-                              <span className="font-medium">
-                                {s.amountToken} {s.settlementType === '41r' ? '41R' : 'USDC'}
-                              </span>
+                            <span key={si} className={`money text-[12px] ${s.settlementType === '41r' ? 'text-sol-purple' : 'text-sol-green'}`}>
+                              {s.amountToken} {s.settlementType === '41r' ? '41R' : 'USDC'}
                             </span>
                           ))}
                         </span>
                       )}
-                      {rejected && (
-                        <span className="text-xs text-[var(--status-error)]">No reward</span>
-                      )}
-                      <span className={`text-sm font-semibold ${
+                      {rejected && <span className="t-caption text-[var(--danger)]">No reward</span>}
+                      <span className={`money text-[13px] font-semibold ${
                         Number(r.qualityScore) >= 4 ? 'text-sol-green' :
-                        Number(r.qualityScore) >= 3 ? 'text-[var(--status-warning)]' : 'text-[var(--status-error)]'
+                        Number(r.qualityScore) >= 3 ? 'text-[var(--warn)]' : 'text-[var(--danger)]'
                       }`}>
                         {Number(r.qualityScore).toFixed(1)}
                       </span>
-                      <span className="text-xs text-[var(--text-tertiary)]">{new Date(String(r.createdAt)).toLocaleDateString()}</span>
+                      <span className="addr">{new Date(String(r.createdAt)).toLocaleDateString()}</span>
                     </div>
                   </div>
                 </a>
@@ -171,22 +276,22 @@ export default function TestDetailPage() {
       )}
 
       {test.requirements && (
-        <div className="mb-8 p-4 rounded-xl bg-surface border border-border-dim">
-          <h2 className="text-sm font-mono text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Requirements</h2>
-          <p className="text-sm text-[var(--text-primary)]">{test.requirements}</p>
+        <div className="mb-8 hf-card p-4">
+          <div className="t-label mb-2">Requirements</div>
+          <p className="t-body">{test.requirements}</p>
         </div>
       )}
 
-      <div className="space-y-6">
+      <div className={`space-y-6 ${tab === 2 ? '' : 'hidden'}`}>
         <div>
-          <h2 className="font-display text-lg font-semibold mb-3">Checklist ({test_cases.checklist?.length || 0})</h2>
+          <h2 className="t-display-s mb-3">Checklist ({test_cases.checklist?.length || 0})</h2>
           <div className="space-y-2">
             {test_cases.checklist?.map((item) => (
-              <div key={item.id} className="p-3 rounded-xl bg-surface border border-border-dim flex gap-3">
-                <span className="text-xs font-mono text-sol-purple mt-0.5">{item.id}</span>
+              <div key={item.id} className="hf-card p-3 flex gap-3">
+                <span className="addr text-sol-purple mt-0.5">{item.id}</span>
                 <div>
-                  <p className="text-sm text-[var(--text-primary)]">{item.task}</p>
-                  <p className="text-xs text-[var(--text-tertiary)] mt-1">Expected: {item.expected}</p>
+                  <p className="t-body">{item.task}</p>
+                  <p className="t-caption mt-1">Expected: {item.expected}</p>
                 </div>
               </div>
             ))}
@@ -194,29 +299,29 @@ export default function TestDetailPage() {
         </div>
 
         <div>
-          <h2 className="font-display text-lg font-semibold mb-3">Scenarios ({test_cases.scenarios?.length || 0})</h2>
+          <h2 className="t-display-s mb-3">Scenarios ({test_cases.scenarios?.length || 0})</h2>
           <div className="space-y-2">
             {test_cases.scenarios?.map((item) => (
-              <div key={item.id} className="p-3 rounded-xl bg-surface border border-border-dim">
+              <div key={item.id} className="hf-card p-3">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-mono text-sol-blue">{item.id}</span>
-                  <span className="text-xs text-[var(--text-tertiary)]">{item.persona_type}</span>
+                  <span className="addr text-sol-blue">{item.id}</span>
+                  <span className="t-caption">{item.persona_type}</span>
                 </div>
-                <p className="text-sm text-[var(--text-primary)]">{item.narrative}</p>
+                <p className="t-body">{item.narrative}</p>
               </div>
             ))}
           </div>
         </div>
 
         <div>
-          <h2 className="font-display text-lg font-semibold mb-3">Questionnaire ({test_cases.questionnaire?.length || 0})</h2>
+          <h2 className="t-display-s mb-3">Questionnaire ({test_cases.questionnaire?.length || 0})</h2>
           <div className="space-y-2">
             {test_cases.questionnaire?.map((item) => (
-              <div key={item.id} className="p-3 rounded-xl bg-surface border border-border-dim flex gap-3">
-                <span className="text-xs font-mono text-sol-green mt-0.5">{item.id}</span>
+              <div key={item.id} className="hf-card p-3 flex gap-3">
+                <span className="addr text-sol-green mt-0.5">{item.id}</span>
                 <div>
-                  <p className="text-sm text-[var(--text-primary)]">{item.question}</p>
-                  <p className="text-xs text-[var(--text-tertiary)] mt-1">Type: {item.type}</p>
+                  <p className="t-body">{item.question}</p>
+                  <p className="t-caption mt-1">Type: {item.type}</p>
                 </div>
               </div>
             ))}

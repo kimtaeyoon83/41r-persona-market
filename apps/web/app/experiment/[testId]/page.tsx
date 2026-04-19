@@ -122,7 +122,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
   if (err) {
     return (
       <div className="max-w-5xl p-6">
-        <h1 className="font-display text-2xl font-bold mb-4">Experiment Dashboard</h1>
+        <h1 className="t-display-m mb-4">Experiment Dashboard</h1>
         <div className="text-red-500">Error: {err}</div>
       </div>
     );
@@ -173,7 +173,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
     <div className="max-w-6xl p-6 space-y-8">
       <header className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-bold">AI Persona vs Human — Agreement Dashboard</h1>
+          <h1 className="t-display-m">AI Persona vs Human — Agreement Dashboard</h1>
           <p className="text-sm text-[var(--text-secondary)] mt-1 font-mono">
             test_id: {params.testId}
           </p>
@@ -212,7 +212,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
 
       {/* ─── Findings — plain-English investor summary ───────────── */}
       {comparison.findings && comparison.findings.length > 0 && (
-        <section className="rounded-xl border border-border-dim bg-surface p-5">
+        <section className="hf-card p-5">
           <h2 className="font-display font-semibold mb-3">Key findings</h2>
           <ul className="space-y-3">
             {comparison.findings.map((f) => (
@@ -240,7 +240,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
 
       {/* ─── Cohort matching ─────────────────────────────────────── */}
       {comparison.by_cohort && comparison.by_cohort.length > 0 && (
-        <section className="rounded-xl border border-border-dim bg-surface p-5">
+        <section className="hf-card p-5">
           <h2 className="font-display font-semibold mb-1">By cohort — demographic-matched agreement</h2>
           <p className="text-xs text-[var(--text-secondary)] mb-4">
             Reports grouped by persona profile (crypto_experience). A tight |Δ| + high agreement
@@ -252,7 +252,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
       )}
 
       {/* ─── Convergence ─────────────────────────────────────────── */}
-      <section className="rounded-xl border border-border-dim bg-surface p-5">
+      <section className="hf-card p-5">
         <h2 className="font-display font-semibold mb-1">Convergence</h2>
         <p className="text-xs text-[var(--text-secondary)] mb-4">
           As N grows, |human mean − persona mean| should trend toward 0 if personas are faithful.
@@ -273,7 +273,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
       </section>
 
       {/* ─── Confusion matrix ───────────────────────────────────── */}
-      <section className="rounded-xl border border-border-dim bg-surface p-5">
+      <section className="hf-card p-5">
         <h2 className="font-display font-semibold mb-1">Agreement matrix</h2>
         <p className="text-xs text-[var(--text-secondary)] mb-4">
           Rows = persona majority, columns = human majority. Counts are per checklist item.
@@ -282,7 +282,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
       </section>
 
       {/* ─── Quality score scatter ───────────────────────────────── */}
-      <section className="rounded-xl border border-border-dim bg-surface p-5">
+      <section className="hf-card p-5">
         <h2 className="font-display font-semibold mb-1">Quality score — paired</h2>
         <p className="text-xs text-[var(--text-secondary)] mb-4">
           Each dot = one tester who has both a manual and a persona report. y=x is perfect agreement.
@@ -322,7 +322,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
       </section>
 
       {/* ─── Rating distribution histogram ──────────────────────── */}
-      <section className="rounded-xl border border-border-dim bg-surface p-5">
+      <section className="hf-card p-5">
         <h2 className="font-display font-semibold mb-1">Questionnaire rating distribution</h2>
         <p className="text-xs text-[var(--text-secondary)] mb-4">
           First numeric answer per report. KS ={' '}
@@ -347,7 +347,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
       </section>
 
       {/* ─── Per-item details (debug / transparency) ─────────────── */}
-      <section className="rounded-xl border border-border-dim bg-surface p-5">
+      <section className="hf-card p-5">
         <h2 className="font-display font-semibold mb-3">Per-item breakdown</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm font-mono">
@@ -487,11 +487,11 @@ function downloadJson(testId: string, data: CompareResponse) {
 
 function Stat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
-    <div className="rounded-xl border border-border-dim bg-surface p-4">
+    <div className="hf-card p-4">
       <div className="text-xs uppercase tracking-wider text-[var(--text-secondary)] font-mono">
         {label}
       </div>
-      <div className="mt-1 font-display text-2xl font-bold">{value}</div>
+      <div className="mt-1 t-display-m">{value}</div>
       {sub && <div className="text-[11px] text-[var(--text-secondary)] font-mono mt-0.5">{sub}</div>}
     </div>
   );

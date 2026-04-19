@@ -23,7 +23,7 @@ interface TestData {
 export default function TesterTestPage() {
   const params = useParams();
   const router = useRouter();
-  const { publicKey, connect } = useWalletContext();
+  const { publicKey, connect, signMessage } = useWalletContext();
   const testId = params.testId as string;
   const [data, setData] = useState<TestData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,6 +35,12 @@ export default function TesterTestPage() {
   const [checklistResults, setChecklistResults] = useState<Record<string, { status: string; memo: string }>>({});
   const [scenarioLogs, setScenarioLogs] = useState<Record<string, string>>({});
   const [answers, setAnswers] = useState<Record<string, string | number>>({});
+
+  // Mobile-only stepper: desktop keeps the long-scroll layout.
+  // 0=checklist · 1=scenarios · 2=questionnaire · 3=submit
+  const [mobileStep, setMobileStep] = useState<0 | 1 | 2 | 3>(0);
+  const stepLabels = ['Checklist', 'Scenarios', 'Survey', 'Submit'] as const;
+  const showStepClass = (idx: number) => (mobileStep === idx ? 'block' : 'hidden') + ' md:block';
 
   const loadTest = () => {
     if (!testId) return;
@@ -79,7 +85,7 @@ export default function TesterTestPage() {
           id: q.id,
           answer: answers[q.id] ?? '',
         })),
-      });
+      }, signMessage);
 
       setResult(report as Record<string, unknown>);
       setSubmitted(true);
@@ -166,20 +172,34 @@ export default function TesterTestPage() {
 
   return (
     <div className="max-w-3xl">
-      <div className="mb-8">
-        <h1 className="font-display text-2xl font-bold mb-2">Test Session</h1>
-        <p className="text-[var(--text-secondary)] font-mono text-sm">{test.targetUrl}</p>
-        <a href={test.targetUrl} target="_blank" rel="noopener noreferrer" className="text-sol-blue text-sm hover:text-sol-blue/80 transition-colors">
-          Open target site in new tab &rarr;
+      <div className="mb-6">
+        <h1 className="t-display-m mb-1">Test Session</h1>
+        <p className="addr mb-1">{test.targetUrl}</p>
+        <a href={test.targetUrl} target="_blank" rel="noopener noreferrer" className="t-caption text-sol-blue hover:opacity-80 transition-opacity">
+          Open target site in new tab →
         </a>
       </div>
 
+      {/* Mobile-only stepper pills. Desktop users see every section at once. */}
+      <div className="mb-5 flex gap-1.5 md:hidden">
+        {stepLabels.map((label, idx) => (
+          <button
+            key={label}
+            onClick={() => setMobileStep(idx as 0 | 1 | 2 | 3)}
+            className={`chip flex-1 justify-center ${mobileStep === idx ? "info" : ""}`}
+            style={{ cursor: "pointer", height: 28 }}
+          >
+            {idx + 1}. {label}
+          </button>
+        ))}
+      </div>
+
       {/* Checklist Section */}
-      <section className="mb-8">
+      <section className={`mb-8 ${showStepClass(0)}`}>
         <h2 className="font-display text-lg font-semibold mb-4 text-sol-purple">Checklist</h2>
         <div className="space-y-3">
           {test_cases.checklist?.map((item) => (
-            <div key={item.id} className="p-4 rounded-xl bg-surface border border-border-dim">
+            <div key={item.id} className="hf-card p-4">
               <div className="flex items-start gap-3">
                 <span className="text-xs font-mono text-sol-purple mt-1">{item.id}</span>
                 <div className="flex-1">
@@ -222,11 +242,11 @@ export default function TesterTestPage() {
       </section>
 
       {/* Scenario Section */}
-      <section className="mb-8">
+      <section className={`mb-8 ${showStepClass(1)}`}>
         <h2 className="font-display text-lg font-semibold mb-4 text-sol-blue">Scenarios</h2>
         <div className="space-y-3">
           {test_cases.scenarios?.map((item) => (
-            <div key={item.id} className="p-4 rounded-xl bg-surface border border-border-dim">
+            <div key={item.id} className="hf-card p-4">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-xs font-mono text-sol-blue">{item.id}</span>
                 <span className="text-xs text-[var(--text-tertiary)]">{item.persona_type}</span>
@@ -245,11 +265,11 @@ export default function TesterTestPage() {
       </section>
 
       {/* Questionnaire Section */}
-      <section className="mb-8">
+      <section className={`mb-8 ${showStepClass(2)}`}>
         <h2 className="font-display text-lg font-semibold mb-4 text-sol-green">Questionnaire</h2>
         <div className="space-y-3">
           {test_cases.questionnaire?.map((item) => (
-            <div key={item.id} className="p-4 rounded-xl bg-surface border border-border-dim">
+            <div key={item.id} className="hf-card p-4">
               <div className="flex items-start gap-3">
                 <span className="text-xs font-mono text-sol-green mt-0.5">{item.id}</span>
                 <div className="flex-1">
@@ -285,20 +305,48 @@ export default function TesterTestPage() {
         </div>
       </section>
 
-      {publicKey && (
-        <div className="mb-3 flex items-center gap-2 px-4 py-2 rounded-lg bg-sol-green/5 border border-sol-green/15">
-          <div className="w-2 h-2 rounded-full bg-sol-green" />
-          <span className="text-xs text-[var(--text-secondary)]">Submitting as</span>
-          <span className="text-xs font-mono text-sol-green">{publicKey.slice(0, 4)}...{publicKey.slice(-4)}</span>
+      {/* Mobile-only prev/next — hidden on the final step so the submit button takes over */}
+      {mobileStep < 3 && (
+        <div className="mb-6 flex gap-2 md:hidden">
+          <button
+            onClick={() => setMobileStep((s) => (s > 0 ? ((s - 1) as 0 | 1 | 2 | 3) : s))}
+            disabled={mobileStep === 0}
+            className="flex-1 py-2.5 rounded-lg text-sm font-medium border border-border-dim text-[var(--text-secondary)] disabled:opacity-40 transition-colors"
+          >
+            &larr; Back
+          </button>
+          <button
+            onClick={() => setMobileStep((s) => ((s + 1) as 0 | 1 | 2 | 3))}
+            className="flex-1 py-2.5 rounded-lg text-sm font-medium bg-sol-blue text-white hover:bg-sol-blue/80 transition-colors"
+          >
+            Next &rarr;
+          </button>
         </div>
       )}
-      <button
-        onClick={handleSubmit}
-        disabled={submitting}
-        className="w-full py-3 bg-sol-blue hover:bg-sol-blue/80 disabled:bg-surface-card disabled:text-[var(--text-tertiary)] rounded-lg font-medium transition-colors text-lg"
-      >
-        {submitting ? "Submitting report..." : publicKey ? "Submit Test Report" : "Connect Wallet & Submit"}
-      </button>
+
+      <div className={`${showStepClass(3)}`}>
+        {publicKey && (
+          <div className="mb-3 flex items-center gap-2 px-4 py-2 rounded-lg bg-sol-green/5 border border-sol-green/15">
+            <div className="w-2 h-2 rounded-full bg-sol-green" />
+            <span className="text-xs text-[var(--text-secondary)]">Submitting as</span>
+            <span className="text-xs font-mono text-sol-green">{publicKey.slice(0, 4)}...{publicKey.slice(-4)}</span>
+          </div>
+        )}
+        <button
+          onClick={handleSubmit}
+          disabled={submitting}
+          className="w-full py-3 bg-sol-blue hover:bg-sol-blue/80 disabled:bg-surface-card disabled:text-[var(--text-tertiary)] rounded-lg font-medium transition-colors text-lg"
+        >
+          {submitting ? "Submitting report..." : publicKey ? "Submit Test Report" : "Connect Wallet & Submit"}
+        </button>
+        {/* Back button on the mobile submit step */}
+        <button
+          onClick={() => setMobileStep(2)}
+          className="md:hidden w-full mt-3 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+        >
+          &larr; Back to survey
+        </button>
+      </div>
     </div>
   );
 }

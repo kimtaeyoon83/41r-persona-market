@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { personaApi } from "@/lib/api";
 import { LoadingSpinner } from "@/components/loading";
 import { ErrorDisplay } from "@/components/error-display";
+import { Topbar } from "@/components/topbar";
 
 interface PersonaVector {
   test_style: Record<string, number>;
@@ -51,73 +52,72 @@ export default function PersonaGallery() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="font-display text-2xl font-bold mb-2">Persona Gallery</h1>
-      <p className="text-[var(--text-secondary)] text-sm mb-8">AI Personas generated from real tester behavior</p>
+      <Topbar
+        title="Persona Market"
+        subtitle={`${personas.length} AI personas trained from real testers`}
+      />
 
       {loading ? (
         <LoadingSpinner text="Loading personas..." />
       ) : error ? (
         <ErrorDisplay message={error} onRetry={loadPersonas} />
       ) : personas.length === 0 ? (
-        <div className="text-center py-12 text-[var(--text-secondary)]">No personas generated yet</div>
+        <div className="text-center py-12 t-caption">No personas generated yet</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {personas.map((persona) => (
-            <Link
-              key={persona.id}
-              href={`/persona/${persona.id}`}
-              className="block p-5 rounded-xl border border-border-dim bg-surface hover:border-sol-green/30 hover:bg-surface-elevated transition-all card-hover"
-            >
-              <div className="flex justify-between items-start mb-3">
-                <div>
-                  <p className="text-xs font-mono text-[var(--text-tertiary)]">{persona.id.slice(0, 8)}</p>
-                  <div className="flex gap-2 mt-1.5">
-                    {topExpertise(persona.vector).map(e => (
-                      <span key={e} className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-sol-green/8 text-sol-green border border-sol-green/15">
-                        {e}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                {persona.sasAttestId && (
-                  <span className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-sol-purple/10 text-sol-purple border border-sol-purple/20">
-                    SAS
-                  </span>
-                )}
-              </div>
-              {persona.vector.demographics && (
-                <div className="flex gap-2 mt-2 mb-2">
-                  {persona.vector.demographics.age_group && (
-                    <span className="px-2 py-0.5 rounded-md text-[11px] bg-sol-purple/8 text-sol-purple/80">
-                      {persona.vector.demographics.age_group}
-                    </span>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {personas.map((persona) => {
+            const quality = persona.vector.reliability.quality_score > 1
+              ? persona.vector.reliability.quality_score
+              : persona.vector.reliability.quality_score * 5;
+            const qTone = quality >= 4 ? "text-sol-green" : quality >= 3 ? "text-[var(--warn)]" : "text-[var(--danger)]";
+            return (
+              <Link
+                key={persona.id}
+                href={`/persona/${persona.id}`}
+                className="hf-card card-hover block p-5 hover:border-[var(--line-2)]"
+              >
+                {/* Voice first — this is the novel asset */}
+                <blockquote className="relative pl-4 border-l-2 border-sol-green/40 mb-4">
+                  <p className="t-body italic leading-snug line-clamp-3">
+                    &ldquo;{persona.vector.voice_sample}&rdquo;
+                  </p>
+                </blockquote>
+
+                <div className="flex items-center gap-1.5 flex-wrap mb-3">
+                  <span className="addr">{persona.id.slice(0, 8)}</span>
+                  {topExpertise(persona.vector).map((e) => (
+                    <span key={e} className="chip accent">{e}</span>
+                  ))}
+                  {persona.vector.demographics?.age_group && (
+                    <span className="chip">{persona.vector.demographics.age_group}</span>
                   )}
                   {persona.vector.ux_preferences?.mobile_first !== undefined && (
-                    <span className="px-2 py-0.5 rounded-md text-[11px] bg-sol-blue/8 text-sol-blue/80">
+                    <span className="chip info">
                       {persona.vector.ux_preferences.mobile_first ? "mobile-first" : "desktop"}
                     </span>
                   )}
-                  {persona.vector.ux_preferences?.visual_style && (
-                    <span className="px-2 py-0.5 rounded-md text-[11px] bg-sol-blue/8 text-sol-blue/80">
-                      {persona.vector.ux_preferences.visual_style}
+                  {persona.sasAttestId && (
+                    <span className="chip ml-auto" style={{ background: "rgba(153,69,255,0.12)", color: "var(--sol-purple)", borderColor: "rgba(153,69,255,0.32)" }}>
+                      SAS
                     </span>
                   )}
                 </div>
-              )}
-              <p className="text-xs text-[var(--text-secondary)] line-clamp-2">{persona.vector.voice_sample}</p>
-              <div className="mt-3 flex gap-4 text-xs text-[var(--text-tertiary)]">
-                <span title="Average quality of this tester's reports (0-5 scale)">Quality: <span className={`font-semibold ${
-                  persona.vector.reliability.quality_score >= 4 ? "text-sol-green" :
-                  persona.vector.reliability.quality_score >= 3 ? "text-[var(--status-warning)]" : "text-[var(--status-error)]"
-                }`}>{persona.vector.reliability.quality_score > 1
-                  ? persona.vector.reliability.quality_score.toFixed(1)
-                  : (persona.vector.reliability.quality_score * 5).toFixed(1)
-                }</span>/5</span>
-                <span title="How consistently this persona delivers similar quality across tests">Consistency: {(persona.vector.reliability.consistency * 100).toFixed(0)}%</span>
-                <span title="How often this persona responds to test requests">Response: {(persona.vector.reliability.response_rate * 100).toFixed(0)}%</span>
-              </div>
-            </Link>
-          ))}
+
+                <div className="flex gap-4 t-caption">
+                  <span title="Average quality of this tester's reports (0-5 scale)">
+                    Quality <span className={`money font-semibold ${qTone}`}>{quality.toFixed(1)}</span>
+                    <span className="text-[var(--fg-3)]">/5</span>
+                  </span>
+                  <span title="How consistently this persona delivers similar quality across tests">
+                    Consistency <span className="money text-[var(--fg-1)]">{(persona.vector.reliability.consistency * 100).toFixed(0)}%</span>
+                  </span>
+                  <span title="How often this persona responds to test requests">
+                    Response <span className="money text-[var(--fg-1)]">{(persona.vector.reliability.response_rate * 100).toFixed(0)}%</span>
+                  </span>
+                </div>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>

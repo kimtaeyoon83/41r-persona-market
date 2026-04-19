@@ -117,6 +117,18 @@ export default function ReportDetailPage() {
   const settlements = report.settlements || [];
   const isRejected = (report.qualityScore ?? 0) < 1.5;
 
+  // Coverage breakdown — shows *why* the quality score landed where it did.
+  // These are derived signals, not separate LLM scores, hence framed as coverage.
+  const scenarioEntries = (report.scenarioLog || []).reduce((sum, s) => sum + (s.timeline?.length || 0), 0);
+  const scenarioWords = (report.scenarioLog || []).reduce(
+    (sum, s) => sum + (s.timeline || []).reduce((a, t) => a + (t.action?.split(/\s+/).filter(Boolean).length ?? 0), 0),
+    0,
+  );
+  const questionnaireAnswered = (report.questionnaireAnswers || []).filter(
+    (qa) => qa.answer !== "" && qa.answer !== null && qa.answer !== undefined,
+  ).length;
+  const questionnaireTotal = (report.questionnaireAnswers || []).length;
+
   return (
     <div className="max-w-4xl">
       {/* Rejected banner */}
@@ -135,52 +147,72 @@ export default function ReportDetailPage() {
       )}
 
       {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <h1 className="font-display text-2xl font-bold">Test Report</h1>
-          {isRejected && (
-            <span className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-[var(--status-error)]/10 text-[var(--status-error)] border border-[var(--status-error)]/20">
-              Rejected
-            </span>
-          )}
-          {report.isPersonaTest && (
-            <span className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-sol-green/10 text-sol-green border border-sol-green/20">
-              AI Persona Test
-            </span>
-          )}
+      <div className="mb-7">
+        <div className="flex items-center gap-2 mb-2">
+          <h1 className="t-display-m">Test Report</h1>
+          {isRejected && <span className="chip danger">Rejected</span>}
+          {report.isPersonaTest && <span className="chip success">AI Persona Test</span>}
         </div>
-        <p className="text-xs text-[var(--text-tertiary)] font-mono">{report.id}</p>
+        <p className="addr">{report.id}</p>
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
-        <div className="p-4 rounded-xl bg-surface border border-border-dim">
-          <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider">Quality</p>
-          <p className={`text-2xl font-display font-bold mt-1 ${
+      <div className="grid grid-cols-4 gap-3 mb-7">
+        <div className="hf-card p-4">
+          <div className="t-label">Quality</div>
+          <p className={`money text-2xl font-semibold mt-1 ${
             (report.qualityScore || 0) >= 4 ? "text-sol-green" :
-            (report.qualityScore || 0) >= 3 ? "text-[var(--status-warning)]" : "text-[var(--status-error)]"
+            (report.qualityScore || 0) >= 3 ? "text-[var(--warn)]" : "text-[var(--danger)]"
           }`}>
-            {report.qualityScore?.toFixed(1) || "N/A"}<span className="text-sm text-[var(--text-tertiary)]">/5</span>
+            {report.qualityScore?.toFixed(1) || "N/A"}<span className="text-sm text-[var(--fg-3)] font-normal">/5</span>
           </p>
         </div>
-        <div className="p-4 rounded-xl bg-surface border border-border-dim">
-          <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider">Checklist</p>
-          <p className="text-2xl font-display font-bold mt-1 text-sol-blue">{passed}<span className="text-sm text-[var(--text-tertiary)]">/{total}</span></p>
+        <div className="hf-card p-4">
+          <div className="t-label">Checklist</div>
+          <p className="money text-2xl font-semibold mt-1 text-sol-blue">{passed}<span className="text-sm text-[var(--fg-3)] font-normal">/{total}</span></p>
         </div>
-        <div className="p-4 rounded-xl bg-surface border border-border-dim">
-          <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider">Tester</p>
-          <p className="text-sm font-mono text-[var(--text-primary)] truncate mt-1">{report.testerAddr.slice(0, 12)}...</p>
+        <div className="hf-card p-4">
+          <div className="t-label">Tester</div>
+          <p className="addr truncate mt-1.5">{report.testerAddr.slice(0, 12)}…</p>
         </div>
-        <div className="p-4 rounded-xl bg-surface border border-border-dim">
-          <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider">Date</p>
-          <p className="text-sm mt-1">{new Date(report.createdAt).toLocaleString("ko-KR")}</p>
+        <div className="hf-card p-4">
+          <div className="t-label">Date</div>
+          <p className="t-body-s mt-1">{new Date(report.createdAt).toLocaleString("ko-KR")}</p>
+        </div>
+      </div>
+
+      {/* Quality coverage breakdown */}
+      <div className="mb-8 hf-card p-4">
+        <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider mb-3">Coverage breakdown</p>
+        <div className="grid grid-cols-3 gap-4 text-sm">
+          <div>
+            <p className="text-[var(--text-tertiary)] text-xs">Checklist</p>
+            <p className="mt-1">
+              <span className="font-display font-semibold text-[var(--text-primary)]">{passed}</span>
+              <span className="text-[var(--text-tertiary)]"> / {total} passed</span>
+            </p>
+          </div>
+          <div>
+            <p className="text-[var(--text-tertiary)] text-xs">Scenarios</p>
+            <p className="mt-1">
+              <span className="font-display font-semibold text-[var(--text-primary)]">{scenarioEntries}</span>
+              <span className="text-[var(--text-tertiary)]"> entries · {scenarioWords} words</span>
+            </p>
+          </div>
+          <div>
+            <p className="text-[var(--text-tertiary)] text-xs">Questionnaire</p>
+            <p className="mt-1">
+              <span className="font-display font-semibold text-[var(--text-primary)]">{questionnaireAnswered}</span>
+              <span className="text-[var(--text-tertiary)]"> / {questionnaireTotal} answered</span>
+            </p>
+          </div>
         </div>
       </div>
 
       {/* Settlements / Payment Info */}
       {settlements.length > 0 && (
-        <div className="mb-8 p-5 rounded-xl bg-surface border border-border-dim">
-          <h2 className="font-display text-lg font-semibold mb-4 flex items-center gap-2">
+        <div className="mb-8 hf-card p-5">
+          <h2 className="t-display-s mb-4 flex items-center gap-2">
             <svg className="w-5 h-5 text-sol-green" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -240,7 +272,7 @@ export default function ReportDetailPage() {
       {/* Screenshots */}
       {report.screenshots && report.screenshots.length > 0 && (
         <div className="mb-8">
-          <h2 className="font-display text-lg font-semibold mb-3">Screenshots</h2>
+          <h2 className="t-display-s mb-3">Screenshots</h2>
           <div className="grid grid-cols-2 gap-3">
             {report.screenshots.map((ss, i) => {
               const imgUrl = ss.startsWith("http") ? ss : `${API_BASE}/screenshots/${ss}`;
@@ -276,10 +308,10 @@ export default function ReportDetailPage() {
       {/* Checklist Results */}
       {report.checklistResults && report.checklistResults.length > 0 && (
         <div className="mb-8">
-          <h2 className="font-display text-lg font-semibold mb-3">Checklist Results</h2>
+          <h2 className="t-display-s mb-3">Checklist Results</h2>
           <div className="space-y-2">
             {report.checklistResults.map((item) => (
-              <div key={item.id} className="p-3 rounded-xl bg-surface border border-border-dim flex items-start gap-3">
+              <div key={item.id} className="hf-card p-3 flex items-start gap-3">
                 <span className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-medium ${statusColor[item.status]}`}>
                   {item.status}
                 </span>
@@ -296,9 +328,9 @@ export default function ReportDetailPage() {
       {/* Scenario Log */}
       {report.scenarioLog && report.scenarioLog.length > 0 && (
         <div className="mb-8">
-          <h2 className="font-display text-lg font-semibold mb-3">Scenario Timeline</h2>
+          <h2 className="t-display-s mb-3">Scenario Timeline</h2>
           {report.scenarioLog.map((scenario) => (
-            <div key={scenario.id} className="p-4 rounded-xl bg-surface border border-border-dim mb-3">
+            <div key={scenario.id} className="hf-card p-4 mb-3">
               <p className="text-xs font-mono text-sol-purple mb-3">{scenario.id}</p>
               <div className="space-y-2 border-l-2 border-border-dim pl-4">
                 {scenario.timeline.map((entry, i) => (
@@ -317,12 +349,12 @@ export default function ReportDetailPage() {
       {/* Questionnaire Answers */}
       {report.questionnaireAnswers && report.questionnaireAnswers.length > 0 && (
         <div className="mb-8">
-          <h2 className="font-display text-lg font-semibold mb-3">Questionnaire Answers</h2>
+          <h2 className="t-display-s mb-3">Questionnaire Answers</h2>
           <div className="space-y-2">
             {report.questionnaireAnswers
               .filter((qa) => String(qa.answer) !== "[object Object]")
               .map((qa) => (
-              <div key={qa.id} className="p-3 rounded-xl bg-surface border border-border-dim">
+              <div key={qa.id} className="hf-card p-3">
                 <span className="text-xs font-mono text-sol-green">{qa.id.replace(/_/g, " ")}</span>
                 <p className="text-sm mt-1">
                   {typeof qa.answer === "number" ? (

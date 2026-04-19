@@ -82,42 +82,34 @@ export default function TesterListPage() {
 
   return (
     <div className="max-w-5xl">
-      <div className="mb-8">
-        <h1 className="font-display text-2xl font-bold mb-2">All Testers</h1>
-        <p className="text-[var(--text-secondary)] text-sm">Registered testers and their testing activity</p>
+      <div className="mb-7">
+        <h1 className="t-display-m mb-1">All Testers</h1>
+        <p className="t-caption">Registered testers and their testing activity</p>
       </div>
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <div className="p-4 rounded-xl bg-surface border border-border-dim">
-          <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider">Total Testers</p>
-          <p className="text-2xl font-display font-bold text-[var(--text-primary)] mt-1">{testers.length}</p>
-        </div>
-        <div className="p-4 rounded-xl bg-surface border border-border-dim">
-          <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider">Total Reports</p>
-          <p className="text-2xl font-display font-bold text-sol-blue mt-1">{totalReports}</p>
-        </div>
-        <div className="p-4 rounded-xl bg-surface border border-border-dim">
-          <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider">With Persona</p>
-          <p className="text-2xl font-display font-bold text-sol-purple mt-1">{withPersona}</p>
-        </div>
-        <div className="p-4 rounded-xl bg-surface border border-border-dim">
-          <p className="text-xs text-[var(--text-tertiary)] font-mono uppercase tracking-wider">Total Earned</p>
-          <p className="text-2xl font-display font-bold text-sol-green mt-1">${totalUsdc.toFixed(0)}</p>
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        {[
+          { label: "Total Testers", value: testers.length, tone: "text-[var(--fg-0)]" },
+          { label: "Total Reports", value: totalReports, tone: "text-sol-blue" },
+          { label: "With Persona", value: withPersona, tone: "text-sol-purple" },
+          { label: "Total Earned", value: `$${totalUsdc.toFixed(0)}`, tone: "text-sol-green" },
+        ].map((s) => (
+          <div key={s.label} className="hf-card p-4">
+            <div className="t-label">{s.label}</div>
+            <div className={`money mt-1 text-2xl font-semibold ${s.tone}`}>{s.value}</div>
+          </div>
+        ))}
       </div>
 
       {/* Sort Controls */}
-      <div className="flex gap-2 mb-4">
-        {(["reports", "quality", "earned", "recent"] as const).map(s => (
+      <div className="flex gap-1.5 mb-4">
+        {(["reports", "quality", "earned", "recent"] as const).map((s) => (
           <button
             key={s}
             onClick={() => setSortBy(s)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-colors ${
-              sortBy === s
-                ? "bg-sol-green/10 text-sol-green border border-sol-green/20"
-                : "bg-surface-elevated text-[var(--text-tertiary)] border border-border-dim hover:border-border-hover"
-            }`}
+            className={`chip ${sortBy === s ? "accent" : ""}`}
+            style={{ cursor: "pointer" }}
           >
             {s === "reports" ? "Most Active" : s === "quality" ? "Top Quality" : s === "earned" ? "Top Earners" : "Recent"}
           </button>
@@ -126,88 +118,70 @@ export default function TesterListPage() {
 
       {/* Tester List */}
       {sorted.length === 0 ? (
-        <div className="text-center py-12 text-[var(--text-secondary)]">No testers registered yet</div>
+        <div className="text-center py-12 t-caption">No testers registered yet</div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {sorted.map((tester) => (
             <Link
               key={tester.walletAddress}
               href={`/tester/${tester.walletAddress}`}
-              className="block p-5 rounded-xl border border-border-dim bg-surface hover:border-sol-green/30 hover:bg-surface-elevated transition-all card-hover"
+              className="hf-card card-hover block p-4 hover:border-[var(--line-2)]"
             >
               <div className="flex items-start justify-between gap-4">
-                {/* Left: Name + Profile */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3 mb-2">
-                    {/* Avatar */}
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sol-purple/20 to-sol-blue/20 border border-border-dim flex items-center justify-center flex-shrink-0">
-                      <span className="text-sm font-display font-bold text-sol-purple">
+                    <div className="w-9 h-9 rounded-[var(--r-2)] bg-gradient-to-br from-sol-purple/20 to-sol-blue/20 border border-[var(--line-1)] flex items-center justify-center flex-shrink-0">
+                      <span className="text-sm font-display font-semibold text-sol-purple">
                         {tester.displayName.charAt(0).toUpperCase()}
                       </span>
                     </div>
                     <div>
-                      <h3 className="font-medium text-[var(--text-primary)] text-sm">{tester.displayName}</h3>
-                      <p className="text-[11px] font-mono text-[var(--text-tertiary)]">
-                        {tester.walletAddress.slice(0, 8)}...{tester.walletAddress.slice(-6)}
+                      <h3 className="t-body font-medium">{tester.displayName}</h3>
+                      <p className="addr">
+                        {tester.walletAddress.slice(0, 8)}…{tester.walletAddress.slice(-6)}
                       </p>
                     </div>
                   </div>
 
-                  {/* Tags */}
                   <div className="flex flex-wrap gap-1.5 mt-2">
-                    {tester.profile?.expertise?.slice(0, 3).map(e => (
-                      <span key={e} className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-sol-blue/8 text-sol-blue border border-sol-blue/15">
-                        {e}
-                      </span>
+                    {tester.profile?.expertise?.slice(0, 3).map((e) => (
+                      <span key={e} className="chip info">{e}</span>
                     ))}
                     {tester.profile?.age_range && (
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-sol-purple/8 text-sol-purple/80">
-                        {tester.profile.age_range}
-                      </span>
+                      <span className="chip">{tester.profile.age_range}</span>
                     )}
                     {tester.profile?.primary_device && (
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-surface-elevated text-[var(--text-tertiary)]">
-                        {tester.profile.primary_device}
-                      </span>
+                      <span className="chip ghost">{tester.profile.primary_device}</span>
                     )}
                   </div>
                 </div>
 
-                {/* Right: Stats */}
                 <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     {tester.persona && (
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono border ${
-                        tester.persona.hasAttestation
-                          ? "bg-sol-green/10 text-sol-green border-sol-green/20"
-                          : "bg-sol-purple/10 text-sol-purple border-sol-purple/20"
-                      }`}>
+                      <span className={`chip ${tester.persona.hasAttestation ? "success" : "accent"}`}>
                         {tester.persona.hasAttestation ? "SAS" : "Persona"}
                       </span>
                     )}
-                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono ${
-                      tester.testsDone >= 3
-                        ? "bg-sol-green/8 text-sol-green"
-                        : "bg-surface-elevated text-[var(--text-tertiary)]"
-                    }`}>
+                    <span className={`chip ${tester.testsDone >= 3 ? "success" : ""}`}>
                       {tester.testsDone} tests
                     </span>
                   </div>
 
-                  <div className="flex gap-3 text-[11px] text-[var(--text-tertiary)]">
+                  <div className="flex gap-3 t-caption">
                     {tester.stats.avgQuality > 0 && (
                       <span>
-                        Q: <span className={`font-semibold ${
+                        Q <span className={`money font-semibold ${
                           tester.stats.avgQuality >= 4 ? "text-sol-green" :
-                          tester.stats.avgQuality >= 3 ? "text-[var(--status-warning)]" : "text-[var(--status-error)]"
+                          tester.stats.avgQuality >= 3 ? "text-[var(--warn)]" : "text-[var(--danger)]"
                         }`}>{tester.stats.avgQuality.toFixed(1)}</span>
                       </span>
                     )}
                     {tester.stats.usdcEarned > 0 && (
-                      <span className="text-sol-green font-mono">${tester.stats.usdcEarned.toFixed(1)}</span>
+                      <span className="text-sol-green money">${tester.stats.usdcEarned.toFixed(1)}</span>
                     )}
                     {tester.stats.tokenEarned > 0 && (
-                      <span className="text-sol-purple font-mono">{tester.stats.tokenEarned.toFixed(0)} 41R</span>
+                      <span className="text-sol-purple money">{tester.stats.tokenEarned.toFixed(0)} 41R</span>
                     )}
                   </div>
                 </div>

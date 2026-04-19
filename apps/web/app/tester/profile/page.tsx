@@ -29,7 +29,7 @@ interface TesterProfile {
 }
 
 export default function TesterProfile() {
-  const { publicKey } = useWalletContext();
+  const { publicKey, signMessage } = useWalletContext();
   const [wallet, setWallet] = useState("");
   const [tester, setTester] = useState<Record<string, unknown> | null>(null);
   const [persona, setPersona] = useState<Record<string, unknown> | null>(null);
@@ -89,7 +89,7 @@ export default function TesterProfile() {
         wallet_address: wallet,
         display_name: displayName,
         profile: profile as unknown as Record<string, unknown>,
-      }) as Record<string, unknown>;
+      }, signMessage) as Record<string, unknown>;
       setTester(data);
       setRegisterMode(false);
     } catch (err) {
@@ -137,7 +137,8 @@ export default function TesterProfile() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="font-display text-2xl font-bold mb-8">Tester Profile</h1>
+      <h1 className="t-display-m mb-1">Tester Profile</h1>
+      <p className="t-caption mb-7">Your persona grows from the reports you submit</p>
 
       {!tester ? (
         <div className="space-y-4">
@@ -308,17 +309,50 @@ export default function TesterProfile() {
         </div>
       ) : (
         <div className="space-y-6">
-          <div className="p-5 rounded-xl bg-surface border border-border-dim">
-            <h2 className="font-display text-lg font-semibold mb-1">{String(tester.displayName || tester.display_name)}</h2>
-            <p className="text-xs text-[var(--text-tertiary)] font-mono mb-3">{String(tester.walletAddress || tester.wallet_address)}</p>
+          <div className="hf-card p-5">
+            <h2 className="t-display-s mb-1">{String(tester.displayName || tester.display_name)}</h2>
+            <p className="addr mb-4">{String(tester.walletAddress || tester.wallet_address)}</p>
 
-            <div className="flex gap-4 text-sm mb-4">
-              <span className="text-[var(--text-secondary)]">Tests Done: <span className="text-sol-blue font-display font-semibold">{String(tester.testsDone || tester.tests_done || 0)}</span></span>
-              <span className="text-[var(--text-secondary)]">Persona: {(tester.personaId || tester.persona_id)
-                ? <Link href={`/persona/${tester.personaId || tester.persona_id}`} className="text-sol-green hover:text-sol-green/80">Active</Link>
-                : <span className="text-[var(--text-tertiary)]">Not yet</span>}
-              </span>
-            </div>
+            {/* Persona progress — the main Tester milestone */}
+            {(() => {
+              const done = Number(tester.testsDone || tester.tests_done || 0);
+              const personaId = tester.personaId || tester.persona_id;
+              const cap = 3;
+              const pct = personaId ? 100 : Math.min(100, (done / cap) * 100);
+              const remaining = Math.max(0, cap - done);
+              return (
+                <div className="mb-4">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <span className="text-xs font-mono uppercase tracking-wider text-[var(--text-tertiary)]">
+                      Persona progress
+                    </span>
+                    <span className="text-xs font-mono text-[var(--text-secondary)]">
+                      {personaId ? `${cap} / ${cap} · minted` : `${done} / ${cap} tests`}
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-surface-elevated border border-border-dim overflow-hidden">
+                    <div
+                      className={`h-full transition-all ${personaId ? 'bg-sol-green' : 'bg-sol-blue'}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-[var(--text-secondary)]">
+                    {personaId ? (
+                      <>
+                        AI persona is active —{' '}
+                        <Link href={`/persona/${personaId}`} className="text-sol-green hover:text-sol-green/80">
+                          view detail
+                        </Link>
+                      </>
+                    ) : remaining === 0 ? (
+                      <>Enough tests completed. Tap <span className="text-sol-green font-medium">Generate AI Persona</span> below.</>
+                    ) : (
+                      <>{remaining} more test{remaining === 1 ? '' : 's'} until your persona mints.</>
+                    )}
+                  </p>
+                </div>
+              );
+            })()}
 
             {!!tester.profile && (
               <div className="pt-3 border-t border-border-dim grid grid-cols-2 gap-2 text-xs text-[var(--text-secondary)]">
@@ -343,33 +377,35 @@ export default function TesterProfile() {
               </div>
             )}
             {!!tester.profile && (tester.profile as TesterProfile).expertise?.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {(tester.profile as TesterProfile).expertise.map((e: string) => (
-                  <span key={e} className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-sol-blue/8 text-sol-blue">{e}</span>
+                  <span key={e} className="chip info">{e}</span>
                 ))}
               </div>
             )}
           </div>
 
           {!persona && Number(tester.testsDone || tester.tests_done || 0) >= 3 && (
-            <button onClick={handleGeneratePersona} disabled={loading} className="w-full py-3 bg-sol-green hover:bg-sol-green/80 rounded-lg font-medium transition-colors text-surface-base">
-              {loading ? "Generating Persona..." : "Generate AI Persona"}
+            <button onClick={handleGeneratePersona} disabled={loading} className="hf-btn primary lg w-full justify-center">
+              {loading ? "Generating Persona…" : "Generate AI Persona"}
             </button>
           )}
 
           {!persona && Number(tester.testsDone || tester.tests_done || 0) < 3 && (
-            <div className="p-4 rounded-xl bg-surface/50 border border-border-dim text-center">
-              <p className="text-[var(--text-secondary)] text-sm">
-                Complete {3 - Number(tester.testsDone || tester.tests_done || 0)} more test(s) to unlock AI Persona generation
-              </p>
-            </div>
+            <Link
+              href="/tester/tests"
+              className="hf-card card-hover block p-4 hover:border-[var(--line-2)] text-center"
+            >
+              <p className="t-body font-medium">Browse open tests →</p>
+              <p className="t-caption mt-0.5">Complete tests to build your persona</p>
+            </Link>
           )}
 
           {persona && (
-            <Link href={`/persona/${persona.id}`} className="block p-4 rounded-xl bg-surface border border-sol-green/20 hover:border-sol-green/40 transition-colors">
-              <h3 className="text-sm font-medium text-sol-green mb-1">AI Persona Active</h3>
-              <p className="text-xs text-[var(--text-tertiary)] font-mono">{String(persona.id)}</p>
-              <p className="text-xs text-[var(--text-secondary)] mt-1">Click to view details</p>
+            <Link href={`/persona/${persona.id}`} className="hf-card block p-4" style={{ borderColor: "rgba(20,241,149,0.24)" }}>
+              <h3 className="t-body font-medium text-sol-green mb-1">AI Persona Active</h3>
+              <p className="addr">{String(persona.id)}</p>
+              <p className="t-caption mt-1">Click to view details</p>
             </Link>
           )}
         </div>

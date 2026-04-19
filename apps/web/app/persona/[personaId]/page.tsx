@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { personaApi } from "@/lib/api";
 import { RadarChart } from "@/components/radar-chart";
+import { PersonaRadar20 } from "@/components/persona-radar-20";
 import { SasBadge } from "@/components/sas-badge";
 import { Loading } from "@/components/loading";
 import { ErrorDisplay } from "@/components/error-display";
@@ -73,27 +74,49 @@ export default function PersonaDetail() {
       <div className="mb-8">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="font-display text-2xl font-bold mb-2">Persona Detail</h1>
-            <p className="text-xs font-mono text-[var(--text-tertiary)]">{persona.id}</p>
+            <h1 className="t-display-m mb-1">Persona Detail</h1>
+            <p className="addr">{persona.id}</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {persona.isActive && (
-              <span className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-sol-green/10 text-sol-green border border-sol-green/20">
-                Active
-              </span>
+              <span className="chip success"><span className="chip-dot" />Active</span>
             )}
             <SasBadge tier={sasTier} attestId={persona.sasAttestId || undefined} />
           </div>
         </div>
       </div>
 
-      {/* Voice Sample */}
-      <div className="mb-6 p-5 rounded-xl bg-surface border border-border-dim">
-        <h3 className="text-xs font-mono text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Voice Sample</h3>
-        <p className="text-sm italic text-[var(--text-primary)] leading-relaxed">&ldquo;{vector.voice_sample}&rdquo;</p>
+      {/* Voice Sample — hero quote */}
+      <div className="hf-card mb-8 p-6" style={{ background: "linear-gradient(135deg, rgba(20,241,149,0.05), rgba(153,69,255,0.05))", borderColor: "rgba(20,241,149,0.22)" }}>
+        <div className="t-label mb-3" style={{ color: "rgba(20,241,149,0.8)" }}>How this persona thinks</div>
+        <blockquote className="relative">
+          <span className="absolute -top-2 -left-1 text-4xl text-sol-green/30 font-display leading-none">&ldquo;</span>
+          <p className="pl-6 t-body-l italic leading-relaxed">{vector.voice_sample}</p>
+        </blockquote>
       </div>
 
-      {/* Radar Charts */}
+      {/* 20-dim persona signature — flattens all 4 buckets into one polygon */}
+      <div className="hf-card mb-4 p-6">
+        <div className="flex items-start gap-6 flex-wrap">
+          <PersonaRadar20 vector={vector} size={260} />
+          <div className="flex-1 min-w-[260px]">
+            <div className="t-label mb-3">Persona signature · 20 dimensions</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
+              {Object.entries({ ...vector.test_style, ...vector.expertise, ...vector.feedback_pattern, ...vector.reliability }).slice(0, 16).map(([k, v]) => {
+                const val = k === "quality_score" && Number(v) > 1 ? Number(v) / 5 : Number(v);
+                return (
+                  <div key={k} className="flex items-center justify-between gap-2">
+                    <span className="text-[var(--fg-2)] truncate">{k.replace(/_/g, " ")}</span>
+                    <span className="money text-[var(--fg-0)]">{(val * 100).toFixed(0)}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Per-bucket deep dives (kept as 4 secondary radars for drill-down) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <RadarChart title="Test Style" data={vector.test_style} color="#9945FF" />
         <RadarChart title="Expertise" data={vector.expertise} color="#00C2FF" />
@@ -112,21 +135,21 @@ export default function PersonaDetail() {
       {(vector.demographics || vector.ux_preferences) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           {vector.demographics && (
-            <div className="p-5 rounded-xl bg-surface border border-border-dim">
-              <h3 className="text-xs font-mono text-sol-purple uppercase tracking-wider mb-3">Demographics</h3>
+            <div className="hf-card p-5">
+              <div className="t-label mb-3" style={{ color: "var(--sol-purple)" }}>Demographics</div>
               <div className="space-y-2.5">
                 {Object.entries(vector.demographics).map(([key, val]) => (
                   <div key={key} className="flex items-center justify-between">
-                    <span className="text-xs text-[var(--text-tertiary)]">{key.replace(/_/g, " ")}</span>
+                    <span className="t-caption">{key.replace(/_/g, " ")}</span>
                     {typeof val === "number" ? (
                       <div className="flex items-center gap-2">
-                        <div className="w-20 h-1.5 bg-surface-card rounded-full overflow-hidden">
+                        <div className="w-20 h-1.5 bg-[var(--bg-2)] rounded-full overflow-hidden">
                           <div className="h-full bg-sol-purple rounded-full" style={{ width: `${val * 100}%` }} />
                         </div>
-                        <span className="text-xs text-[var(--text-secondary)] w-10 text-right font-mono">{(val * 100).toFixed(0)}%</span>
+                        <span className="addr w-10 text-right">{(val * 100).toFixed(0)}%</span>
                       </div>
                     ) : (
-                      <span className="text-xs text-sol-purple px-2 py-0.5 rounded-md bg-sol-purple/8">{String(val)}</span>
+                      <span className="chip" style={{ background: "rgba(153,69,255,0.12)", color: "var(--sol-purple)", borderColor: "rgba(153,69,255,0.24)" }}>{String(val)}</span>
                     )}
                   </div>
                 ))}
@@ -134,16 +157,14 @@ export default function PersonaDetail() {
             </div>
           )}
           {vector.ux_preferences && (
-            <div className="p-5 rounded-xl bg-surface border border-border-dim">
-              <h3 className="text-xs font-mono text-sol-blue uppercase tracking-wider mb-3">UX Preferences</h3>
+            <div className="hf-card p-5">
+              <div className="t-label mb-3" style={{ color: "var(--sol-blue)" }}>UX Preferences</div>
               <div className="space-y-2.5">
                 {Object.entries(vector.ux_preferences).map(([key, val]) => (
                   <div key={key} className="flex items-center justify-between">
-                    <span className="text-xs text-[var(--text-tertiary)]">{key.replace(/_/g, " ")}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-md ${
-                      typeof val === "boolean"
-                        ? val ? "bg-sol-green/8 text-sol-green" : "bg-surface-card text-[var(--text-tertiary)]"
-                        : "bg-sol-blue/8 text-sol-blue"
+                    <span className="t-caption">{key.replace(/_/g, " ")}</span>
+                    <span className={`chip ${
+                      typeof val === "boolean" ? (val ? "success" : "") : "info"
                     }`}>
                       {String(val)}
                     </span>
@@ -156,9 +177,9 @@ export default function PersonaDetail() {
       )}
 
       {/* Footer Info */}
-      <div className="mt-6 p-4 rounded-xl bg-surface/50 border border-border-dim">
-        <div className="flex flex-wrap gap-6 text-xs text-[var(--text-tertiary)] font-mono">
-          <span>Tester: {persona.testerAddr.slice(0, 12)}...</span>
+      <div className="hf-card mt-6 p-4">
+        <div className="flex flex-wrap gap-6 addr">
+          <span>Tester: {persona.testerAddr.slice(0, 12)}…</span>
           <span>Created: {new Date(persona.createdAt).toLocaleDateString()}</span>
           <span>Updated: {new Date(persona.updatedAt).toLocaleDateString()}</span>
           {persona.sasAttestId && (

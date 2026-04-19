@@ -5,6 +5,7 @@ import { testApi, personaApi, autoTestApi, API_BASE } from "@/lib/api";
 import { useWalletContext } from "@/components/wallet-provider";
 import { LoadingSpinner } from "@/components/loading";
 import { ErrorDisplay } from "@/components/error-display";
+import { Topbar } from "@/components/topbar";
 import {
   Connection,
   PublicKey,
@@ -249,7 +250,10 @@ export default function AutoTestPage() {
 
   return (
     <div className="max-w-5xl">
-      <h1 className="font-display text-2xl font-bold mb-2">Auto Test Engine</h1>
+      <Topbar
+        title="AutoTest"
+        subtitle="Run headless persona panels · $0.10 per run"
+      />
       <p className="text-[var(--text-secondary)] text-sm mb-8">AI Persona-driven automated browser testing with Stagehand</p>
 
       <div className="grid grid-cols-2 gap-4 mb-6">
@@ -284,7 +288,7 @@ export default function AutoTestPage() {
       </div>
 
       {selectedPersonaData && (
-        <div className="p-3 rounded-xl bg-surface border border-border-dim mb-4 text-sm">
+        <div className="hf-card p-3 mb-4 text-sm">
           <div className="flex items-center gap-2 mb-1">
             {topExpertise.map(([k, v]) => (
               <span key={k} className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-sol-green/8 text-sol-green">
@@ -302,7 +306,7 @@ export default function AutoTestPage() {
       )}
 
       {/* x402 Payment Info */}
-      <div className="flex items-center justify-between p-3 rounded-xl bg-surface border border-border-dim mb-4">
+      <div className="flex items-center justify-between hf-card p-3 mb-4">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-sol-blue/10 flex items-center justify-center">
             <span className="text-sm font-bold text-sol-blue">$</span>
@@ -359,19 +363,7 @@ export default function AutoTestPage() {
       </button>
 
       {result && (result.status === "queued" || result.status === "running") && (
-        <div className="mb-8">
-          <div className="flex items-center justify-between text-sm mb-2">
-            <span className="text-sol-green font-mono">{result.status === "queued" ? "Queued..." : "Running..."}</span>
-            <span className="text-[var(--text-tertiary)] font-mono">{result.progress || 0}%</span>
-          </div>
-          <div className="w-full h-2 bg-surface-card rounded-full overflow-hidden">
-            <div
-              className="h-full bg-sol-green rounded-full transition-all duration-500"
-              style={{ width: `${result.progress || 0}%` }}
-            />
-          </div>
-          {polling && <p className="text-xs text-[var(--text-tertiary)] mt-2 font-mono">Polling for updates every 3s...</p>}
-        </div>
+        <LiveTheater result={result} polling={polling} personaVoice={personas.find(p => p.id === selectedPersona)?.vector?.voice_sample} />
       )}
 
       {result?.status === "failed" && (
@@ -401,7 +393,7 @@ export default function AutoTestPage() {
 
           {hasSteps && (
             <div>
-              <h3 className="font-display text-lg font-semibold mb-4">Browser Session Timeline</h3>
+              <h3 className="t-display-s mb-4">Browser Session Timeline</h3>
 
               <div className="flex gap-3 mb-4 text-xs">
                 {Object.entries(PHASE_LABELS).map(([phase, label]) => {
@@ -506,7 +498,7 @@ export default function AutoTestPage() {
 
           {!hasSteps && result.result.screenshots.length > 0 && (
             <div>
-              <h3 className="font-display text-lg font-semibold mb-3">Screenshots</h3>
+              <h3 className="t-display-s mb-3">Screenshots</h3>
               <div className="grid grid-cols-2 gap-3">
                 {result.result.screenshots.map((ss, i) => (
                   <div key={i} className="rounded-xl overflow-hidden border border-border-dim bg-surface">
@@ -524,58 +516,76 @@ export default function AutoTestPage() {
           )}
 
           <div>
-            <h3 className="font-display text-lg font-semibold mb-3">Persona Report</h3>
-            <div className="p-5 rounded-xl bg-surface border border-border-dim text-sm text-[var(--text-primary)] whitespace-pre-wrap leading-relaxed">
+            <h3 className="t-display-s mb-3">Persona Report</h3>
+            <div className="hf-card p-5 text-sm text-[var(--text-primary)] whitespace-pre-wrap leading-relaxed">
               {result.result.textReport}
             </div>
           </div>
 
           {result.result.uxFeedback && (
             <div>
-              <h3 className="font-display text-lg font-semibold mb-3">UX Feedback</h3>
+              <h3 className="t-display-s mb-3">UX Feedback</h3>
+              {/* Score grid — 4 metrics the persona-engine surfaces for every run */}
               <div className="grid grid-cols-4 gap-3 mb-4">
-                {["overall_score", "usability", "visual_design", "performance"].map(key => {
+                {[
+                  { key: "overall_score", label: "Overall" },
+                  { key: "usability", label: "Usability" },
+                  { key: "visual_design", label: "Visual" },
+                  { key: "performance", label: "Performance" },
+                ].map(({ key, label }) => {
                   const val = result.result!.uxFeedback[key];
-                  if (val === undefined) return null;
+                  const hasVal = val !== undefined && val !== null;
                   return (
-                    <div key={key} className="p-3 rounded-xl bg-surface border border-border-dim text-center">
-                      <p className="text-xs text-[var(--text-tertiary)] mb-1 font-mono">{key.replace(/_/g, " ")}</p>
-                      <p className={`text-xl font-display font-bold ${
-                        Number(val) >= 4 ? "text-sol-green" :
-                        Number(val) >= 3 ? "text-[var(--status-warning)]" : "text-[var(--status-error)]"
-                      }`}>
-                        {String(val)}
-                      </p>
+                    <div key={key} className="hf-card p-4 text-center">
+                      <p className="text-[10px] text-[var(--text-tertiary)] font-mono uppercase tracking-wider mb-1">{label}</p>
+                      {hasVal ? (
+                        <p className={`text-2xl font-display font-bold ${
+                          Number(val) >= 4 ? "text-sol-green" :
+                          Number(val) >= 3 ? "text-[var(--status-warning)]" : "text-[var(--status-error)]"
+                        }`}>
+                          {String(val)}
+                          <span className="text-xs font-normal text-[var(--text-tertiary)] ml-1">/ 5</span>
+                        </p>
+                      ) : (
+                        <p className="text-2xl font-display font-bold text-[var(--text-tertiary)]">—</p>
+                      )}
                     </div>
                   );
                 })}
               </div>
 
-              {Array.isArray(result.result.uxFeedback.issues_found) && (
-                <div className="mb-3">
-                  <p className="text-sm text-[var(--text-secondary)] mb-2 font-mono">Issues Found:</p>
-                  <ul className="space-y-1">
-                    {(result.result.uxFeedback.issues_found as string[]).map((issue, i) => (
-                      <li key={i} className="text-sm text-[var(--status-error)] pl-3 border-l-2 border-[var(--status-error)]/30">{issue}</li>
-                    ))}
-                  </ul>
+              {/* Issues / suggestions — parallel columns so the reader can weigh what broke vs what to try */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl border border-[var(--status-error)]/20 bg-[var(--status-error)]/5">
+                  <p className="text-xs font-mono uppercase tracking-wider text-[var(--status-error)] mb-2">Issues found</p>
+                  {Array.isArray(result.result.uxFeedback.issues_found) && (result.result.uxFeedback.issues_found as string[]).length > 0 ? (
+                    <ul className="space-y-1.5">
+                      {(result.result.uxFeedback.issues_found as string[]).map((issue, i) => (
+                        <li key={i} className="text-sm text-[var(--text-primary)] leading-snug">• {issue}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-[var(--text-tertiary)]">No issues flagged.</p>
+                  )}
                 </div>
-              )}
 
-              {Array.isArray(result.result.uxFeedback.suggestions) && (
-                <div>
-                  <p className="text-sm text-[var(--text-secondary)] mb-2 font-mono">Suggestions:</p>
-                  <ul className="space-y-1">
-                    {(result.result.uxFeedback.suggestions as string[]).map((sug, i) => (
-                      <li key={i} className="text-sm text-sol-blue pl-3 border-l-2 border-sol-blue/30">{sug}</li>
-                    ))}
-                  </ul>
+                <div className="p-4 rounded-xl border border-sol-blue/20 bg-sol-blue/5">
+                  <p className="text-xs font-mono uppercase tracking-wider text-sol-blue mb-2">Suggestions</p>
+                  {Array.isArray(result.result.uxFeedback.suggestions) && (result.result.uxFeedback.suggestions as string[]).length > 0 ? (
+                    <ul className="space-y-1.5">
+                      {(result.result.uxFeedback.suggestions as string[]).map((sug, i) => (
+                        <li key={i} className="text-sm text-[var(--text-primary)] leading-snug">• {sug}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-[var(--text-tertiary)]">No suggestions this run.</p>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           )}
 
-          <details className="rounded-xl bg-surface border border-border-dim">
+          <details className="hf-card">
             <summary className="p-3 text-sm text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)] font-mono">
               Action Log ({result.result.actionLog.length} entries)
             </summary>
@@ -587,7 +597,7 @@ export default function AutoTestPage() {
           </details>
 
           {result.result.txSignature && !result.result.txSignature.startsWith("pending") && (
-            <div className="flex items-center gap-2 text-sm p-3 rounded-xl bg-surface border border-border-dim">
+            <div className="flex items-center gap-2 text-sm hf-card p-3">
               <span className="text-[var(--text-secondary)]">41R Token Settlement:</span>
               <a
                 href={`https://explorer.solana.com/tx/${result.result.txSignature}?cluster=devnet`}
@@ -602,6 +612,158 @@ export default function AutoTestPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Live Theater ─────────────────────────────────────────────────────────
+// Browser viewport + persona "thinking out loud" timeline. Shown only while
+// a run is queued/running; swaps out for the final result panels.
+
+function stylizedMonologue(line: string): string {
+  // A few light reframings so action log reads more like a person's narration.
+  if (/^\s*(open|navigate|goto|visit)/i.test(line)) return `OK, let me open this up.`;
+  if (/click.*(connect|wallet|sign)/i.test(line)) return `Connecting my wallet — hope the popup behaves.`;
+  if (/click/i.test(line)) return `Clicking that.`;
+  if (/(type|fill|enter).*(amount|value)/i.test(line)) return `Typing a weird amount to see how it reacts.`;
+  if (/(slippage|gas|fee)/i.test(line)) return `Let me check slippage settings — that's usually where things go sideways.`;
+  if (/scroll/i.test(line)) return `Scrolling through to see if anything else catches my eye.`;
+  if (/wait|loading|spinner/i.test(line)) return `Still loading. Fine — but a hint of progress would help.`;
+  if (/error|failed|reject/i.test(line)) return `That errored. Taking note.`;
+  return line;
+}
+
+function LiveTheater({
+  result,
+  polling,
+  personaVoice,
+}: {
+  result: AutoTestResult;
+  polling: boolean;
+  personaVoice?: string;
+}) {
+  const steps = result.result?.steps || [];
+  const actionLog = result.result?.actionLog || [];
+  const latestScreenshot =
+    steps.length > 0 ? steps[steps.length - 1] : null;
+  const progress = result.progress ?? 0;
+
+  return (
+    <div className="mb-8">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="chip success">
+            <span className="chip-dot pulse-dot" />
+            Live · {result.status}
+          </span>
+          <span className="addr">polling every 3s</span>
+        </div>
+        <span className="money text-[var(--fg-1)]">{progress}%</span>
+      </div>
+
+      <div className="h-1.5 rounded-full mb-4 overflow-hidden" style={{ background: "var(--bg-2)" }}>
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${progress}%`, background: "var(--accent)" }}
+        />
+      </div>
+
+      <div className="grid gap-4" style={{ gridTemplateColumns: "minmax(0, 1.6fr) minmax(0, 1fr)" }}>
+        {/* Browser viewport */}
+        <div className="hf-card overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--line-1)]" style={{ background: "var(--bg-2)" }}>
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: "var(--danger)" }} />
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: "var(--warn)" }} />
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: "var(--success)" }} />
+            <span className="addr ml-2 truncate">
+              {latestScreenshot ? latestScreenshot.label : "browser booting…"}
+            </span>
+          </div>
+          <div className="bg-[var(--bg-2)] min-h-[300px] grid place-items-center relative">
+            {latestScreenshot ? (
+              <img
+                src={latestScreenshot.file.startsWith("http") ? latestScreenshot.file : `${API_BASE}/screenshots/${latestScreenshot.file}`}
+                alt={latestScreenshot.label}
+                className="w-full h-auto"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              />
+            ) : (
+              <div className="flex flex-col items-center gap-2 py-12">
+                <div className="w-5 h-5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" />
+                <span className="t-caption">Spinning up the browser…</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Persona monologue */}
+        <div className="hf-card overflow-hidden flex flex-col">
+          <div className="flex items-center gap-2.5 px-4 py-3 border-b border-[var(--line-1)]" style={{ background: "var(--bg-2)" }}>
+            <div
+              className="w-9 h-9 rounded-[var(--r-2)] border border-[var(--line-1)] grid place-items-center"
+              style={{
+                background: "radial-gradient(circle at 30% 30%, var(--sol-green) 0%, transparent 45%), radial-gradient(circle at 70% 70%, var(--sol-purple) 0%, transparent 50%), var(--bg-3)",
+              }}
+            />
+            <div>
+              <div className="t-body font-medium">Persona thinking</div>
+              <div className="t-caption">in character</div>
+            </div>
+          </div>
+          {personaVoice && (
+            <div className="px-4 py-3 border-b border-[var(--line-1)]">
+              <div className="t-label mb-1.5" style={{ color: "var(--accent)" }}>Voice</div>
+              <p className="t-body-s italic leading-snug line-clamp-3">&ldquo;{personaVoice}&rdquo;</p>
+            </div>
+          )}
+          <div className="flex-1 overflow-auto max-h-[360px] relative" style={{ paddingLeft: 28 }}>
+            <div
+              className="absolute left-[13px] top-3 bottom-3 w-px"
+              style={{ background: "var(--line-1)" }}
+            />
+            <div className="py-2">
+              {actionLog.length === 0 ? (
+                <p className="px-4 py-3 t-caption">Waiting for the first move…</p>
+              ) : (
+                actionLog.slice(-12).map((line, i, arr) => {
+                  const elapsed = i === arr.length - 1;
+                  const mono = stylizedMonologue(line);
+                  return (
+                    <div key={i} className="relative pr-4 py-2">
+                      <span
+                        className="absolute -left-[22px] top-3 w-2.5 h-2.5 rounded-full"
+                        style={{
+                          background: elapsed ? "var(--accent)" : "var(--bg-0)",
+                          border: `2px solid ${elapsed ? "var(--accent)" : "var(--line-2)"}`,
+                        }}
+                      />
+                      <div className="addr mb-0.5">
+                        {String(Math.floor((i / Math.max(arr.length - 1, 1)) * progress)).padStart(2, "0")}%
+                      </div>
+                      <p className="t-body-s">
+                        {mono !== line ? (
+                          <>
+                            {mono}
+                            <span className="t-caption block mt-0.5 opacity-70">· {line}</span>
+                          </>
+                        ) : (
+                          line
+                        )}
+                      </p>
+                    </div>
+                  );
+                })
+              )}
+              {polling && (
+                <div className="px-4 py-2 t-caption opacity-70">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent)] pulse-dot mr-2" />
+                  listening for the next step…
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

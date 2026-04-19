@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { testApi } from "@/lib/api";
 import { LoadingSpinner } from "@/components/loading";
 import { ErrorDisplay } from "@/components/error-display";
+import { Topbar } from "@/components/topbar";
 
 interface Test {
   id: string;
@@ -35,33 +36,33 @@ export default function TesterTestList() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="font-display text-2xl font-bold mb-2">Available Tests</h1>
-      <p className="text-[var(--text-secondary)] text-sm mb-8">Complete 3 tests to generate your AI Persona</p>
+      <Topbar
+        title="Available Tests"
+        subtitle="Complete 3 tests to generate your AI persona"
+      />
 
       {loading ? (
         <LoadingSpinner text="Loading available tests..." />
       ) : error ? (
         <ErrorDisplay message={error} onRetry={loadTests} />
       ) : tests.length === 0 ? (
-        <div className="text-center py-12 text-[var(--text-secondary)]">No active tests available</div>
+        <div className="text-center py-12 t-caption">No active tests available</div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {tests.map((test) => (
             <Link
               key={test.id}
               href={`/tester/test/${test.id}`}
-              className="block p-5 rounded-xl border border-border-dim bg-surface hover:border-sol-blue/30 hover:bg-surface-elevated transition-all card-hover"
+              className="hf-card card-hover block p-4 hover:border-[var(--line-2)]"
             >
-              <div className="flex justify-between items-start">
-                <div>
-                  <p className="font-mono text-sm text-[var(--text-primary)] truncate max-w-md">{test.targetUrl}</p>
-                  <p className="text-xs text-[var(--text-tertiary)] mt-1">
-                    Created {new Date(test.createdAt).toLocaleDateString()}
-                  </p>
+              <div className="flex justify-between items-start gap-4">
+                <div className="min-w-0">
+                  <p className="t-body font-medium truncate">{test.targetUrl}</p>
+                  <p className="addr mt-1">Created {new Date(test.createdAt).toLocaleDateString()}</p>
                 </div>
-                <div className="text-right">
-                  <p className="text-sol-blue font-display font-semibold">${test.rewardPerTester} USDC</p>
-                  <p className="text-xs text-[var(--text-tertiary)] mt-1">reward per tester</p>
+                <div className="text-right shrink-0">
+                  <p className="money text-sol-blue font-semibold text-lg leading-none">${test.rewardPerTester}<span className="ml-1 text-xs text-[var(--fg-3)] font-normal">USDC</span></p>
+                  <p className="t-caption mt-1">per report</p>
                 </div>
               </div>
             </Link>

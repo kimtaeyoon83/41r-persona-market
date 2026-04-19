@@ -11,31 +11,31 @@ const config: Config = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
-        // Solana brand
+        // Solana brand — kept as product identity
         sol: {
           green: "#14F195",
           purple: "#9945FF",
           blue: "#00C2FF",
         },
-        // Surface colors
+        // Surface colors — now route through Hi-Fi OKLCH tokens in globals.css
         surface: {
-          base: "#000000",
-          DEFAULT: "#0E1019",
-          elevated: "#151822",
-          card: "#1A1E2B",
-          "card-hover": "#1F2435",
+          base: "var(--bg-0)",
+          DEFAULT: "var(--bg-1)",
+          elevated: "var(--bg-2)",
+          card: "var(--bg-2)",
+          "card-hover": "var(--bg-3)",
         },
-        // Border colors
+        // Border colors — Hi-Fi hairline scale
         border: {
-          dim: "#1E2230",
-          DEFAULT: "#282D3E",
-          hover: "#3A3F52",
+          dim: "var(--line-1)",
+          DEFAULT: "var(--line-1)",
+          hover: "var(--line-2)",
         },
       },
       fontFamily: {
-        display: ["Syne", "system-ui", "sans-serif"],
-        sans: ["DM Sans", "system-ui", "sans-serif"],
-        mono: ["JetBrains Mono", "Menlo", "monospace"],
+        display: ["var(--font-display-loaded)", "Inter Tight", "system-ui", "sans-serif"],
+        sans: ["var(--font-sans-loaded)", "Inter", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono-loaded)", "JetBrains Mono", "Menlo", "monospace"],
       },
       animation: {
         "glow-pulse": "glow-pulse 3s ease-in-out infinite",

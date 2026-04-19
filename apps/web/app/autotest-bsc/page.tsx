@@ -22,6 +22,7 @@ import {
 } from "@/lib/api";
 import { LoadingSpinner } from "@/components/loading";
 import { ErrorDisplay } from "@/components/error-display";
+import { DevDemoBanner } from "@/components/dev-demo-banner";
 
 interface Test { id: string; targetUrl: string; status: string }
 interface Persona {
@@ -437,6 +438,7 @@ export default function AutoTestBscPage() {
 
   return (
     <div className="max-w-5xl">
+      <DevDemoBanner subtitle="EVM/BSC testnet variant of auto-test. Solana is the canonical path — this flow is kept for x402 + EIP-3009 research." />
       <div className="flex items-start justify-between mb-2">
         <h1 className="font-display text-2xl font-bold">Auto Test — BSC Testnet</h1>
         <span className="px-2 py-1 rounded-md text-[11px] font-mono bg-yellow-400/10 text-yellow-300 border border-yellow-400/20">

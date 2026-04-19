@@ -1,27 +1,27 @@
 import type { Metadata } from "next";
-import { Syne, DM_Sans, JetBrains_Mono } from "next/font/google";
+import { Inter_Tight, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
 import { SolanaWalletProvider } from "@/components/wallet-provider";
 import { EvmWalletProvider } from "@/components/evm-wallet-provider";
 
-const syne = Syne({
+const interTight = Inter_Tight({
   subsets: ["latin"],
-  variable: "--font-display",
+  variable: "--font-display-loaded",
   display: "swap",
-  weight: ["400", "500", "600", "700", "800"],
+  weight: ["400", "500", "600", "700"],
 });
 
-const dmSans = DM_Sans({
+const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-sans",
+  variable: "--font-sans-loaded",
   display: "swap",
-  weight: ["300", "400", "500", "600", "700"],
+  weight: ["400", "500", "600"],
 });
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-mono",
+  variable: "--font-mono-loaded",
   display: "swap",
   weight: ["400", "500"],
 });
@@ -39,14 +39,14 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${syne.variable} ${dmSans.variable} ${jetbrainsMono.variable} font-sans antialiased bg-surface-base text-[var(--text-primary)]`}
+        className={`${interTight.variable} ${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
         <SolanaWalletProvider>
           <EvmWalletProvider>
             <div className="flex min-h-screen">
               <Sidebar />
-              <main className="flex-1 ml-[260px] min-h-screen">
-                <div className="max-w-[1200px] mx-auto px-8 py-8">
+              <main className="flex-1 ml-[232px] min-h-screen">
+                <div className="max-w-[1240px] mx-auto px-7 py-7">
                   {children}
                 </div>
               </main>

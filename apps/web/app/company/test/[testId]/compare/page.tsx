@@ -84,113 +84,119 @@ export default function CompareReportsPage() {
   return (
     <div className="max-w-6xl">
       <div className="mb-6">
-        <Link href={`/company/test/${testId}`} className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] mb-2 inline-block transition-colors">
-          &larr; Back to Test
+        <Link href={`/company/test/${testId}`} className="t-caption hover:text-[var(--fg-0)] mb-2 inline-block transition-colors">
+          ← Back to Test
         </Link>
-        <h1 className="font-display text-2xl font-bold mb-1">Manual vs AI Persona Report</h1>
-        <p className="text-sm text-[var(--text-secondary)] font-mono">{testUrl}</p>
+        <h1 className="t-display-m mb-1">Manual vs AI Persona Report</h1>
+        <p className="addr">{testUrl}</p>
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-8">
-        <div className="p-5 rounded-xl border border-sol-blue/20 bg-sol-blue/5">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-sol-blue/20 text-sol-blue">Manual</span>
-            <span className="text-xs text-[var(--text-tertiary)]">{data.manual.count} report(s)</span>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="text-center">
-              <p className="text-xs text-[var(--text-tertiary)]">Quality</p>
-              <p className={`text-2xl font-display font-bold ${data.manual.avg_quality >= 4 ? "text-sol-green" : data.manual.avg_quality >= 3 ? "text-[var(--status-warning)]" : "text-[var(--status-error)]"}`}>
-                {data.manual.avg_quality.toFixed(1)}
-              </p>
+        {[
+          { label: "Manual", data: data.manual, variant: "info" as const, toneSet: ["text-sol-blue", "text-[var(--info)]"] },
+          { label: "AI Persona", data: data.persona, variant: "success" as const, toneSet: ["text-sol-green", "text-[var(--success)]"] },
+        ].map((panel) => (
+          <div key={panel.label} className="hf-card p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <span className={`chip ${panel.variant}`}>{panel.label}</span>
+              <span className="t-caption">{panel.data.count} report(s)</span>
             </div>
-            <div className="text-center">
-              <p className="text-xs text-[var(--text-tertiary)]">Passed</p>
-              <p className="text-2xl font-display font-bold text-sol-green">{data.manual.issues.passed}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-[var(--text-tertiary)]">Issues</p>
-              <p className="text-2xl font-display font-bold text-[var(--status-error)]">{data.manual.issues.failed + data.manual.issues.blocked}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-5 rounded-xl border border-sol-green/20 bg-sol-green/5">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-sol-green/20 text-sol-green">AI Persona</span>
-            <span className="text-xs text-[var(--text-tertiary)]">{data.persona.count} report(s)</span>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="text-center">
-              <p className="text-xs text-[var(--text-tertiary)]">Quality</p>
-              <p className={`text-2xl font-display font-bold ${data.persona.avg_quality >= 4 ? "text-sol-green" : data.persona.avg_quality >= 3 ? "text-[var(--status-warning)]" : "text-[var(--status-error)]"}`}>
-                {data.persona.avg_quality.toFixed(1)}
-              </p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-[var(--text-tertiary)]">Passed</p>
-              <p className="text-2xl font-display font-bold text-sol-green">{data.persona.issues.passed}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-[var(--text-tertiary)]">Issues</p>
-              <p className="text-2xl font-display font-bold text-[var(--status-error)]">{data.persona.issues.failed + data.persona.issues.blocked}</p>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center">
+                <div className="t-label">Quality</div>
+                <p className={`money text-2xl font-semibold mt-1 ${panel.data.avg_quality >= 4 ? "text-sol-green" : panel.data.avg_quality >= 3 ? "text-[var(--warn)]" : "text-[var(--danger)]"}`}>
+                  {panel.data.avg_quality.toFixed(1)}
+                </p>
+              </div>
+              <div className="text-center">
+                <div className="t-label">Passed</div>
+                <p className="money text-2xl font-semibold mt-1 text-sol-green">{panel.data.issues.passed}</p>
+              </div>
+              <div className="text-center">
+                <div className="t-label">Issues</div>
+                <p className="money text-2xl font-semibold mt-1 text-[var(--danger)]">{panel.data.issues.failed + panel.data.issues.blocked}</p>
+              </div>
             </div>
           </div>
-        </div>
+        ))}
       </div>
 
-      {(manualReport || personaReport) && (
-        <div className="mb-8">
-          <h2 className="font-display text-lg font-semibold mb-4">Checklist Results</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-xs text-sol-blue mb-2 font-mono font-medium">Manual Tester</p>
-              <div className="space-y-2">
-                {manualReport?.checklistResults?.map((item) => (
-                  <div key={item.id} className="p-2.5 rounded-lg bg-surface border border-border-dim flex items-start gap-2">
-                    <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-medium ${
-                      item.status === "passed" ? "text-sol-green bg-sol-green/10" :
-                      item.status === "failed" ? "text-[var(--status-error)] bg-[var(--status-error)]/10" :
-                      "text-[var(--status-warning)] bg-[var(--status-warning)]/10"
-                    }`}>
-                      {item.status}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-[10px] font-mono text-[var(--text-tertiary)]">{item.id}</span>
-                      <p className="text-xs text-[var(--text-secondary)] truncate">{item.memo}</p>
-                    </div>
-                  </div>
-                )) || <p className="text-xs text-[var(--text-tertiary)]">No manual reports yet</p>}
-              </div>
-            </div>
+      {(manualReport || personaReport) && (() => {
+        // Pair checklist items by id to show agreement at a glance.
+        const manualById = new Map((manualReport?.checklistResults || []).map((c) => [c.id, c]));
+        const personaById = new Map((personaReport?.checklistResults || []).map((c) => [c.id, c]));
+        const allIds = Array.from(new Set([...manualById.keys(), ...personaById.keys()]));
+        const pairs = allIds.map((id) => {
+          const m = manualById.get(id);
+          const p = personaById.get(id);
+          const agree = m && p && m.status === p.status;
+          const disagree = m && p && m.status !== p.status;
+          return { id, m, p, agree, disagree };
+        });
+        const agreeCount = pairs.filter((x) => x.agree).length;
+        const disagreeCount = pairs.filter((x) => x.disagree).length;
+        const pairedCount = pairs.filter((x) => x.m && x.p).length;
 
-            <div>
-              <p className="text-xs text-sol-green mb-2 font-mono font-medium">AI Persona</p>
-              <div className="space-y-2">
-                {personaReport?.checklistResults?.map((item) => (
-                  <div key={item.id} className="p-2.5 rounded-lg bg-surface border border-border-dim flex items-start gap-2">
-                    <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-medium ${
-                      item.status === "passed" ? "text-sol-green bg-sol-green/10" :
-                      item.status === "failed" ? "text-[var(--status-error)] bg-[var(--status-error)]/10" :
-                      "text-[var(--status-warning)] bg-[var(--status-warning)]/10"
-                    }`}>
-                      {item.status}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-[10px] font-mono text-[var(--text-tertiary)]">{item.id}</span>
-                      <p className="text-xs text-[var(--text-secondary)] truncate">{item.memo}</p>
+        const statusPill = (status?: string) => {
+          if (!status) return <span className="text-[10px] font-mono text-[var(--text-tertiary)]">—</span>;
+          const cls = status === 'passed' ? 'text-sol-green bg-sol-green/10'
+            : status === 'failed' ? 'text-[var(--status-error)] bg-[var(--status-error)]/10'
+            : 'text-[var(--status-warning)] bg-[var(--status-warning)]/10';
+          return <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-medium ${cls}`}>{status}</span>;
+        };
+
+        return (
+          <div className="mb-8">
+            <div className="flex items-baseline justify-between mb-3">
+              <h2 className="t-display-s">Checklist — agreement</h2>
+              {pairedCount > 0 && (
+                <span className="text-xs font-mono text-[var(--text-tertiary)]">
+                  <span className="text-sol-green">{agreeCount} agree</span>
+                  {' · '}
+                  <span className="text-[var(--status-error)]">{disagreeCount} disagree</span>
+                  {' · '}
+                  {pairedCount} paired
+                </span>
+              )}
+            </div>
+            <div className="hf-card overflow-hidden">
+              <div className="grid grid-cols-[80px_1fr_1fr] gap-px bg-border-dim text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)]">
+                <div className="bg-surface px-3 py-2">Item</div>
+                <div className="bg-surface px-3 py-2">Manual</div>
+                <div className="bg-surface px-3 py-2">AI Persona</div>
+              </div>
+              <div className="divide-y divide-border-dim">
+                {pairs.map((row) => {
+                  const bg = row.agree ? 'bg-sol-green/5' : row.disagree ? 'bg-[var(--status-error)]/5' : 'bg-surface';
+                  return (
+                    <div key={row.id} className={`grid grid-cols-[80px_1fr_1fr] gap-0 items-start ${bg}`}>
+                      <div className="px-3 py-2 text-[10px] font-mono text-[var(--text-tertiary)] border-r border-border-dim">{row.id}</div>
+                      <div className="px-3 py-2 space-y-1 border-r border-border-dim">
+                        {statusPill(row.m?.status)}
+                        {row.m?.memo && <p className="text-xs text-[var(--text-secondary)] leading-snug">{row.m.memo}</p>}
+                      </div>
+                      <div className="px-3 py-2 space-y-1">
+                        {statusPill(row.p?.status)}
+                        {row.p?.memo && <p className="text-xs text-[var(--text-secondary)] leading-snug">{row.p.memo}</p>}
+                      </div>
                     </div>
-                  </div>
-                )) || <p className="text-xs text-[var(--text-tertiary)]">No persona reports yet</p>}
+                  );
+                })}
+                {pairs.length === 0 && (
+                  <div className="px-3 py-4 text-xs text-[var(--text-tertiary)]">No checklist items recorded yet.</div>
+                )}
               </div>
             </div>
+            <p className="mt-2 text-[11px] text-[var(--text-tertiary)]">
+              Rows are tinted when both sides reported the same item: green if they agree on pass/fail/blocked, pink if they disagree.
+            </p>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {(manualActions.length > 0 || personaActions.length > 0) && (
         <div className="mb-8">
-          <h2 className="font-display text-lg font-semibold mb-4">Action Timeline</h2>
+          <h2 className="t-display-s mb-4">Action Timeline</h2>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-xs text-sol-blue mb-2 font-mono font-medium">Manual Tester ({manualActions.length} actions)</p>
@@ -217,7 +223,7 @@ export default function CompareReportsPage() {
 
       {(manualReport?.screenshots?.length > 0 || personaReport?.screenshots?.length > 0) && (
         <div className="mb-8">
-          <h2 className="font-display text-lg font-semibold mb-4">Screenshots</h2>
+          <h2 className="t-display-s mb-4">Screenshots</h2>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-xs text-sol-blue mb-2 font-mono font-medium">Manual</p>

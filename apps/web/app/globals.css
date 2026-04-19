@@ -2,51 +2,122 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Solana-Inspired Design System ─── */
+/* ─── 41R Design Tokens · Hi-Fi (Linear / Phantom inspired) ─── */
 :root {
-  /* Solana brand colors */
+  /* Fonts */
+  --font-display: var(--font-display-loaded, "Inter Tight"), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: var(--font-sans-loaded, "Inter"), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-mono-loaded, "JetBrains Mono"), ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Neutrals — cool-tinted dark, 5 surface steps */
+  --bg-0: oklch(0.14 0.008 265);      /* page */
+  --bg-1: oklch(0.17 0.008 265);      /* raised */
+  --bg-2: oklch(0.20 0.009 265);      /* card */
+  --bg-3: oklch(0.24 0.010 265);      /* hover */
+  --bg-4: oklch(0.28 0.011 265);      /* pressed */
+
+  /* Hairlines */
+  --line-1: oklch(0.26 0.010 265 / 0.6);
+  --line-2: oklch(0.32 0.012 265 / 0.8);
+
+  /* Foreground scale */
+  --fg-0: oklch(0.98 0.003 265);
+  --fg-1: oklch(0.82 0.006 265);
+  --fg-2: oklch(0.62 0.008 265);
+  --fg-3: oklch(0.48 0.008 265);
+  --fg-4: oklch(0.36 0.009 265);
+
+  /* Solana brand palette (kept — this is the product's identity) */
   --sol-green: #14F195;
   --sol-purple: #9945FF;
   --sol-blue: #00C2FF;
 
-  /* Surfaces */
-  --bg-base: #000000;
-  --bg-surface: #0E1019;
-  --bg-elevated: #151822;
-  --bg-card: #1A1E2B;
-  --bg-card-hover: #1F2435;
+  /* Semantic — tuned to match Solana palette */
+  --success: oklch(0.82 0.22 155);         /* sol-green-ish */
+  --success-soft: oklch(0.82 0.22 155 / 0.14);
+  --success-line: oklch(0.82 0.22 155 / 0.32);
+  --warn: oklch(0.84 0.18 90);
+  --warn-soft: oklch(0.84 0.18 90 / 0.14);
+  --warn-line: oklch(0.84 0.18 90 / 0.32);
+  --danger: oklch(0.68 0.22 20);
+  --danger-soft: oklch(0.68 0.22 20 / 0.14);
+  --danger-line: oklch(0.68 0.22 20 / 0.32);
+  --info: oklch(0.78 0.14 225);            /* sol-blue-ish */
+  --info-soft: oklch(0.78 0.14 225 / 0.14);
+  --info-line: oklch(0.78 0.14 225 / 0.32);
+  --accent: var(--sol-green);
+  --accent-soft: rgba(20, 241, 149, 0.14);
+  --accent-line: rgba(20, 241, 149, 0.32);
+  --accent-fg: oklch(0.14 0.008 265);
 
-  /* Borders */
-  --border-dim: #1E2230;
-  --border-default: #282D3E;
-  --border-hover: #3A3F52;
-  --border-accent: rgba(20, 241, 149, 0.2);
+  /* Radius scale */
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 8px;
+  --r-4: 12px;
+  --r-5: 16px;
+  --r-pill: 999px;
 
-  /* Text */
-  --text-primary: #E8E9ED;
-  --text-secondary: #8A8F9E;
-  --text-tertiary: #555B6E;
-  --text-link: #14F195;
+  /* Spacing with density variant */
+  --density: 1;
+  --sp-1: calc(4px * var(--density));
+  --sp-2: calc(8px * var(--density));
+  --sp-3: calc(12px * var(--density));
+  --sp-4: calc(16px * var(--density));
+  --sp-5: calc(20px * var(--density));
+  --sp-6: calc(24px * var(--density));
+  --sp-8: calc(32px * var(--density));
+  --sp-10: calc(40px * var(--density));
+  --sp-12: calc(48px * var(--density));
 
-  /* Status */
-  --status-success: #14F195;
-  --status-error: #F14668;
-  --status-warning: #FFD93D;
-  --status-info: #00C2FF;
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
 
-  --foreground: var(--text-primary);
-  --background: var(--bg-base);
+  /* ─── Legacy aliases — kept so existing pages keep rendering.
+         Phase 0/1/1.5 components still reference these names.         ─── */
+  --bg-base: var(--bg-0);
+  --bg-surface: var(--bg-1);
+  --bg-elevated: var(--bg-2);
+  --bg-card: var(--bg-2);
+  --bg-card-hover: var(--bg-3);
+  --border-dim: var(--line-1);
+  --border-default: var(--line-1);
+  --border-hover: var(--line-2);
+  --border-accent: var(--accent-line);
+  --text-primary: var(--fg-0);
+  --text-secondary: var(--fg-1);
+  --text-tertiary: var(--fg-2);
+  --text-link: var(--accent);
+  --status-success: var(--success);
+  --status-error: var(--danger);
+  --status-warning: var(--warn);
+  --status-info: var(--info);
+  --foreground: var(--fg-0);
+  --background: var(--bg-0);
 }
 
-/* ─── Base Styles ─── */
+/* Density + radius variants (not wired to a Tweaks panel yet, but available) */
+[data-density="compact"] { --density: 0.85; font-size: 13px; }
+[data-density="comfortable"] { --density: 1.15; font-size: 15px; }
+[data-radius="sharp"] { --r-1: 0; --r-2: 2px; --r-3: 3px; --r-4: 4px; --r-5: 6px; }
+[data-radius="round"] { --r-1: 6px; --r-2: 10px; --r-3: 14px; --r-4: 18px; --r-5: 22px; }
+
+/* ─── Base ─── */
 body {
-  color: var(--text-primary);
-  background: var(--bg-base);
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  color: var(--fg-0);
+  background: var(--bg-0);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Subtle grain texture overlay */
+/* Subtle grain overlay — keep, it's a distinctive touch */
 body::before {
   content: "";
   position: fixed;
@@ -57,35 +128,36 @@ body::before {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* ─── Scrollbar ─── */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--border-default);
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--border-hover);
-}
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: var(--r-pill); }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-3); }
 
-/* ─── Selection ─── */
 ::selection {
-  background: rgba(20, 241, 149, 0.2);
-  color: var(--sol-green);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
-/* ─── Utility Layers ─── */
+/* ─── Type scale (Hi-Fi) ─── */
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
+  .t-display-xl { font-family: var(--font-display); font-size: 56px; line-height: 1.02; letter-spacing: -0.035em; font-weight: 600; }
+  .t-display-l  { font-family: var(--font-display); font-size: 40px; line-height: 1.05; letter-spacing: -0.03em; font-weight: 600; }
+  .t-display-m  { font-family: var(--font-display); font-size: 28px; line-height: 1.1;  letter-spacing: -0.025em; font-weight: 600; }
+  .t-display-s  { font-family: var(--font-display); font-size: 20px; line-height: 1.2;  letter-spacing: -0.02em; font-weight: 600; }
+  .t-body-l     { font-size: 15px; line-height: 1.5; }
+  .t-body       { font-size: 14px; line-height: 1.5; }
+  .t-body-s     { font-size: 13px; line-height: 1.45; }
+  .t-caption    { font-size: 12px; line-height: 1.4; color: var(--fg-2); }
+  .t-label      { font-size: 11px; line-height: 1.3; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-2); font-weight: 500; }
+  .t-mono       { font-family: var(--font-mono); font-size: 12px; letter-spacing: -0.005em; }
 
-  /* Solana gradient text */
+  .money { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .addr  { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
+
+  .text-balance { text-wrap: balance; }
+
+  /* Solana gradient text (kept — brand moment on the Home hero) */
   .sol-gradient-text {
     background: linear-gradient(135deg, var(--sol-green), var(--sol-purple));
     -webkit-background-clip: text;
@@ -93,110 +165,133 @@ body::before {
     background-clip: text;
   }
 
-  /* Solana gradient border (uses pseudo-element) */
-  .sol-border-glow {
-    position: relative;
-  }
-  .sol-border-glow::before {
-    content: "";
-    position: absolute;
-    inset: -1px;
-    border-radius: inherit;
-    padding: 1px;
-    background: linear-gradient(135deg, rgba(20, 241, 149, 0.3), rgba(153, 69, 255, 0.3));
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-  }
-
-  /* Glow effect */
-  .sol-glow {
-    box-shadow: 0 0 20px rgba(20, 241, 149, 0.08), 0 0 60px rgba(153, 69, 255, 0.04);
-  }
-
-  /* Card hover lift */
-  .card-hover {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .card-hover:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 24px rgba(20, 241, 149, 0.06);
-  }
-
-  /* Pulse dot animation */
-  .pulse-dot {
-    animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
+  /* Pulse + fade-in (kept for Phase 1 code paths) */
+  .pulse-dot { animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
   @keyframes pulse-dot {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
   }
 
-  /* Fade in animation */
-  .fade-in {
-    animation: fade-in 0.5s ease-out forwards;
-  }
+  .fade-in { animation: fade-in 0.4s ease-out forwards; }
   @keyframes fade-in {
-    from { opacity: 0; transform: translateY(8px); }
+    from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: translateY(0); }
   }
 
-  /* Stagger children */
-  .stagger-children > * {
-    opacity: 0;
-    animation: fade-in 0.4s ease-out forwards;
-  }
-  .stagger-children > *:nth-child(1) { animation-delay: 0.05s; }
-  .stagger-children > *:nth-child(2) { animation-delay: 0.1s; }
-  .stagger-children > *:nth-child(3) { animation-delay: 0.15s; }
-  .stagger-children > *:nth-child(4) { animation-delay: 0.2s; }
-  .stagger-children > *:nth-child(5) { animation-delay: 0.25s; }
-  .stagger-children > *:nth-child(6) { animation-delay: 0.3s; }
-
-  /* Shimmer loading effect */
-  .shimmer {
-    background: linear-gradient(
-      90deg,
-      var(--bg-card) 25%,
-      var(--bg-card-hover) 50%,
-      var(--bg-card) 75%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.5s ease-in-out infinite;
-  }
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
+  .card-hover { transition: all var(--dur-2) var(--ease-out); }
+  .card-hover:hover { transform: translateY(-1px); border-color: var(--line-2); }
 }
 
-/* ─── Component Layers ─── */
+/* ─── Hi-Fi primitives ─── */
 @layer components {
-  /* Input styles — covers inputs without explicit type attribute too */
+  /* Cards */
+  .hf-card {
+    background: var(--bg-1);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-4);
+  }
+  .hf-card-inset {
+    background: var(--bg-2);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-3);
+  }
+
+  /* Chip — status pill, pluggable variants */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: 2px 8px;
+    height: 22px;
+    border-radius: var(--r-pill);
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--bg-3);
+    color: var(--fg-1);
+    border: 1px solid var(--line-1);
+    white-space: nowrap;
+    line-height: 1;
+  }
+  .chip.accent  { background: var(--accent-soft);  color: var(--accent);  border-color: var(--accent-line); }
+  .chip.success { background: var(--success-soft); color: var(--success); border-color: var(--success-line); }
+  .chip.warn    { background: var(--warn-soft);    color: var(--warn);    border-color: var(--warn-line); }
+  .chip.danger  { background: var(--danger-soft);  color: var(--danger);  border-color: var(--danger-line); }
+  .chip.info    { background: var(--info-soft);    color: var(--info);    border-color: var(--info-line); }
+  .chip.ghost   { background: transparent; }
+
+  /* Dot indicator */
+  .chip-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--r-pill);
+    background: currentColor;
+    display: inline-block;
+  }
+
+  /* Hi-Fi buttons — coexist with existing ad-hoc buttons */
+  .hf-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: 0 var(--sp-3);
+    height: 32px;
+    border-radius: var(--r-2);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--fg-0);
+    background: var(--bg-3);
+    border: 1px solid var(--line-1);
+    transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+    white-space: nowrap;
+  }
+  .hf-btn:hover { background: var(--bg-4); border-color: var(--line-2); }
+  .hf-btn.primary {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: transparent;
+    box-shadow: 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft);
+  }
+  .hf-btn.primary:hover { filter: brightness(1.08); }
+  .hf-btn.ghost { background: transparent; border-color: transparent; }
+  .hf-btn.ghost:hover { background: var(--bg-2); }
+  .hf-btn.sm { height: 26px; padding: 0 10px; font-size: 12px; }
+  .hf-btn.lg { height: 40px; padding: 0 16px; font-size: 14px; }
+
+  /* Keyboard shortcut pill */
+  .kbd {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--bg-3);
+    border: 1px solid var(--line-1);
+    color: var(--fg-2);
+  }
+
+  /* Inputs — inherited from before, updated for Hi-Fi feel */
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]),
   textarea,
   select {
     width: 100%;
-    background: var(--bg-elevated) !important;
-    border: 1px solid var(--border-default) !important;
-    color: var(--text-primary) !important;
-    border-radius: 0.5rem;
-    padding: 0.75rem 1rem;
+    background: var(--bg-2);
+    border: 1px solid var(--line-1);
+    color: var(--fg-0);
+    border-radius: var(--r-2);
+    padding: 0.625rem 0.875rem;
     font-size: 0.875rem;
     outline: none;
-    transition: border-color 0.2s;
+    transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
   }
   input::placeholder,
   textarea::placeholder {
-    color: var(--text-tertiary);
+    color: var(--fg-4);
     opacity: 1;
   }
   input:focus,
   textarea:focus,
   select:focus {
-    border-color: var(--sol-green) !important;
-    box-shadow: 0 0 0 1px rgba(20, 241, 149, 0.15);
+    border-color: var(--accent-line);
+    background: var(--bg-1);
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
 }
