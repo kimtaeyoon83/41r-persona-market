@@ -117,10 +117,14 @@ router.post('/register', llmGenerateLimiter, requireSignedRequest, validateBody(
           // Fallback to the legacy in-process Stagehand loop otherwise.
           const engineEnabled = process.env.USE_PERSONA_ENGINE === '1';
           if (engineEnabled) {
-            const { runAutoTestAndPersist } = await import('./autotest.js');
-            // Fire-and-forget per persona. We *don't* await the whole batch
-            // in the request path — LLM scoring takes 10-30s per run and
-            // the company shouldn't wait on that for the register response.
+            const { runStagehandHybridAndPersist } = await import('./autotest.js');
+            // Sequential fire-and-forget. Three concurrent Chromium instances
+            // in the api container OOM'd Railway's memory — each headless
+            // Chrome eats ~300-500MB. Serialize so only one browser runs at a
+            // time; register still returns immediately because the whole
+            // chain is `void`'d. Total wall-clock per test: ~3-6 min for
+            // 3 personas, which is fine for auto-queue.
+            let chain: Promise<unknown> = Promise.resolve();
             for (const match of matches) {
               const jobId = `auto_${test.id.slice(0, 8)}_${match.persona.id.slice(0, 8)}_${Date.now().toString(36)}`;
               autoTestJobs.push({
@@ -128,15 +132,16 @@ router.post('/register', llmGenerateLimiter, requireSignedRequest, validateBody(
                 tester_addr: match.persona.testerAddr,
                 job_id: jobId,
               });
-              void runAutoTestAndPersist({
-                testId: test.id,
-                personaId: match.persona.id,
-                mode: 'text', // cheapest mode for auto-queue; manual /autotest uses hybrid default
-              }).catch((err) => {
-                console.warn(`[AutoTest] persona-engine run failed for ${match.persona.id}:`, err instanceof Error ? err.message : err);
-              });
+              const personaId = match.persona.id;
+              const testId = test.id;
+              chain = chain.then(() =>
+                runStagehandHybridAndPersist({ testId, personaId }).catch((err) => {
+                  console.warn(`[AutoTest] stagehand_hybrid run failed for ${personaId}:`, err instanceof Error ? err.message : err);
+                }),
+              );
             }
-            console.log(`[AutoTest] Queued ${autoTestJobs.length} persona-engine runs for test ${test.id}`);
+            void chain;
+            console.log(`[AutoTest] Queued ${autoTestJobs.length} stagehand_hybrid runs (sequential) for test ${test.id}`);
           } else {
             // Legacy path — in-process Stagehand directly from api container
             const { startAutoTest } = await import('../services/autotest.js');
