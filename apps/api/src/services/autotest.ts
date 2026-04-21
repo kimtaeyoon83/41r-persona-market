@@ -307,12 +307,22 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
     // Final screenshot (current state)
     await captureStep(page, job.id, stepCounter++, 'Test complete — final state', 'final', allBase64, allSteps);
   } catch (stagehandError) {
-    actionLog.push(`Stagehand error: ${stagehandError instanceof Error ? stagehandError.message : 'Unknown'}`);
-    // Continue without browser screenshots — generate report from test data alone
+    const msg = stagehandError instanceof Error ? stagehandError.message : 'Unknown';
+    actionLog.push(`Stagehand error: ${msg}`);
   } finally {
     if (stagehandInstance) {
       await stagehandInstance.close().catch(() => {});
     }
+  }
+
+  // If Stagehand never produced any screenshots, the browser never booted —
+  // don't ask the LLM to fabricate "what the persona would have tested"
+  // prose. Fail the job so the UI reports it honestly instead of surfacing
+  // a glossy fake report with every checklist item "blocked, I would have…".
+  if (allBase64.length === 0) {
+    throw new Error(
+      `autotest browser never booted (${actionLog.find((l) => l.startsWith('Stagehand error')) ?? 'no screenshots captured'})`,
+    );
   }
   job.progress = 80;
 
