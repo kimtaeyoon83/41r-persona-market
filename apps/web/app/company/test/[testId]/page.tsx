@@ -29,7 +29,10 @@ export default function TestDetailPage() {
   const [data, setData] = useState<TestDetail | null>(null);
   const [reports, setReports] = useState<Array<Record<string, unknown>>>([]);
   const [loading, setLoading] = useState(true);
+  // Tab default: 0 (Reports) normally, 2 (Test cases) when there are no reports
+  // yet — otherwise the page looks empty for a freshly-registered test.
   const [tab, setTab] = useState(0);
+  const [userPickedTab, setUserPickedTab] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadData = () => {
@@ -43,6 +46,9 @@ export default function TestDetailPage() {
       .then(([testData, reportData]) => {
         setData(testData);
         setReports(reportData);
+        if (!userPickedTab && reportData.length === 0) {
+          setTab(2); // Test cases
+        }
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load test details"))
       .finally(() => setLoading(false));
@@ -126,9 +132,25 @@ export default function TestDetailPage() {
         <VarTabs
           variants={["Reports", "Issues", "Test cases"]}
           active={tab}
-          onChange={setTab}
+          onChange={(next) => { setUserPickedTab(true); setTab(next); }}
         />
       </div>
+
+      {tab === 0 && reports.length === 0 && (
+        <div className="hf-card p-6 text-center mb-8">
+          <p className="t-body-s text-[var(--fg-1)] mb-1">No reports submitted yet.</p>
+          <p className="t-caption">
+            Once testers submit reports, they&rsquo;ll appear here.
+            {" "}Preview the auto-generated test cases on the{" "}
+            <button
+              onClick={() => { setUserPickedTab(true); setTab(2); }}
+              className="text-sol-blue hover:underline"
+            >
+              Test cases
+            </button> tab.
+          </p>
+        </div>
+      )}
 
       {tab === 1 && (() => {
         type CheckTally = { id: string; task: string; failed: number; blocked: number };
