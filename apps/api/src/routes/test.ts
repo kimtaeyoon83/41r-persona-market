@@ -111,21 +111,49 @@ router.post('/register', llmGenerateLimiter, requireSignedRequest, validateBody(
             3, // max 3 personas
           );
 
-          // Import and queue auto-tests
-          const { startAutoTest } = await import('../services/autotest.js');
-          for (const match of matches) {
-            try {
-              const job = await startAutoTest(test.id, match.persona.id);
+          // Route through persona-engine when USE_PERSONA_ENGINE=1 so the
+          // auto-queued runs land the same quality/voice_sample/narrative
+          // as a manual /api/autotest/run (which we already route there).
+          // Fallback to the legacy in-process Stagehand loop otherwise.
+          const engineEnabled = process.env.USE_PERSONA_ENGINE === '1';
+          if (engineEnabled) {
+            const { runAutoTestAndPersist } = await import('./autotest.js');
+            // Fire-and-forget per persona. We *don't* await the whole batch
+            // in the request path — LLM scoring takes 10-30s per run and
+            // the company shouldn't wait on that for the register response.
+            for (const match of matches) {
+              const jobId = `auto_${test.id.slice(0, 8)}_${match.persona.id.slice(0, 8)}_${Date.now().toString(36)}`;
               autoTestJobs.push({
                 persona_id: match.persona.id,
                 tester_addr: match.persona.testerAddr,
-                job_id: job.id,
+                job_id: jobId,
               });
-            } catch (e) {
-              console.warn(`[AutoTest] Failed to queue for persona ${match.persona.id}:`, e);
+              void runAutoTestAndPersist({
+                testId: test.id,
+                personaId: match.persona.id,
+                mode: 'text', // cheapest mode for auto-queue; manual /autotest uses hybrid default
+              }).catch((err) => {
+                console.warn(`[AutoTest] persona-engine run failed for ${match.persona.id}:`, err instanceof Error ? err.message : err);
+              });
             }
+            console.log(`[AutoTest] Queued ${autoTestJobs.length} persona-engine runs for test ${test.id}`);
+          } else {
+            // Legacy path — in-process Stagehand directly from api container
+            const { startAutoTest } = await import('../services/autotest.js');
+            for (const match of matches) {
+              try {
+                const job = await startAutoTest(test.id, match.persona.id);
+                autoTestJobs.push({
+                  persona_id: match.persona.id,
+                  tester_addr: match.persona.testerAddr,
+                  job_id: job.id,
+                });
+              } catch (e) {
+                console.warn(`[AutoTest] Failed to queue for persona ${match.persona.id}:`, e);
+              }
+            }
+            console.log(`[AutoTest] Queued ${autoTestJobs.length} legacy auto-tests for test ${test.id}`);
           }
-          console.log(`[AutoTest] Queued ${autoTestJobs.length} auto-tests for test ${test.id}`);
         }
       } catch (autoErr) {
         console.warn('[AutoTest] Auto-test matching failed:', autoErr);

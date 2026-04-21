@@ -241,7 +241,7 @@ router.post('/run', autotestRunLimiter, validateBody(autotestRunBodySchema), asy
  * ``/api/reports/compare/:testId`` can treat both sources
  * interchangeably for the AI-vs-human comparison dashboard.
  */
-async function runAutoTestAndPersist(args: {
+export async function runAutoTestAndPersist(args: {
   testId: string;
   personaId: string;
   mode: 'text' | 'browser';
@@ -348,7 +348,7 @@ async function runAutoTestAndPersist(args: {
  * produces. Net result lands in test_reports with the same shape, so
  * /compare sees hybrid runs uniformly.
  */
-async function runStagehandHybridAndPersist(args: {
+export async function runStagehandHybridAndPersist(args: {
   testId: string;
   personaId: string;
 }): Promise<{
