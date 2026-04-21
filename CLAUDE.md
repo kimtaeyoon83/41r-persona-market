@@ -100,9 +100,53 @@ cd apps/persona-engine
 - API client: `lib/api.ts` exports `testApi`, `reportApi`, `personaApi`, `testerApi`, `autoTestApi`
 - Loading: use `<LoadingSpinner>` or `<Loading>` from `components/loading.tsx`
 - Errors: use `<ErrorDisplay message={...} onRetry={...}>` from `components/error-display.tsx`
-- Design system: Solana-inspired dark theme (sol-green #14F195, sol-purple #9945FF)
-- Fonts: Syne (display), DM Sans (body), JetBrains Mono (code)
-- Wallet: Phantom via `components/wallet-provider.tsx`, `useWalletContext()` hook
+- Design system: Hi-Fi dark theme built on OKLCH neutrals + Solana brand accent
+  (sol-green #14F195, sol-purple #9945FF, sol-blue #00C2FF). All primitives and
+  tokens are defined in `app/globals.css` — do not introduce one-off styles
+  when a utility class already covers the need.
+- Fonts: **Inter Tight** (display, `-0.025em` tight tracking) + **Inter** (body)
+  + **JetBrains Mono** (money / addresses). Font CSS variables are
+  `--font-display-loaded`, `--font-sans-loaded`, `--font-mono-loaded`, piped
+  through `--font-display` / `--font-sans` / `--font-mono` so `TweaksPanel`
+  can swap the display face at runtime.
+- Wallet: Phantom via `components/wallet-provider.tsx`, `useWalletContext()`
+  hook. Exposes `publicKey`, `connected`, `connect()`, `disconnect()`,
+  **`signMessage(message)`** returning base58 signature.
+- Role awareness: `useAppRole()` from `components/sidebar.tsx` returns
+  `{role: 'company' | 'tester', setRole}`. Persists in localStorage
+  (`sidebar:role`) and fires `41r:role` CustomEvent on change so pages like
+  Home KPI dashboard can react. Sidebar nav is role-filtered; use this hook
+  when a page needs to branch on role.
+
+### Design tokens / utility classes
+Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
+- Cards: `.hf-card` (bg-1 + line-1 border + r-4) · `.hf-card-inset` (bg-2 + r-3)
+- Buttons: `.hf-btn` + `.primary` / `.ghost` / `.sm` / `.lg` (32px base height,
+  primary has accent glow ring)
+- Chips: `.chip` + `.accent` / `.success` / `.warn` / `.danger` / `.info` /
+  `.ghost` (22px pill, line-1 border). `.chip-dot` for the leading pulse dot.
+- Type scale: `.t-display-xl|l|m|s` (56 / 40 / 28 / 20 px), `.t-body-l|''|s`,
+  `.t-caption`, `.t-label` (11px uppercase tracked)
+- Numbers + wallet: `.money` (JetBrains Mono, tabular-nums), `.addr` (11px mono
+  with fg-2 muted color)
+- Colors: `--bg-0..4` (5 neutral steps), `--line-1/2`, `--fg-0..4`,
+  `--accent` / `--accent-soft` / `--accent-line`, semantic
+  `--success` / `--warn` / `--danger` / `--info` with `-soft` + `-line` variants
+- Legacy aliases (`--bg-surface`, `--text-primary`, `--border-dim`, …) still
+  resolve to the new tokens — safe to delete when you touch a given file.
+
+### Shared primitives
+- `components/topbar.tsx` — hairline page header (title + subtitle + actions
+  + eyebrow chip). Drop into any page that needs a consistent title slot.
+- `components/var-tabs.tsx` — `01 Label / 02 Label` layout switcher (used on
+  Home, company test detail).
+- `components/persona-radar-20.tsx` — flattens persona.vector (test_style +
+  expertise + feedback_pattern + reliability) into a 20-axis polygon.
+- `components/tweaks-panel.tsx` — floating settings card (accent hue, font,
+  density, radius). Toggled from sidebar footer, persists to localStorage
+  (`41r:tweaks`).
+- `components/dev-demo-banner.tsx` — amber "Dev / Demo — not production flow"
+  banner for `/x402` and `/autotest-bsc`.
 
 ### Solana Integration
 - Network: devnet
@@ -112,12 +156,48 @@ cd apps/persona-engine
 - SAS: on-chain attestation with fallback to local demo IDs
 - Keypair: loaded from `SOLANA_KEYPAIR_JSON` env var (production) or `~/.config/solana/id.json` (local)
 
+### Auth / signed requests (important)
+Mutating routes (`POST /api/tester/register`, `PUT /api/tester/:wallet`,
+`POST /api/report/submit`, `POST /api/test/register`) require a wallet-signed
+nonce. Pattern:
+
+```ts
+// client (apps/web/lib/api.ts)
+await signedRequest('/api/...', { method: 'POST', body }, { wallet, signMessage })
+// under the hood:
+//  1. GET /api/auth/nonce?wallet=...  → { nonce, expiresAt }
+//  2. signMessage(nonce)              → base58 signature
+//  3. POST with x-wallet-address, x-nonce, x-signature headers
+```
+
+- **Do not** POST to signed routes without going through `signedRequest`.
+  `request()` in `lib/api.ts` preserves Content-Type when callers pass their
+  own headers — regression reproducer in `/tmp/e2e-flows.py`.
+- Server side: `middleware/auth.ts` `requireSignedRequest` verifies ed25519 +
+  single-use nonce (5-min TTL). Handlers additionally assert
+  `req.signedWallet === body.walletField` where applicable.
+- Schemas: every signed POST has a Zod schema in `apps/api/src/schemas/`
+  applied via `validateBody(schema)` in the route chain (after
+  `requireSignedRequest`, before the handler).
+
+### E2E test hooks (dev only)
+- `__E2E_BYPASS_DEPOSIT=1` in localStorage: on `/company/register` and
+  `/autotest`, skip the Solana USDC round-trip (signTransaction +
+  confirmTransaction). Uses a synthetic payment_tx. Gated behind
+  `NODE_ENV !== 'production'` so it's dead code in prod builds.
+  Useful for browser E2E that can't easily mock web3.js internals.
+
 ### Testing
-- Vitest for API unit tests (`apps/api/src/__tests__/`) — 59 tests
+- Vitest for API unit tests (`apps/api/src/__tests__/`) — **98 tests**
+  (auth, cors, env, schemas, settlement-worker + prior suites)
 - Pytest for persona-engine (`apps/persona-engine/tests/`) — 35 tests
-- No frontend tests (hackathon scope)
-- E2E: `scripts/e2e-persona-engine.ts` (autotest+engine+DB path)
-- Dashboard render check: `scripts/check-dashboard-render.py` (headless chromium)
+- Browser E2E harness at `/tmp/e2e-flows.py` (Phantom mock via tweetnacl +
+  playwright). Covers tester register → report submit → persona generate
+  → company register → AutoTest (5 flows, 22/22 assertions).
+- Legacy API-only E2E: `scripts/e2e-flow.ts` (updated to generate real
+  keypairs + sign nonces).
+- Dashboard render check: `scripts/check-dashboard-render.py` (headless
+  chromium) and `scripts/check-experiment-index.py`.
 
 ## Autotest Modes (`POST /api/autotest/run`)
 
@@ -185,6 +265,33 @@ Route table (default is now **stagehand_hybrid** as of 2026-04-19):
 - **persona_agent workspace** must be configured before any `_internal`
   import — see `apps/persona-engine/main.py` top-of-file setup.
 
+## Security / Observability / Settlement (Phase 0 + 1 hardening)
+
+- **Wallet signature verification** — all mutating routes gated by
+  `middleware/auth.ts` (ed25519 + single-use 5-min nonce). See §Auth above.
+- **CORS allowlist** — `config/cors.ts`. Defaults allow localhost:3000/3001,
+  127.0.0.1:3000/3001, the Railway web URL. Override via
+  `CORS_ALLOWED_ORIGINS` (comma-separated).
+- **Rate limiting** — `middleware/rate-limit.ts` keys by wallet (signedWallet
+  → route params → body wallet → IP). Autotest 2/min, reportSubmit 5/min,
+  LLM-generation routes 10/min.
+- **Zod body validation** — `schemas/index.ts` + `validateBody()`. Every
+  signed POST has a schema, applied right after `requireSignedRequest`.
+- **Env flag safety** — `config/env.ts` forces `SKIP_PAYMENT_VERIFY=false`
+  when `NODE_ENV === 'production'` regardless of env input. Boot log prints
+  `[env] NODE_ENV=... · payment verify: ENABLED/SKIPPED · x402 mode: …`.
+- **Structured logging** — `apps/api/src/logger.ts` exports a pino instance
+  (+ `childLogger(bindings)`). Railway surfaces JSON logs cleanly. Replace
+  remaining `console.*` as you touch files.
+- **Deep health** — `GET /api/health?deep=1` pings DB + persona-engine +
+  Solana RPC with per-dep latency (`services/health.ts`). 503 when any dep
+  is down. Basic `/api/health` stays synchronous + cheap.
+- **Settlement worker** — exponential backoff 30s → 1m → 5m → 15m cap,
+  24h MAX_AGE terminal marker (`services/settlement-worker.ts`). Runs in
+  background; disable via `SETTLEMENT_WORKER_DISABLED=1` for tests.
+- **DB migrations** — `apps/api/drizzle/` holds versioned SQL. Use
+  `pnpm --filter api db:migrate` for Railway deploys. `db:push` is dev-only.
+
 ## Environment Variables
 
 Required in root `.env` (local) or Railway env vars (production):
@@ -208,13 +315,22 @@ R2_BUCKET             # Bucket name (default: 41rpm-screenshots)
 R2_PUBLIC_URL         # Public CDN URL for the bucket
 ```
 
+Persona-engine (required when `USE_PERSONA_ENGINE=1`):
+```
+USE_PERSONA_ENGINE=1                     # route autotest through persona-engine
+PERSONA_ENGINE_URL=http://127.0.0.1:4200 # or the Railway internal URL
+PERSONA_ENGINE_WORKSPACE=/tmp/persona-jobs   # writable path for job artifacts
+```
+
 Optional:
 ```
 API_PORT=4100
 NEXT_PUBLIC_API_URL=http://localhost:4100
-SKIP_PAYMENT_VERIFY=true    # Skip on-chain verification for demo
+CORS_ALLOWED_ORIGINS=...    # comma-separated; overrides the default allowlist
+SKIP_PAYMENT_VERIFY=true    # Local dev only — auto-forced to false in production
 USE_X402_FALLBACK=false     # Use custom USDC verification instead of x402
 CHROMIUM_PATH=/usr/bin/chromium  # Set in Docker for Stagehand
+LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
 ```
 
 ### Screenshots & File Storage
@@ -232,7 +348,11 @@ CHROMIUM_PATH=/usr/bin/chromium  # Set in Docker for Stagehand
 - Commit `.env`, keypair files, or API keys
 - Hardcode `localhost:4100` in frontend — use `API_BASE`
 - Use `JSON.parse()` on LLM output — use `parseJsonSafe()` from `services/llm.ts`
-- Add wallet signature verification (simplified for hackathon)
+- ~~Add wallet signature verification~~ — wallet signature IS required now on all
+  mutating routes. Don't disable it or bypass `requireSignedRequest` middleware.
+- Call `request()` in `lib/api.ts` with custom headers and forget about
+  `Content-Type` — the helper preserves explicit headers but caller-provided
+  options must not override it. `signedRequest` already handles this.
 - Create new .md docs without explicit request
 - Use `fs.writeFile` for screenshots in production — use `uploadToR2()` from `services/r2.ts`
 - Assume local file paths work in Docker — use env vars for all external paths
@@ -241,6 +361,17 @@ CHROMIUM_PATH=/usr/bin/chromium  # Set in Docker for Stagehand
 - Change `mode=browser` default without measuring cost/quality on both paths —
   the stagehand_hybrid default came from an A/B run (see feature/event-hardening
   branch history)
+- Remove the `result: {...}` nested field from the synchronous `/api/autotest/run`
+  response — the UI's completion panel reads it. The top-level flat fields
+  exist for other consumers but the nested one is what drives the screen.
+- Remove the `__E2E_BYPASS_DEPOSIT` branches from `/company/register` or
+  `/autotest` without replacing the browser E2E strategy — the test harness
+  in `/tmp/e2e-flows.py` depends on them. They are guarded by
+  `NODE_ENV !== 'production'` so they compile out of prod bundles.
+- Add ad-hoc `bg-surface border border-border-dim` card styles — use
+  `.hf-card` / `.hf-card-inset`. Same for chips (`.chip.<variant>`) and
+  buttons (`.hf-btn`). Migrating older pages to these classes is always
+  a safe follow-up.
 
 ## Investor Dashboard Narrative
 

@@ -6,7 +6,13 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=next.js&logoColor=white)
 
-> Built for the **Solana Startup Village Hackathon** (7-day sprint, Feb 2026)
+> Built for the **Solana Startup Village Hackathon** (7-day sprint, Feb 2026).
+> Post-hackathon `feature/event-hardening` track added: wallet-signature auth,
+> Zod validation, rate limiting, pino logging, deep health checks, exponential-
+> backoff settlement, Drizzle migrations, Hi-Fi Linear/Phantom redesign (OKLCH
+> tokens, Inter Tight / Inter fonts, chip + hf-card utilities, role switcher,
+> Tweaks panel, 20-dim persona radar, VarTabs, AutoTest Live Theater). See
+> `CLAUDE.md` for engineering conventions.
 
 ---
 
@@ -171,7 +177,10 @@ Edit `.env` with your values:
 # Create the database
 createdb persona_market
 
-# Push the Drizzle schema
+# Apply versioned migrations (preferred — matches what Railway runs)
+pnpm --filter @41rpm/api db:migrate
+
+# Or, for quick local dev, push schema directly (bypasses migration files)
 pnpm --filter @41rpm/api db:push
 ```
 
