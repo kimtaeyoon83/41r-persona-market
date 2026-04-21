@@ -244,7 +244,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
           <h2 className="font-display font-semibold mb-1">By cohort — demographic-matched agreement</h2>
           <p className="text-xs text-[var(--text-secondary)] mb-4">
             Reports grouped by persona profile (crypto_experience). A tight |Δ| + high agreement
-            inside a cohort is the honest "persona ≈ human" signal — the same demographic on
+            inside a cohort is the honest &ldquo;persona ≈ human&rdquo; signal — the same demographic on
             both sides.
           </p>
           <CohortBreakdown cohorts={comparison.by_cohort} />
