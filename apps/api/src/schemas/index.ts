@@ -73,6 +73,11 @@ export const retryAutotestBodySchema = z.object({
    *  matcher's picks. Safe default is false — we only re-queue
    *  personas that have no prior report at all. */
   force_retry_low_quality: z.boolean().optional(),
+  /** Which runner modes to re-queue. Defaults to ['stagehand_hybrid','text']
+   *  so a retry mirrors the dual-mode behaviour of /register. Set to a
+   *  single-item array to re-run only one side (e.g. ['text'] to regen
+   *  predictions without waiting on Chromium again). */
+  modes: z.array(z.enum(['stagehand_hybrid', 'text'])).min(1).max(2).optional(),
 });
 
 export type RegisterTestBody = z.infer<typeof registerTestBodySchema>;

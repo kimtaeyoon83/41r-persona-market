@@ -477,18 +477,20 @@ export async function runStagehandHybridAndPersist(args: {
     questionnaireAnswers: enrichedAnswers,
     qualityScore: qualityBreakdown.quality_score,
     isPersonaTest: true,
+    sourceMode: 'stagehand_hybrid',
     screenshots: screenshotUrls,
   }).onConflictDoNothing({
     target: [
       schema.testReports.testerAddr,
       schema.testReports.testId,
       schema.testReports.isPersonaTest,
+      schema.testReports.sourceMode,
     ],
   }).returning();
 
   if (!inserted) {
     throw new Error(
-      `persona ${args.personaId} already has a persona report for test ${args.testId}`,
+      `persona ${args.personaId} already has a stagehand_hybrid report for test ${args.testId}`,
     );
   }
 

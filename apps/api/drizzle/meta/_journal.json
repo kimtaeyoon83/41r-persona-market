@@ -15,6 +15,13 @@
       "when": 1776854572888,
       "tag": "0001_funny_arclight",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776856849940,
+      "tag": "0002_useful_apocalypse",
+      "breakpoints": true
     }
   ]
 }

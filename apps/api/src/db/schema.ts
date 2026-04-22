@@ -93,16 +93,27 @@ export const testReports = pgTable('test_reports', {
   }>>(),
   qualityScore: real('quality_score'), // 0.0 ~ 5.0
   isPersonaTest: boolean('is_persona_test').notNull().default(false),
+  /** Which runner produced this report. Previously tracked only via the
+   *  _source sentinel inside questionnaire_answers. Hoisted to a column
+   *  so the unique index can distinguish the same persona running in
+   *  browser vs text mode (the "simulation vs actual" pair the
+   *  diagnosis synthesis depends on). Values:
+   *    'stagehand_hybrid' — browser-mode persona run (Playwright)
+   *    'text'             — prediction-only persona run (no browser)
+   *    'manual'           — human tester submission
+   *    legacy rows are back-filled from the sentinel in the 0002 migration.
+   */
+  sourceMode: varchar('source_mode', { length: 24 }).notNull().default('manual'),
   screenshots: jsonb('screenshots').$type<string[]>(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (t) => ({
-  // Prevents a tester submitting the same test twice (and closes the
-  // SELECT→INSERT race in routes/report.ts). ``is_persona_test`` is in
-  // the key so the same wallet can carry both a manual report and a
-  // persona-generated report for the same test — that pair is the
-  // basis of the AI-vs-human comparison dashboard.
-  uniqTesterTest: uniqueIndex('test_reports_tester_test_kind_uniq')
-    .on(t.testerAddr, t.testId, t.isPersonaTest),
+  // Prevents a tester submitting the same test twice per source mode.
+  // Widened from (tester, test, isPersona) to (tester, test, isPersona,
+  // sourceMode) so one persona can carry both a browser run and a text
+  // run for the same test — that pair is what lets the diagnosis report
+  // contrast prediction with actual browsing.
+  uniqTesterTestMode: uniqueIndex('test_reports_tester_test_mode_uniq')
+    .on(t.testerAddr, t.testId, t.isPersonaTest, t.sourceMode),
 }));
 
 // ─── Personas ────────────────────────────────────────

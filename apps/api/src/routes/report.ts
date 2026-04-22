@@ -137,6 +137,7 @@ router.post('/submit', reportSubmitLimiter, requireSignedRequest, validateBody(s
       questionnaireAnswers: questionnaire_answers || [],
       qualityScore: quality.score,
       isPersonaTest: false,
+      sourceMode: 'manual',
       screenshots: screenshots || [],
     })
       .onConflictDoNothing({
@@ -144,6 +145,7 @@ router.post('/submit', reportSubmitLimiter, requireSignedRequest, validateBody(s
           schema.testReports.testerAddr,
           schema.testReports.testId,
           schema.testReports.isPersonaTest,
+          schema.testReports.sourceMode,
         ],
       })
       .returning();

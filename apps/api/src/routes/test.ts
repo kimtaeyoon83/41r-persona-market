@@ -123,13 +123,21 @@ router.post('/register', llmGenerateLimiter, requireSignedRequest, validateBody(
           const engineEnabled = process.env.USE_PERSONA_ENGINE === '1';
           if (engineEnabled) {
             const { runStagehandHybridAndPersist } = await import('./autotest.js');
-            // Sequential fire-and-forget. Three concurrent Chromium instances
-            // in the api container OOM'd Railway's memory — each headless
-            // Chrome eats ~300-500MB. Serialize so only one browser runs at a
-            // time; register still returns immediately because the whole
-            // chain is `void`'d. Total wall-clock per test: ~3-6 min for
-            // 3 personas, which is fine for auto-queue.
-            let chain: Promise<unknown> = Promise.resolve();
+            const { runTextModeAndPersist } = await import('../services/scoring/text_run.js');
+            // Dual-mode auto-queue.
+            //
+            //   browser chain (sequential): each persona runs stagehand_hybrid
+            //     one at a time — three concurrent Chromiums OOM the Railway
+            //     api container (each headless Chrome eats 300-500MB).
+            //
+            //   text chain (parallel): each persona also runs text-mode
+            //     simulation in parallel — text runs are just an LLM call,
+            //     no browser contention, ~10-20s each.
+            //
+            // Total reports per test = matches × 2 (browser + text). The
+            // "simulation vs actual" comparison is what the Final Diagnosis
+            // aggregates into the verdict section.
+            let browserChain: Promise<unknown> = Promise.resolve();
             for (const match of matches) {
               const jobId = `auto_${test.id.slice(0, 8)}_${match.persona.id.slice(0, 8)}_${Date.now().toString(36)}`;
               autoTestJobs.push({
@@ -139,14 +147,18 @@ router.post('/register', llmGenerateLimiter, requireSignedRequest, validateBody(
               });
               const personaId = match.persona.id;
               const testId = test.id;
-              chain = chain.then(() =>
+              browserChain = browserChain.then(() =>
                 runStagehandHybridAndPersist({ testId, personaId }).catch((err) => {
                   console.warn(`[AutoTest] stagehand_hybrid run failed for ${personaId}:`, err instanceof Error ? err.message : err);
                 }),
               );
+              // Text runs fire in parallel — no chain membership.
+              void runTextModeAndPersist({ testId, personaId }).catch((err) => {
+                console.warn(`[AutoTest] text run failed for ${personaId}:`, err instanceof Error ? err.message : err);
+              });
             }
-            void chain;
-            console.log(`[AutoTest] Queued ${autoTestJobs.length} stagehand_hybrid runs (sequential) for test ${test.id}`);
+            void browserChain;
+            console.log(`[AutoTest] Queued ${autoTestJobs.length} × 2 runs (browser sequential + text parallel) for test ${test.id}`);
           } else {
             // Legacy path — in-process Stagehand directly from api container
             const { startAutoTest } = await import('../services/autotest.js');
@@ -199,7 +211,8 @@ router.post('/:id/retry-autotest',
   async (req, res) => {
     try {
       const id = String(req.params.id);
-      const { company_wallet, max_personas, force_retry_low_quality } = req.body;
+      const { company_wallet, max_personas, force_retry_low_quality, modes } = req.body;
+      const retryModes: Array<'stagehand_hybrid' | 'text'> = modes ?? ['stagehand_hybrid', 'text'];
 
       const signedWallet = (req as unknown as { signedWallet: string }).signedWallet;
       if (signedWallet !== company_wallet) {
@@ -256,68 +269,99 @@ router.post('/:id/retry-autotest',
         }
       }
 
-      // Skip personas that already produced a report for this test — the
-      // unique index (tester, test, isPersonaTest=true) would make the
-      // insert a no-op, but we also don't want to burn LLM tokens on a
-      // run whose result can't be stored.
+      // Build per-mode coverage: which (persona, mode) pairs already
+      // have a row. Widened unique index means one persona can have
+      // separate stagehand_hybrid and text rows — we skip each mode
+      // independently so re-running only the missing side is cheap.
       const existingReports = await db.select().from(schema.testReports).where(
         and(
           eq(schema.testReports.testId, id),
           eq(schema.testReports.isPersonaTest, true),
         ),
       );
-      const done = new Set(existingReports.map((r) => r.testerAddr));
-      const toRun = matches.filter((m) => !done.has(m.persona.testerAddr));
+      const coveredKey = (addr: string, mode: string) => `${addr}::${mode}`;
+      const covered = new Set(
+        existingReports.map((r) => coveredKey(r.testerAddr, r.sourceMode)),
+      );
 
-      const autoTestJobs: Array<{ persona_id: string; tester_addr: string; job_id: string }> = [];
-      const skipped: Array<{ persona_id: string; tester_addr: string }> = matches
-        .filter((m) => done.has(m.persona.testerAddr))
-        .map((m) => ({ persona_id: m.persona.id, tester_addr: m.persona.testerAddr }));
+      const autoTestJobs: Array<{ persona_id: string; tester_addr: string; mode: string; job_id: string }> = [];
+      let skippedExisting = 0;
 
-      if (toRun.length === 0) {
+      const { runStagehandHybridAndPersist } = await import('./autotest.js');
+      const { runTextModeAndPersist } = await import('../services/scoring/text_run.js');
+
+      // browser chain stays sequential (Chromium ceiling), text runs
+      // fire in parallel (pure LLM, no browser contention).
+      let browserChain: Promise<unknown> = Promise.resolve();
+      for (const match of matches) {
+        const testId = id;
+        const personaId = match.persona.id;
+        const testerAddr = match.persona.testerAddr;
+
+        if (retryModes.includes('stagehand_hybrid')) {
+          if (covered.has(coveredKey(testerAddr, 'stagehand_hybrid'))) {
+            skippedExisting += 1;
+          } else {
+            autoTestJobs.push({
+              persona_id: personaId,
+              tester_addr: testerAddr,
+              mode: 'stagehand_hybrid',
+              job_id: `retry_sh_${id.slice(0, 8)}_${personaId.slice(0, 8)}_${Date.now().toString(36)}`,
+            });
+            browserChain = browserChain.then(() =>
+              runStagehandHybridAndPersist({ testId, personaId }).catch((err) => {
+                console.warn(
+                  `[AutoTest-retry] stagehand_hybrid run failed for ${personaId}:`,
+                  err instanceof Error ? err.message : err,
+                );
+              }),
+            );
+          }
+        }
+
+        if (retryModes.includes('text')) {
+          if (covered.has(coveredKey(testerAddr, 'text'))) {
+            skippedExisting += 1;
+          } else {
+            autoTestJobs.push({
+              persona_id: personaId,
+              tester_addr: testerAddr,
+              mode: 'text',
+              job_id: `retry_tx_${id.slice(0, 8)}_${personaId.slice(0, 8)}_${Date.now().toString(36)}`,
+            });
+            void runTextModeAndPersist({ testId, personaId }).catch((err) => {
+              console.warn(
+                `[AutoTest-retry] text run failed for ${personaId}:`,
+                err instanceof Error ? err.message : err,
+              );
+            });
+          }
+        }
+      }
+      void browserChain;
+
+      if (autoTestJobs.length === 0) {
         res.json({
           test_id: id,
           queued: 0,
-          skipped_existing: skipped.length,
+          skipped_existing: skippedExisting,
           deleted_low_quality: forcedDeleted,
           auto_tests: [],
           message: forcedDeleted > 0
-            ? `${forcedDeleted} low-quality reports deleted, but no personas need retry (matcher picks already complete)`
-            : 'all matched personas already have reports',
+            ? `${forcedDeleted} low-quality reports deleted, but no (persona, mode) pair needs retry`
+            : `all matched (persona, mode) pairs already have reports (modes=${retryModes.join(',')})`,
         });
         return;
       }
 
-      // Same sequential fire-and-forget pattern as /register — single
-      // Chromium at a time to respect Railway's memory ceiling.
-      const { runStagehandHybridAndPersist } = await import('./autotest.js');
-      let chain: Promise<unknown> = Promise.resolve();
-      for (const match of toRun) {
-        const jobId = `retry_${id.slice(0, 8)}_${match.persona.id.slice(0, 8)}_${Date.now().toString(36)}`;
-        autoTestJobs.push({
-          persona_id: match.persona.id,
-          tester_addr: match.persona.testerAddr,
-          job_id: jobId,
-        });
-        const personaId = match.persona.id;
-        const testId = id;
-        chain = chain.then(() =>
-          runStagehandHybridAndPersist({ testId, personaId }).catch((err) => {
-            console.warn(
-              `[AutoTest-retry] stagehand_hybrid run failed for ${personaId}:`,
-              err instanceof Error ? err.message : err,
-            );
-          }),
-        );
-      }
-      void chain;
-      console.log(`[AutoTest-retry] Queued ${autoTestJobs.length} stagehand_hybrid runs (sequential) for test ${id}`);
+      console.log(`[AutoTest-retry] Queued ${autoTestJobs.length} runs (modes=${retryModes.join(',')}) for test ${id}`);
 
       res.json({
         test_id: id,
         queued: autoTestJobs.length,
-        skipped_existing: skipped.length,
+        skipped_existing: skippedExisting,
         deleted_low_quality: forcedDeleted,
+        modes: retryModes,
         auto_tests: autoTestJobs,
       });
     } catch (error) {
