@@ -1,8 +1,12 @@
 import { Router, type Router as RouterType } from 'express';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { generateTestCases } from '../services/llm.js';
-import { registerTestBodySchema, validateBody } from '../schemas/index.js';
+import {
+  registerTestBodySchema,
+  retryAutotestBodySchema,
+  validateBody,
+} from '../schemas/index.js';
 import { requireSignedRequest } from '../middleware/auth.js';
 import { llmGenerateLimiter } from '../middleware/rate-limit.js';
 
@@ -175,6 +179,122 @@ router.post('/register', llmGenerateLimiter, requireSignedRequest, validateBody(
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// POST /api/test/:id/retry-autotest — Re-queue persona runs for a test
+// whose auto-queue got stuck or never completed. Typical causes are a
+// hung stagehand session on a complex SPA, a Railway redeploy that
+// killed the in-flight sequential chain, or genuine agent errors mid-run.
+//
+// Idempotent: personas that already have a test_report row with
+// isPersonaTest=true are skipped (the DB unique index would reject the
+// insert anyway, but checking here lets us report cleanly).
+//
+// No payment: the company already paid at /register. This is recovery
+// from a transient runtime failure, not a new billable operation.
+router.post('/:id/retry-autotest',
+  llmGenerateLimiter,
+  requireSignedRequest,
+  validateBody(retryAutotestBodySchema),
+  async (req, res) => {
+    try {
+      const id = String(req.params.id);
+      const { company_wallet, max_personas } = req.body;
+
+      const signedWallet = (req as unknown as { signedWallet: string }).signedWallet;
+      if (signedWallet !== company_wallet) {
+        res.status(403).json({ error: 'signed wallet does not match company_wallet' });
+        return;
+      }
+
+      const [test] = await db.select().from(schema.tests).where(eq(schema.tests.id, id));
+      if (!test) {
+        res.status(404).json({ error: 'Test not found' });
+        return;
+      }
+      if (test.companyAddr !== company_wallet) {
+        res.status(403).json({ error: 'only the owning company may retry this test' });
+        return;
+      }
+
+      // Re-match personas deterministically (same path /register uses)
+      const allPersonas = await db.select().from(schema.personas).where(eq(schema.personas.isActive, true));
+      if (allPersonas.length === 0) {
+        res.status(409).json({ error: 'no active personas available' });
+        return;
+      }
+      const { matchPersonas } = await import('../services/matching.js');
+      const matches = await matchPersonas(
+        test.requirements || '',
+        test.targetUrl,
+        allPersonas.map((p) => ({ id: p.id, testerAddr: p.testerAddr, vector: p.vector as unknown as Parameters<typeof matchPersonas>[2][0]['vector'] })),
+        max_personas ?? 3,
+      );
+
+      // Skip personas that already produced a report for this test — the
+      // unique index (tester, test, isPersonaTest=true) would make the
+      // insert a no-op, but we also don't want to burn LLM tokens on a
+      // run whose result can't be stored.
+      const existingReports = await db.select().from(schema.testReports).where(
+        and(
+          eq(schema.testReports.testId, id),
+          eq(schema.testReports.isPersonaTest, true),
+        ),
+      );
+      const done = new Set(existingReports.map((r) => r.testerAddr));
+      const toRun = matches.filter((m) => !done.has(m.persona.testerAddr));
+
+      const autoTestJobs: Array<{ persona_id: string; tester_addr: string; job_id: string }> = [];
+      const skipped: Array<{ persona_id: string; tester_addr: string }> = matches
+        .filter((m) => done.has(m.persona.testerAddr))
+        .map((m) => ({ persona_id: m.persona.id, tester_addr: m.persona.testerAddr }));
+
+      if (toRun.length === 0) {
+        res.json({
+          test_id: id,
+          queued: 0,
+          skipped_existing: skipped.length,
+          auto_tests: [],
+          message: 'all matched personas already have reports',
+        });
+        return;
+      }
+
+      // Same sequential fire-and-forget pattern as /register — single
+      // Chromium at a time to respect Railway's memory ceiling.
+      const { runStagehandHybridAndPersist } = await import('./autotest.js');
+      let chain: Promise<unknown> = Promise.resolve();
+      for (const match of toRun) {
+        const jobId = `retry_${id.slice(0, 8)}_${match.persona.id.slice(0, 8)}_${Date.now().toString(36)}`;
+        autoTestJobs.push({
+          persona_id: match.persona.id,
+          tester_addr: match.persona.testerAddr,
+          job_id: jobId,
+        });
+        const personaId = match.persona.id;
+        const testId = id;
+        chain = chain.then(() =>
+          runStagehandHybridAndPersist({ testId, personaId }).catch((err) => {
+            console.warn(
+              `[AutoTest-retry] stagehand_hybrid run failed for ${personaId}:`,
+              err instanceof Error ? err.message : err,
+            );
+          }),
+        );
+      }
+      void chain;
+      console.log(`[AutoTest-retry] Queued ${autoTestJobs.length} stagehand_hybrid runs (sequential) for test ${id}`);
+
+      res.json({
+        test_id: id,
+        queued: autoTestJobs.length,
+        skipped_existing: skipped.length,
+        auto_tests: autoTestJobs,
+      });
+    } catch (error) {
+      console.error('[POST /api/test/:id/retry-autotest]', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
 
 // PATCH /api/test/:id/deposit — Update deposit tx signature
 router.patch('/:id/deposit', async (req, res) => {

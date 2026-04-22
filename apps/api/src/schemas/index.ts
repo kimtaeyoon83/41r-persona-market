@@ -58,12 +58,20 @@ export const personaGenerateBodySchema = z.object({
   tester_addr: walletAddressSchema,
 });
 
+export const retryAutotestBodySchema = z.object({
+  company_wallet: walletAddressSchema,
+  /** Optional cap on how many personas to (re)queue. Defaults to 3 —
+   *  same as the matcher used by POST /api/test/register. */
+  max_personas: z.number().int().positive().max(10).optional(),
+});
+
 export type RegisterTestBody = z.infer<typeof registerTestBodySchema>;
 export type RegisterTesterBody = z.infer<typeof registerTesterBodySchema>;
 export type UpdateTesterBody = z.infer<typeof updateTesterBodySchema>;
 export type SubmitReportBody = z.infer<typeof submitReportBodySchema>;
 export type AutotestRunBody = z.infer<typeof autotestRunBodySchema>;
 export type PersonaGenerateBody = z.infer<typeof personaGenerateBodySchema>;
+export type RetryAutotestBody = z.infer<typeof retryAutotestBodySchema>;
 
 // Returns an Express RequestHandler that validates req.body against the
 // schema. Kept fully generic so the route's param/query types aren't
