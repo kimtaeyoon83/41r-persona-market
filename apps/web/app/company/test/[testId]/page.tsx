@@ -6,6 +6,7 @@ import { testApi, reportApi } from "@/lib/api";
 import { LoadingSpinner } from "@/components/loading";
 import { ErrorDisplay } from "@/components/error-display";
 import { VarTabs } from "@/components/var-tabs";
+import { useWalletContext } from "@/components/wallet-provider";
 
 interface TestDetail {
   test: {
@@ -15,6 +16,7 @@ interface TestDetail {
     budgetUsdc: number;
     status: string;
     createdAt: string;
+    companyAddr?: string;
   };
   test_cases: {
     checklist: Array<{ id: string; task: string; expected: string }>;
@@ -34,6 +36,9 @@ export default function TestDetailPage() {
   const [tab, setTab] = useState(0);
   const [userPickedTab, setUserPickedTab] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [retryMsg, setRetryMsg] = useState<string | null>(null);
+  const { publicKey, signMessage } = useWalletContext();
 
   const loadData = () => {
     if (!testId) return;
@@ -58,6 +63,37 @@ export default function TestDetailPage() {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testId]);
+
+  async function handleRetryAutotest() {
+    if (!publicKey || !signMessage || !data) return;
+    setRetrying(true);
+    setRetryMsg(null);
+    try {
+      const result = await testApi.retryAutotest(
+        testId,
+        { company_wallet: publicKey },
+        signMessage,
+      ) as { queued: number; skipped_existing: number; message?: string };
+      if (result.queued > 0) {
+        setRetryMsg(
+          `Queued ${result.queued} persona run${result.queued > 1 ? 's' : ''}. ` +
+          `Reports will appear in 3-10 minutes. ` +
+          `${result.skipped_existing > 0 ? `(${result.skipped_existing} already complete.)` : ''}`,
+        );
+      } else {
+        setRetryMsg(result.message ?? 'All matched personas already have reports.');
+      }
+    } catch (err) {
+      setRetryMsg(`Retry failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  const canRetry =
+    !!publicKey &&
+    !!data &&
+    (data.test.companyAddr ? data.test.companyAddr === publicKey : true);
 
   if (loading) return <LoadingSpinner text="Loading test details..." />;
   if (error) return <ErrorDisplay message={error} onRetry={loadData} />;
@@ -117,6 +153,26 @@ export default function TestDetailPage() {
           <p className="t-body mt-1">{new Date(test.createdAt).toLocaleDateString()}</p>
         </div>
       </div>
+
+      {canRetry && (
+        <div className="mb-6 hf-card p-4 flex items-center justify-between gap-4">
+          <div>
+            <p className="t-body-s font-medium">Re-run auto-test personas</p>
+            <p className="t-caption mt-0.5">
+              Personas that already have a report for this test are skipped.
+              Use this when a previous run got stuck on a redirect wall or timed out.
+            </p>
+            {retryMsg && <p className="t-caption mt-1 text-sol-blue">{retryMsg}</p>}
+          </div>
+          <button
+            onClick={handleRetryAutotest}
+            disabled={retrying}
+            className="hf-btn sm"
+          >
+            {retrying ? 'Queuing...' : 'Retry auto-test'}
+          </button>
+        </div>
+      )}
 
       {reports.filter(r => Number(r.qualityScore) >= 1.5).some(r => r.isPersonaTest) && reports.filter(r => Number(r.qualityScore) >= 1.5).some(r => !r.isPersonaTest) && (
         <a

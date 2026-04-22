@@ -57,6 +57,16 @@ export const testApi = {
   list: () => request('/api/tests'),
 
   get: (id: string) => request(`/api/test/${id}`),
+
+  retryAutotest: (
+    id: string,
+    data: { company_wallet: string; max_personas?: number },
+    signMessage: SignMessage,
+  ) => signedRequest(
+    `/api/test/${id}/retry-autotest`,
+    { method: 'POST', body: data },
+    { wallet: data.company_wallet, signMessage },
+  ),
 };
 
 // ─── Tester APIs ─────────────────────────────────────
