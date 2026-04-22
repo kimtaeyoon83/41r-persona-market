@@ -110,7 +110,7 @@ function repairJson(text: string): string {
   return json;
 }
 
-function parseJsonSafe(text: string): any {
+export function parseJsonSafe(text: string): any {
   const raw = extractJson(text);
   try {
     return JSON.parse(raw);
@@ -120,6 +120,15 @@ function parseJsonSafe(text: string): any {
     return JSON.parse(repaired);
   }
 }
+
+// Model constants — re-exported for scoring adapters. Keep in sync with
+// persona-engine's routing.yaml tiers. Sonnet for review_proposer
+// (checklist/questionnaire), Haiku for review_inspection (structured
+// report) and hypothesis_rewrite (predicate evaluation when we enable it).
+export const SCORING_MODELS = {
+  sonnet: SONNET,
+  haiku: HAIKU,
+} as const;
 
 // ─── Generate Test Cases ─────────────────────────────
 export async function generateTestCases(

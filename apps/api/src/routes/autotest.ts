@@ -15,8 +15,15 @@ import { uploadToR2 } from '../services/r2.js';
 import { skipPaymentVerify } from '../config/env.js';
 import { autotestRunBodySchema, validateBody } from '../schemas/index.js';
 import { autotestRunLimiter } from '../middleware/rate-limit.js';
-
-const PERSONA_ENGINE_URL = process.env.PERSONA_ENGINE_URL ?? 'http://persona-engine:4200';
+import { scoreChecklist } from '../services/scoring/checklist.js';
+import { answerQuestionnaire } from '../services/scoring/questionnaire.js';
+import { generateStructuredReport } from '../services/scoring/report.js';
+import { computeQualityScore } from '../services/scoring/quality.js';
+import { buildPersonaSoul } from '../services/scoring/persona_soul.js';
+import type {
+  ChecklistResult,
+  SessionLog,
+} from '../services/scoring/types.js';
 
 const router: RouterType = Router();
 
@@ -424,51 +431,46 @@ export async function runStagehandHybridAndPersist(args: {
     }
   }
 
-  // Ship the SessionLog to persona-engine for scoring. Must run after
-  // the browser session completes; no job polling needed since /score
-  // is synchronous.
-  const scoreResp = await fetch(`${PERSONA_ENGINE_URL}/analyses/score`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      session_log: sessionLog,
-      persona_id: args.personaId,
-      checklist,
-      questionnaire,
-      generate_report: true,
-    }),
+  // In-process scoring (previously: POST /analyses/score to persona-engine
+  // Python service). The adapters + quality math live at services/scoring/*
+  // now — see 2026-04-22 TS port. This removes the cross-language boundary
+  // that produced schema-contract drift and lets us iterate on the prompts
+  // alongside the browser runner.
+  const soulText = buildPersonaSoul({ persona: { id: persona.id, vector: persona.vector }, tester });
+
+  const typedSessionLog = sessionLog as unknown as SessionLog;
+  const checklistResults: ChecklistResult[] = checklist.length > 0
+    ? await scoreChecklist({ checklist, sessionLog: typedSessionLog })
+    : [];
+  const questionnaireAnswers = questionnaire.length > 0
+    ? await answerQuestionnaire({ questionnaire, sessionLog: typedSessionLog, soulText })
+    : [];
+  const structuredReport = await generateStructuredReport({
+    sessionLog: typedSessionLog,
+    personaId: args.personaId,
+    checklistResults,
   });
-  if (!scoreResp.ok) {
-    throw new Error(`/analyses/score → ${scoreResp.status}: ${await scoreResp.text()}`);
-  }
-  const score = (await scoreResp.json()) as {
-    checklist_results: Array<{ id: string; status: string; memo: string }>;
-    quality_score: number | null;
-    quality_breakdown: Record<string, unknown>;
-    questionnaire_answers: Array<{ id: string; answer: string | number }>;
-    structured_report: Record<string, unknown>;
-  };
+  const qualityBreakdown = computeQualityScore({
+    sessionLog: typedSessionLog,
+    checklistResults,
+  });
 
   const enrichedAnswers = [
-    ...score.questionnaire_answers,
-    ...(Object.keys(score.structured_report).length > 0
-      ? [{ id: '_structured_report', answer: JSON.stringify(score.structured_report) }]
-      : []),
-    ...(Object.keys(score.quality_breakdown).length > 0
-      ? [{ id: '_quality_breakdown', answer: JSON.stringify(score.quality_breakdown) }]
-      : []),
+    ...questionnaireAnswers,
+    { id: '_structured_report', answer: JSON.stringify(structuredReport) },
+    { id: '_quality_breakdown', answer: JSON.stringify(qualityBreakdown) },
     { id: '_source', answer: 'stagehand_hybrid' },
   ];
 
   const [inserted] = await db.insert(schema.testReports).values({
     testerAddr: persona.testerAddr,
     testId: args.testId,
-    checklistResults: score.checklist_results.map((r) => ({
-      id: r.id, status: r.status as 'passed' | 'failed' | 'blocked', memo: r.memo,
+    checklistResults: checklistResults.map((r) => ({
+      id: r.id, status: r.status, memo: r.memo,
     })),
     scenarioLog: [],
     questionnaireAnswers: enrichedAnswers,
-    qualityScore: score.quality_score,
+    qualityScore: qualityBreakdown.quality_score,
     isPersonaTest: true,
     screenshots: screenshotUrls,
   }).onConflictDoNothing({
@@ -488,7 +490,7 @@ export async function runStagehandHybridAndPersist(args: {
   return {
     reportId: inserted.id,
     outcome: sessionLog.outcome,
-    qualityScore: score.quality_score,
+    qualityScore: qualityBreakdown.quality_score,
     screenshotUrls,
     sessionId: sessionLog.session_id,
   };
