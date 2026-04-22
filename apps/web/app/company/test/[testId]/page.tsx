@@ -308,17 +308,26 @@ export default function TestDetailPage() {
           <div className="space-y-2">
             {reports.map((r) => {
               const rSettlements = (r.settlements || []) as Array<{ amountToken?: number; settlementType?: string; txSignature?: string }>;
-              const rejected = Number(r.qualityScore) < 1.5;
+              const lowCoverage = Number(r.qualityScore) < 1.5;
+              // Persona runs hit the low-coverage bucket when the browser
+              // session gets cut short (patience_exceeded on a hard SPA,
+              // signin wall, etc.) — not because the persona itself is
+              // bad. Label them accordingly so the company can tell
+              // "the site was hard to drive" from "the tester phoned it in".
+              const lowCoverageLabel = r.isPersonaTest ? 'Session limited' : 'Low coverage';
+              const lowCoverageHint = r.isPersonaTest
+                ? 'Session cut short — site was hard to navigate'
+                : 'Below reward threshold';
               return (
                 <a
                   key={String(r.id)}
                   href={`/report/${r.id}`}
-                  className={`hf-card block p-3 transition-colors hover:border-[var(--line-2)] ${rejected ? 'opacity-60' : ''}`}
+                  className={`hf-card block p-3 transition-colors hover:border-[var(--line-2)] ${lowCoverage ? 'opacity-60' : ''}`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2 min-w-0">
-                      {rejected ? (
-                        <span className="chip danger">Rejected</span>
+                      {lowCoverage ? (
+                        <span className="chip warn">{lowCoverageLabel}</span>
                       ) : (
                         <span className={`chip ${r.isPersonaTest ? 'success' : 'info'}`}>
                           {r.isPersonaTest ? 'AI Persona' : 'Manual'}
@@ -327,7 +336,7 @@ export default function TestDetailPage() {
                       <span className="addr">{String(r.testerAddr).slice(0, 16)}…</span>
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
-                      {!rejected && rSettlements.length > 0 && (
+                      {!lowCoverage && rSettlements.length > 0 && (
                         <span className="flex items-center gap-2">
                           {rSettlements.map((s, si) => (
                             <span key={si} className={`money text-[12px] ${s.settlementType === '41r' ? 'text-sol-purple' : 'text-sol-green'}`}>
@@ -336,7 +345,7 @@ export default function TestDetailPage() {
                           ))}
                         </span>
                       )}
-                      {rejected && <span className="t-caption text-[var(--danger)]">No reward</span>}
+                      {lowCoverage && <span className="t-caption text-[var(--warn)]" title={lowCoverageHint}>Not rewarded</span>}
                       <span className={`money text-[13px] font-semibold ${
                         Number(r.qualityScore) >= 4 ? 'text-sol-green' :
                         Number(r.qualityScore) >= 3 ? 'text-[var(--warn)]' : 'text-[var(--danger)]'

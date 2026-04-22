@@ -115,7 +115,12 @@ export default function ReportDetailPage() {
   const passed = report.checklistResults?.filter(c => c.status === "passed").length || 0;
   const total = report.checklistResults?.length || 0;
   const settlements = report.settlements || [];
-  const isRejected = (report.qualityScore ?? 0) < 1.5;
+  // Low-coverage = quality below the reward threshold. For persona runs
+  // this almost always means the browser session got cut short on a
+  // hard SPA or signin wall (patience_exceeded outcome) rather than a
+  // genuine low-effort submission, so the banner language differs.
+  const isLowCoverage = (report.qualityScore ?? 0) < 1.5;
+  const lowCoverageLabel = report.isPersonaTest ? 'Session limited' : 'Low coverage';
 
   // Coverage breakdown — shows *why* the quality score landed where it did.
   // These are derived signals, not separate LLM scores, hence framed as coverage.
@@ -131,17 +136,19 @@ export default function ReportDetailPage() {
 
   return (
     <div className="max-w-4xl">
-      {/* Rejected banner */}
-      {isRejected && (
-        <div className="mb-6 p-4 rounded-xl bg-[var(--status-error)]/8 border border-[var(--status-error)]/20">
+      {/* Low-coverage banner */}
+      {isLowCoverage && (
+        <div className="mb-6 p-4 rounded-xl bg-[var(--warn-soft)] border border-[var(--warn-line)]">
           <div className="flex items-center gap-2">
-            <svg className="w-5 h-5 text-[var(--status-error)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            <svg className="w-5 h-5 text-[var(--warn)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.34 16a2 2 0 001.73 3z" />
             </svg>
-            <p className="text-sm font-medium text-[var(--status-error)]">Rejected Report</p>
+            <p className="text-sm font-medium text-[var(--warn)]">{lowCoverageLabel}</p>
           </div>
           <p className="text-xs text-[var(--text-tertiary)] mt-1 ml-7">
-            This report was rejected due to insufficient quality (score {report.qualityScore?.toFixed(1)}/5.0). No reward was paid.
+            {report.isPersonaTest
+              ? `Session was cut short before enough UI could be observed (quality ${report.qualityScore?.toFixed(1)}/5.0). This usually happens on SPAs with aggressive redirects or signin walls. Retry from the company test page.`
+              : `Quality ${report.qualityScore?.toFixed(1)}/5.0 is below the reward threshold. No reward was paid.`}
           </p>
         </div>
       )}
@@ -150,7 +157,7 @@ export default function ReportDetailPage() {
       <div className="mb-7">
         <div className="flex items-center gap-2 mb-2">
           <h1 className="t-display-m">Test Report</h1>
-          {isRejected && <span className="chip danger">Rejected</span>}
+          {isLowCoverage && <span className="chip warn">{lowCoverageLabel}</span>}
           {report.isPersonaTest && <span className="chip success">AI Persona Test</span>}
         </div>
         <p className="addr">{report.id}</p>

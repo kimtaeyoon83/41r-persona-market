@@ -97,7 +97,9 @@ export default function TesterDetailPage() {
 
   const profile = tester.profile;
   const validReports = reports.filter(r => (r.qualityScore ?? 0) >= 1.5);
-  const rejectedReports = reports.filter(r => (r.qualityScore ?? 0) < 1.5);
+  const lowCoverageReports = reports.filter(r => (r.qualityScore ?? 0) < 1.5);
+  const sessionLimitedCount = lowCoverageReports.filter(r => r.isPersonaTest).length;
+  const manualLowCount = lowCoverageReports.length - sessionLimitedCount;
   const avgQuality = validReports.length > 0
     ? validReports.reduce((sum, r) => sum + (r.qualityScore ?? 0), 0) / validReports.length
     : 0;
@@ -319,7 +321,12 @@ export default function TesterDetailPage() {
             {[...reports]
               .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
               .map((report) => {
-                const isRejected = (report.qualityScore ?? 0) < 1.5;
+                const isLowCoverage = (report.qualityScore ?? 0) < 1.5;
+                // Persona sessions that get cut short on hard sites
+                // end up here but aren't really "rejected" — they're
+                // session-limited. Human manual submissions below the
+                // threshold genuinely are low-coverage.
+                const lowCovLabel = report.isPersonaTest ? 'Session limited' : 'Low coverage';
                 const usdcSettlement = report.settlements?.find(s => s.settlementType === "usdc");
                 const tokenSettlement = report.settlements?.find(s => s.settlementType === "41r");
                 const passedCount = (report.checklistResults || []).filter(c => c.status === "passed").length;
@@ -331,8 +338,8 @@ export default function TesterDetailPage() {
                     key={report.id}
                     href={`/report/${report.id}`}
                     className={`block p-4 rounded-xl border transition-all card-hover ${
-                      isRejected
-                        ? "border-[var(--status-error)]/20 bg-surface opacity-60 hover:opacity-80"
+                      isLowCoverage
+                        ? "border-[var(--warn-line)] bg-surface opacity-60 hover:opacity-80"
                         : "border-border-dim bg-surface hover:border-sol-green/30 hover:bg-surface-elevated"
                     }`}
                   >
@@ -352,9 +359,9 @@ export default function TesterDetailPage() {
                               AI
                             </span>
                           )}
-                          {isRejected && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--status-error)]/10 text-[var(--status-error)] flex-shrink-0">
-                              Rejected
+                          {isLowCoverage && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--warn-soft)] text-[var(--warn)] flex-shrink-0">
+                              {lowCovLabel}
                             </span>
                           )}
                         </div>
@@ -376,7 +383,7 @@ export default function TesterDetailPage() {
                       {/* Right: Score + Payments */}
                       <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                         <div className={`px-2 py-0.5 rounded-md text-xs font-mono font-semibold ${
-                          isRejected ? "bg-[var(--status-error)]/10 text-[var(--status-error)]" :
+                          isLowCoverage ? "bg-[var(--warn-soft)] text-[var(--warn)]" :
                           (report.qualityScore ?? 0) >= 4 ? "bg-sol-green/10 text-sol-green" :
                           (report.qualityScore ?? 0) >= 3 ? "bg-[var(--status-warning)]/10 text-[var(--status-warning)]" :
                           "bg-surface-elevated text-[var(--text-tertiary)]"
@@ -384,7 +391,7 @@ export default function TesterDetailPage() {
                           {(report.qualityScore ?? 0).toFixed(1)}/5
                         </div>
 
-                        {!isRejected && (usdcSettlement || tokenSettlement) ? (
+                        {!isLowCoverage && (usdcSettlement || tokenSettlement) ? (
                           <div className="flex items-center gap-2 text-[11px]">
                             {usdcSettlement && (
                               <span className="text-sol-green font-mono">${usdcSettlement.amountToken.toFixed(2)}</span>
@@ -393,8 +400,8 @@ export default function TesterDetailPage() {
                               <span className="text-sol-purple font-mono">{tokenSettlement.amountToken.toFixed(0)} 41R</span>
                             )}
                           </div>
-                        ) : isRejected ? (
-                          <span className="text-[11px] text-[var(--status-error)]">No reward</span>
+                        ) : isLowCoverage ? (
+                          <span className="text-[11px] text-[var(--warn)]">Not rewarded</span>
                         ) : null}
                       </div>
                     </div>
@@ -405,10 +412,20 @@ export default function TesterDetailPage() {
         )}
       </div>
 
-      {/* Rejected Reports Note */}
-      {rejectedReports.length > 0 && (
-        <div className="mt-4 p-3 rounded-lg bg-[var(--status-error)]/5 border border-[var(--status-error)]/15 text-xs text-[var(--text-tertiary)]">
-          {rejectedReports.length} report(s) rejected due to low quality (score &lt; 1.5/5)
+      {/* Low-coverage reports note */}
+      {lowCoverageReports.length > 0 && (
+        <div className="mt-4 p-3 rounded-lg bg-[var(--warn-soft)] border border-[var(--warn-line)] text-xs text-[var(--text-tertiary)]">
+          {sessionLimitedCount > 0 && (
+            <p>
+              {sessionLimitedCount} persona session{sessionLimitedCount > 1 ? 's' : ''} cut short on hard sites
+              (score &lt; 1.5/5 — retry from the company test page).
+            </p>
+          )}
+          {manualLowCount > 0 && (
+            <p className={sessionLimitedCount > 0 ? 'mt-1' : ''}>
+              {manualLowCount} manual report{manualLowCount > 1 ? 's' : ''} below reward threshold (score &lt; 1.5/5).
+            </p>
+          )}
         </div>
       )}
     </div>
