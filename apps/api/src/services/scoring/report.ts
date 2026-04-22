@@ -11,7 +11,7 @@
  * fits a 4-pain-points / 5-recommendations payload with headroom.
  */
 import { client, withRoute } from '../anthropic_client.js';
-import { SCORING_MODELS } from '../llm.js';
+import { SCORING_MODELS, parseJsonSafe } from '../llm.js';
 import { sessionSummary } from './session_summary.js';
 import type {
   ChecklistResult,
@@ -90,12 +90,20 @@ function strList(raw: unknown, cap = 20): string[] {
 }
 
 function extractJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = parseJsonSafe(text);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* fall through */
+  }
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}') + 1;
   if (start < 0 || end <= start) return null;
   try {
-    const parsed = JSON.parse(text.slice(start, end));
-    return typeof parsed === 'object' && parsed !== null
+    const parsed = parseJsonSafe(text.slice(start, end));
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : null;
   } catch {
@@ -132,10 +140,14 @@ export async function generateStructuredReport(
   const userMsg = '## 세션 요약\n' + summary + checklistSummary;
 
   try {
+    // max_tokens=2000 (Python used 1400). With 20-turn session logs the
+    // summary + pain_points + recommendations output can stretch past
+    // 1400 and truncate mid-JSON. 2000 fits comfortably; Haiku at that
+    // cap is still <20% the Sonnet cost.
     const resp = await withRoute('structured_report', () =>
       client.messages.create({
         model: SCORING_MODELS.haiku,
-        max_tokens: 1400,
+        max_tokens: 2000,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMsg }],
       }),

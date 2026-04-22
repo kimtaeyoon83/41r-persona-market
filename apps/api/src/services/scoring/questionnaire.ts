@@ -8,7 +8,7 @@
  * the DB, not markdown files.
  */
 import { client, withRoute } from '../anthropic_client.js';
-import { SCORING_MODELS } from '../llm.js';
+import { SCORING_MODELS, parseJsonSafe } from '../llm.js';
 import { sessionSummary } from './session_summary.js';
 import type {
   QuestionnaireAnswer,
@@ -94,11 +94,17 @@ function normalizeItems(
 }
 
 function extractJsonArray(text: string): unknown[] | null {
+  try {
+    const parsed = parseJsonSafe(text);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    /* fall through */
+  }
   const start = text.indexOf('[');
   const end = text.lastIndexOf(']') + 1;
   if (start < 0 || end <= start) return null;
   try {
-    const parsed = JSON.parse(text.slice(start, end));
+    const parsed = parseJsonSafe(text.slice(start, end));
     return Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;
@@ -134,10 +140,13 @@ export async function answerQuestionnaire(
     );
 
   try {
+    // max_tokens=2500: free_text answers run 1-3 sentences of Korean per
+    // question and tests frequently ship 6-8 questionnaire items, so the
+    // Python-era 1024 cap truncated full runs.
     const resp = await withRoute('questionnaire', () =>
       client.messages.create({
         model: SCORING_MODELS.sonnet,
-        max_tokens: 1024,
+        max_tokens: 2500,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMsg }],
       }),

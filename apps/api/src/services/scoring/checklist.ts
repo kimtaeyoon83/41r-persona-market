@@ -11,7 +11,7 @@
  * shift in memo wording between the two pipelines.
  */
 import { client, withRoute } from '../anthropic_client.js';
-import { SCORING_MODELS } from '../llm.js';
+import { SCORING_MODELS, parseJsonSafe } from '../llm.js';
 import { BLOCKING_OUTCOMES, sessionSummary } from './session_summary.js';
 import type {
   ChecklistItem,
@@ -101,11 +101,21 @@ function ruleBasedFallback(
 }
 
 function extractJsonArray(text: string): unknown[] | null {
+  // Use parseJsonSafe so max_tokens truncation doesn't immediately drop
+  // us to the keyword-fallback path — repairJson closes any dangling
+  // [/{  brackets. Falls back to manual slice if parseJsonSafe returns
+  // a non-array (e.g. the response starts with prose).
+  try {
+    const parsed = parseJsonSafe(text);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    /* fall through to slice attempt */
+  }
   const start = text.indexOf('[');
   const end = text.lastIndexOf(']') + 1;
   if (start < 0 || end <= start) return null;
   try {
-    const parsed = JSON.parse(text.slice(start, end));
+    const parsed = parseJsonSafe(text.slice(start, end));
     return Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;
@@ -143,10 +153,15 @@ export async function scoreChecklist(
     );
 
   try {
+    // max_tokens=3000 lifts the hard Python-era 1024 ceiling that
+    // truncated 10+ item checklists (per-item {id,status,memo,turn_idx}
+    // costs ~80-120 tokens so 11 items easily hits 1300+). Truncation
+    // there wasted an entire LLM call because the JSON array never
+    // closed and we dropped to keyword fallback silently.
     const resp = await withRoute('checklist', () =>
       client.messages.create({
         model: SCORING_MODELS.sonnet,
-        max_tokens: 1024,
+        max_tokens: 3000,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMsg }],
       }),
