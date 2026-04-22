@@ -20,6 +20,16 @@ export const tests = pgTable('tests', {
   status: varchar('status', { length: 20 }).notNull().default('pending'), // pending | active | completed
   escrowPda: varchar('escrow_pda', { length: 64 }),
   screenshotUrls: jsonb('screenshot_urls').$type<string[]>(),
+  // Final synthesis report generated on demand from all persona +
+  // human reports for this test. Populated by POST /api/test/:id/diagnosis.
+  // Stored so regeneration is an explicit user action (costs an LLM call)
+  // and the company can re-read without re-billing.
+  diagnosisMd: text('diagnosis_md'),
+  diagnosisGeneratedAt: timestamp('diagnosis_generated_at'),
+  /** Number of reports the stored diagnosis was generated from.
+   *  Lets the UI show "out of date — N new reports since" without
+   *  re-parsing the markdown to compare. */
+  diagnosisReportCount: integer('diagnosis_report_count'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

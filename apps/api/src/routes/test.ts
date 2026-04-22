@@ -5,6 +5,7 @@ import { generateTestCases } from '../services/llm.js';
 import {
   registerTestBodySchema,
   retryAutotestBodySchema,
+  generateDiagnosisBodySchema,
   validateBody,
 } from '../schemas/index.js';
 import { requireSignedRequest } from '../middleware/auth.js';
@@ -324,6 +325,91 @@ router.post('/:id/retry-autotest',
       res.status(500).json({ error: 'Internal server error' });
     }
   });
+
+// GET /api/test/:id/diagnosis — Return the stored synthesis report if any.
+// Unauthenticated (matches GET /api/test/:id) — the diagnosis is a
+// summary over data the owner has anyway; companies who want to share
+// a read link don't need a second signing round.
+router.get('/:id/diagnosis', async (req, res) => {
+  try {
+    const id = String(req.params.id);
+    const [test] = await db.select().from(schema.tests).where(eq(schema.tests.id, id));
+    if (!test) {
+      res.status(404).json({ error: 'Test not found' });
+      return;
+    }
+    const reports = await db.select({ id: schema.testReports.id })
+      .from(schema.testReports)
+      .where(eq(schema.testReports.testId, id));
+    res.json({
+      test_id: id,
+      markdown: test.diagnosisMd,
+      generated_at: test.diagnosisGeneratedAt,
+      generated_for_report_count: test.diagnosisReportCount,
+      current_report_count: reports.length,
+      stale: !!test.diagnosisMd && (test.diagnosisReportCount ?? 0) < reports.length,
+    });
+  } catch (error) {
+    console.error('[GET /api/test/:id/diagnosis]', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/test/:id/diagnosis — (re)generate the synthesis report.
+// Auth: signed request matching test.companyAddr. Triggers a Sonnet
+// call so we rate-limit the same as LLM generation routes. Safe to
+// re-call; each call overwrites the stored markdown.
+router.post(
+  '/:id/diagnosis',
+  llmGenerateLimiter,
+  requireSignedRequest,
+  validateBody(generateDiagnosisBodySchema),
+  async (req, res) => {
+    try {
+      const id = String(req.params.id);
+      const { company_wallet } = req.body;
+
+      const signedWallet = (req as unknown as { signedWallet: string }).signedWallet;
+      if (signedWallet !== company_wallet) {
+        res.status(403).json({ error: 'signed wallet does not match company_wallet' });
+        return;
+      }
+
+      const [test] = await db.select().from(schema.tests).where(eq(schema.tests.id, id));
+      if (!test) {
+        res.status(404).json({ error: 'Test not found' });
+        return;
+      }
+      if (test.companyAddr !== company_wallet) {
+        res.status(403).json({ error: 'only the owning company may generate this diagnosis' });
+        return;
+      }
+
+      const reports = await db.select({ id: schema.testReports.id })
+        .from(schema.testReports)
+        .where(eq(schema.testReports.testId, id));
+      if (reports.length < 3) {
+        res.status(409).json({
+          error: 'not enough reports',
+          detail: `need at least 3 reports to synthesise, have ${reports.length}`,
+        });
+        return;
+      }
+
+      const { generateAndStoreDiagnosis } = await import('../services/scoring/diagnosis.js');
+      const { markdown, reportCount, generatedAt } = await generateAndStoreDiagnosis(id);
+      res.json({
+        test_id: id,
+        markdown,
+        generated_at: generatedAt.toISOString(),
+        generated_for_report_count: reportCount,
+      });
+    } catch (error) {
+      console.error('[POST /api/test/:id/diagnosis]', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Internal server error' });
+    }
+  },
+);
 
 // PATCH /api/test/:id/deposit — Update deposit tx signature
 router.patch('/:id/deposit', async (req, res) => {

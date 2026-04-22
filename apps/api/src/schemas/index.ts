@@ -58,6 +58,10 @@ export const personaGenerateBodySchema = z.object({
   tester_addr: walletAddressSchema,
 });
 
+export const generateDiagnosisBodySchema = z.object({
+  company_wallet: walletAddressSchema,
+});
+
 export const retryAutotestBodySchema = z.object({
   company_wallet: walletAddressSchema,
   /** Optional cap on how many personas to (re)queue. Defaults to 3 —
@@ -78,6 +82,7 @@ export type SubmitReportBody = z.infer<typeof submitReportBodySchema>;
 export type AutotestRunBody = z.infer<typeof autotestRunBodySchema>;
 export type PersonaGenerateBody = z.infer<typeof personaGenerateBodySchema>;
 export type RetryAutotestBody = z.infer<typeof retryAutotestBodySchema>;
+export type GenerateDiagnosisBody = z.infer<typeof generateDiagnosisBodySchema>;
 
 // Returns an Express RequestHandler that validates req.body against the
 // schema. Kept fully generic so the route's param/query types aren't

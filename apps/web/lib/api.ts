@@ -67,6 +67,18 @@ export const testApi = {
     { method: 'POST', body: data },
     { wallet: data.company_wallet, signMessage },
   ),
+
+  getDiagnosis: (id: string) => request(`/api/test/${id}/diagnosis`),
+
+  generateDiagnosis: (
+    id: string,
+    data: { company_wallet: string },
+    signMessage: SignMessage,
+  ) => signedRequest(
+    `/api/test/${id}/diagnosis`,
+    { method: 'POST', body: data },
+    { wallet: data.company_wallet, signMessage },
+  ),
 };
 
 // ─── Tester APIs ─────────────────────────────────────

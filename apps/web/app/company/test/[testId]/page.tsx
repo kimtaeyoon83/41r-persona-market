@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { testApi, reportApi } from "@/lib/api";
 import { LoadingSpinner } from "@/components/loading";
 import { ErrorDisplay } from "@/components/error-display";
@@ -39,6 +41,15 @@ export default function TestDetailPage() {
   const [retrying, setRetrying] = useState(false);
   const [retryMsg, setRetryMsg] = useState<string | null>(null);
   const [retryIncludeSessionLimited, setRetryIncludeSessionLimited] = useState(false);
+  const [diagnosis, setDiagnosis] = useState<{
+    markdown: string | null;
+    generatedAt: string | null;
+    generatedForReportCount: number | null;
+    currentReportCount: number;
+    stale: boolean;
+  } | null>(null);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [diagnosisMsg, setDiagnosisMsg] = useState<string | null>(null);
   const { publicKey, signMessage } = useWalletContext();
 
   const loadData = () => {
@@ -48,10 +59,26 @@ export default function TestDetailPage() {
     Promise.all([
       testApi.get(testId) as Promise<TestDetail>,
       reportApi.byTest(testId) as Promise<Array<Record<string, unknown>>>,
+      testApi.getDiagnosis(testId).catch(() => null) as Promise<{
+        markdown: string | null;
+        generated_at: string | null;
+        generated_for_report_count: number | null;
+        current_report_count: number;
+        stale: boolean;
+      } | null>,
     ])
-      .then(([testData, reportData]) => {
+      .then(([testData, reportData, diagResp]) => {
         setData(testData);
         setReports(reportData);
+        if (diagResp) {
+          setDiagnosis({
+            markdown: diagResp.markdown,
+            generatedAt: diagResp.generated_at,
+            generatedForReportCount: diagResp.generated_for_report_count,
+            currentReportCount: diagResp.current_report_count,
+            stale: diagResp.stale,
+          });
+        }
         if (!userPickedTab && reportData.length === 0) {
           setTab(2); // Test cases
         }
@@ -109,6 +136,35 @@ export default function TestDetailPage() {
     !!publicKey &&
     !!data &&
     (data.test.companyAddr ? data.test.companyAddr === publicKey : true);
+
+  async function handleGenerateDiagnosis() {
+    if (!publicKey || !signMessage || !data) return;
+    setDiagnosing(true);
+    setDiagnosisMsg(null);
+    try {
+      const result = await testApi.generateDiagnosis(
+        testId,
+        { company_wallet: publicKey },
+        signMessage,
+      ) as {
+        markdown: string;
+        generated_at: string;
+        generated_for_report_count: number;
+      };
+      setDiagnosis({
+        markdown: result.markdown,
+        generatedAt: result.generated_at,
+        generatedForReportCount: result.generated_for_report_count,
+        currentReportCount: reports.length,
+        stale: false,
+      });
+      setDiagnosisMsg('Final diagnosis ready.');
+    } catch (err) {
+      setDiagnosisMsg(`Generation failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+    } finally {
+      setDiagnosing(false);
+    }
+  }
 
   if (loading) return <LoadingSpinner text="Loading test details..." />;
   if (error) return <ErrorDisplay message={error} onRetry={loadData} />;
@@ -221,7 +277,7 @@ export default function TestDetailPage() {
 
       <div className="mb-5">
         <VarTabs
-          variants={["Reports", "Issues", "Test cases"]}
+          variants={["Reports", "Issues", "Test cases", "Diagnosis"]}
           active={tab}
           onChange={(next) => { setUserPickedTab(true); setTab(next); }}
         />
@@ -449,6 +505,81 @@ export default function TestDetailPage() {
             ))}
           </div>
         </div>
+      </div>
+
+      <div className={`space-y-4 ${tab === 3 ? '' : 'hidden'}`}>
+        {reports.length < 3 ? (
+          <div className="hf-card p-6 text-center">
+            <p className="t-body-s text-[var(--fg-1)] mb-1">
+              Need at least 3 reports before a synthesis report can be generated.
+            </p>
+            <p className="t-caption">
+              Current: {reports.length} / 3. Persona auto-runs and human submissions both count.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="hf-card p-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="t-body-s font-medium">Final synthesis report</p>
+                <p className="t-caption mt-0.5">
+                  Aggregates all {reports.length} reports into a single Jupiter-style UX
+                  diagnosis (Korean markdown). Uses Claude Sonnet — costs ~$0.20-0.40 per
+                  generation.
+                </p>
+                {diagnosis?.generatedAt && (
+                  <p className="t-caption mt-1">
+                    {diagnosis.stale ? (
+                      <span className="text-[var(--warn)]">
+                        Last generated{' '}
+                        {new Date(diagnosis.generatedAt).toLocaleString()}
+                        {' '}from {diagnosis.generatedForReportCount} reports —
+                        {' '}{reports.length - (diagnosis.generatedForReportCount ?? 0)} new since.
+                      </span>
+                    ) : (
+                      <span className="text-[var(--fg-3)]">
+                        Generated {new Date(diagnosis.generatedAt).toLocaleString()}
+                      </span>
+                    )}
+                  </p>
+                )}
+                {diagnosisMsg && <p className="t-caption mt-1 text-sol-blue">{diagnosisMsg}</p>}
+              </div>
+              {canRetry && (
+                <button
+                  onClick={handleGenerateDiagnosis}
+                  disabled={diagnosing}
+                  className="hf-btn sm shrink-0"
+                >
+                  {diagnosing
+                    ? 'Generating...'
+                    : diagnosis?.markdown
+                      ? 'Regenerate'
+                      : 'Generate Final Report'}
+                </button>
+              )}
+            </div>
+
+            {diagnosis?.markdown ? (
+              <div className="hf-card p-6">
+                <div className="prose-diagnosis max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {diagnosis.markdown}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            ) : (
+              <div className="hf-card p-6 text-center">
+                <p className="t-body-s text-[var(--fg-1)]">
+                  No diagnosis generated yet.{' '}
+                  {canRetry
+                    ? 'Click Generate Final Report to create one.'
+                    : 'Only the owning company wallet can generate this.'}
+                </p>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
