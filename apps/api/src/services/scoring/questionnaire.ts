@@ -8,7 +8,7 @@
  * the DB, not markdown files.
  */
 import { client, withRoute } from '../anthropic_client.js';
-import { SCORING_MODELS, parseJsonSafe } from '../llm.js';
+import { SCORING_MODELS, repairJson } from '../llm.js';
 import { sessionSummary } from './session_summary.js';
 import type {
   QuestionnaireAnswer,
@@ -93,18 +93,28 @@ function normalizeItems(
   return out;
 }
 
+// See scoring/checklist.ts for the matching rationale — parseJsonSafe
+// doesn't know how to recognise bare arrays, so we slice + repairJson
+// directly instead.
 function extractJsonArray(text: string): unknown[] | null {
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const body = fenceMatch ? fenceMatch[1] : text;
+
+  const start = body.indexOf('[');
+  const end = body.lastIndexOf(']') + 1;
+  if (start < 0) return null;
+
+  const sliced = end > start ? body.slice(start, end) : body.slice(start);
+
   try {
-    const parsed = parseJsonSafe(text);
+    const parsed = JSON.parse(sliced);
     if (Array.isArray(parsed)) return parsed;
   } catch {
-    /* fall through */
+    /* try repair */
   }
-  const start = text.indexOf('[');
-  const end = text.lastIndexOf(']') + 1;
-  if (start < 0 || end <= start) return null;
+
   try {
-    const parsed = parseJsonSafe(text.slice(start, end));
+    const parsed = JSON.parse(repairJson(sliced));
     return Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;

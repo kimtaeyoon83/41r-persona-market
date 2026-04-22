@@ -11,7 +11,7 @@
  * shift in memo wording between the two pipelines.
  */
 import { client, withRoute } from '../anthropic_client.js';
-import { SCORING_MODELS, parseJsonSafe } from '../llm.js';
+import { SCORING_MODELS, repairJson } from '../llm.js';
 import { BLOCKING_OUTCOMES, sessionSummary } from './session_summary.js';
 import type {
   ChecklistItem,
@@ -100,22 +100,40 @@ function ruleBasedFallback(
   });
 }
 
+/**
+ * Extract a JSON array from an LLM response.
+ *
+ * We can't reuse parseJsonSafe from llm.ts here — its underlying
+ * extractJson() only knows how to recognise objects (`{…}`) and code
+ * fences, so an unwrapped array prefix/suffix would bomb. For arrays
+ * we do two attempts:
+ *   1. Strict JSON.parse on the slice from the first "[" to the last
+ *      "]" — handles the common case where the LLM wraps or prefaces
+ *      with prose.
+ *   2. repairJson fallback — closes any unbalanced brackets left by
+ *      max_tokens truncation so a partial response still yields the
+ *      items that DID complete.
+ */
 function extractJsonArray(text: string): unknown[] | null {
-  // Use parseJsonSafe so max_tokens truncation doesn't immediately drop
-  // us to the keyword-fallback path — repairJson closes any dangling
-  // [/{  brackets. Falls back to manual slice if parseJsonSafe returns
-  // a non-array (e.g. the response starts with prose).
+  // Strip markdown code fences if present.
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const body = fenceMatch ? fenceMatch[1] : text;
+
+  const start = body.indexOf('[');
+  const end = body.lastIndexOf(']') + 1;
+  if (start < 0) return null;
+
+  const sliced = end > start ? body.slice(start, end) : body.slice(start);
+
   try {
-    const parsed = parseJsonSafe(text);
+    const parsed = JSON.parse(sliced);
     if (Array.isArray(parsed)) return parsed;
   } catch {
-    /* fall through to slice attempt */
+    /* try repair */
   }
-  const start = text.indexOf('[');
-  const end = text.lastIndexOf(']') + 1;
-  if (start < 0 || end <= start) return null;
+
   try {
-    const parsed = parseJsonSafe(text.slice(start, end));
+    const parsed = JSON.parse(repairJson(sliced));
     return Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;

@@ -87,7 +87,7 @@ export function extractJson(text: string): string {
 }
 
 // ─── Helper: repair truncated/malformed JSON ─────────
-function repairJson(text: string): string {
+export function repairJson(text: string): string {
   let json = text;
   // Remove trailing commas before ] or }
   json = json.replace(/,\s*([\]}])/g, '$1');
