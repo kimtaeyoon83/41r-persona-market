@@ -412,7 +412,12 @@ export async function runStagehandHybridAndPersist(args: {
     url: test.targetUrl,
     task: test.requirements || `Evaluate the UX at ${test.targetUrl}`,
     screenshotsDir,
-    maxSteps: 8,
+    // Phase-based runner: checklist items drive Phase C (one act+screenshot
+    // each), persona vector drives Phase D (generated persona-specific
+    // exploration). Both are optional; omitting them shrinks the session
+    // to discovery + scroll + final.
+    checklist,
+    personaVector: persona.vector,
   });
 
   // Best-effort screenshot upload to R2. If that fails we still

@@ -94,6 +94,15 @@ export interface HybridSessionLog {
   screenshot_paths: string[];
 }
 
+/** Checklist item shape the hybrid runner accepts. Matches the upstream
+ *  test_cases.content for ``type='checklist'`` — narrow copy so we don't
+ *  depend on the drizzle schema from this services file. */
+export interface HybridChecklistItem {
+  id: string;
+  task: string;
+  expected?: string;
+}
+
 export interface RunHybridArgs {
   personaId: string;
   personaOneliner: string;       // short persona voice prefix, e.g. "a cautious 40yo banker in India"
@@ -102,6 +111,21 @@ export interface RunHybridArgs {
   /** absolute dir for saving per-turn screenshot PNGs — written for parity
    *  with persona_agent's layout so R2 upload logic works unchanged */
   screenshotsDir: string;
+  /** Checklist items the persona should try to verify one-by-one in Phase C.
+   *  Each item becomes a dedicated ``stagehand.act(item.task)`` turn with its
+   *  own screenshot — scoring adapters then have a direct per-item mapping
+   *  rather than inferring checklist status from a blob of agent actions. */
+  checklist?: HybridChecklistItem[];
+  /** Persona vector used to generate persona-specific exploration actions
+   *  in Phase D (e.g. a security-focused persona will inspect trust
+   *  signals). Pass ``undefined`` to skip Phase D. Shape mirrors
+   *  schema.personas.vector. Using ``unknown`` here to keep this module
+   *  decoupled from the drizzle types. */
+  personaVector?: unknown;
+  /** DEPRECATED — left for back-compat with old callers. The new
+   *  phase-based loop doesn't use a single agent.execute maxSteps cap;
+   *  turn count is determined by checklist length + persona action count
+   *  + discovery/scroll phases. */
   maxSteps?: number;
 }
 
@@ -147,86 +171,46 @@ async function capturePageState(page: unknown): Promise<{
 }
 
 /**
- * Map Stagehand's agent result into our SessionLog shape.
+ * Phase-driven hybrid runner. We drive the browser loop ourselves
+ * (rather than delegating to Stagehand's opaque ``agent.execute``) so
+ * each turn maps 1:1 to a visible action and a persisted screenshot.
  *
- * Stagehand v3 non-streaming ``agent.execute()`` returns ``actions[]``
- * with reasoning + instruction per step, but does NOT surface mid-run
- * page state. To get evidence-based scoring we bookend the session
- * with rich snapshots (turn 0 = pre-agent, final turn = post-agent)
- * and preserve per-action reasoning in between.
+ * Phases (inspired by the legacy services/autotest.ts pattern, commit
+ * f6921ef "feat: per-action screenshot timeline in auto test"):
+ *
+ *   Phase A: Site discovery — crawl up to 4 internal links or nav
+ *            items, one screenshot per page (bounded by MAX_DISCOVERY).
+ *   Phase B: Scroll exploration — if the page is taller than ~2
+ *            viewports, scroll to mid + bottom and capture each.
+ *   Phase C: Checklist verification — for every checklist item, fire
+ *            one ``stagehand.act(item.task)`` and snap the resulting
+ *            state. This gives the scoring adapter an explicit per-item
+ *            entry to judge instead of inferring from a blob of agent
+ *            actions.
+ *   Phase D: Persona-specific exploration — generatePersonaActions
+ *            produces 3-5 actions tailored to the persona's feedback
+ *            bias (security-aware → inspect trust signals, etc.) and
+ *            we execute each via ``stagehand.act``.
+ *
+ * Expected turn/screenshot count: 1 (initial) + up to 4 (A) + 0-2 (B)
+ * + N (C, one per checklist) + 0-5 (D) + 1 (final) = ~8-20.
+ *
+ * Bookend turns (initial + final) capture url/title/innerText/a11y so
+ * the scoring LLM has a full-page baseline. Middle turns capture just
+ * url + title (cheap) alongside the action log.
  */
-function actionsToTurns(
-  actions: Array<Record<string, unknown>>,
-  bookends: { initial: { url: string; title: string; text: string; a11y: string }; final: { url: string; title: string; text: string; a11y: string } },
-): HybridSessionLog['turns'] {
-  const turns: HybridSessionLog['turns'] = [];
-
-  // Turn 0: pre-agent page state. Gives the scoring LLM a baseline of
-  // what the persona saw when they landed on the page.
-  turns.push({
-    turn: 0,
-    observation: {
-      summary: bookends.initial.text
-        ? `초기 페이지 상태 — ${bookends.initial.title || bookends.initial.url}: ${bookends.initial.text.slice(0, 400)}`
-        : `visited ${bookends.initial.url || '(unknown)'}`,
-      page_text: bookends.initial.text,
-      url: bookends.initial.url,
-      title: bookends.initial.title,
-      a11y: bookends.initial.a11y,
-    },
-    decision: { action: 'goto', reasoning: 'initial navigation', done: false },
-    tool: { tool: 'goto', target: bookends.initial.url },
-  });
-
-  // Middle turns: one per agent action. observation stays thin because
-  // Stagehand doesn't give us per-step page state, but decision carries
-  // the reasoning + instruction so the LLM can follow the agent's path.
-  for (let i = 0; i < actions.length; i++) {
-    const a = actions[i];
-    const action = String(a.action ?? a.type ?? 'read');
-    const instruction = typeof a.instruction === 'string' ? a.instruction : undefined;
-    const reasoning = typeof a.reasoning === 'string' ? a.reasoning : '';
-    const pageUrl = typeof a.pageUrl === 'string' ? a.pageUrl : '';
-    const pageText = typeof a.pageText === 'string' ? a.pageText : '';
-
-    turns.push({
-      turn: turns.length,
-      observation: {
-        summary: pageText
-          ? pageText.slice(0, 500)
-          : reasoning
-            ? `[에이전트 판단] ${reasoning.slice(0, 300)}${instruction ? ` / instruction=${instruction.slice(0, 120)}` : ''}`
-            : pageUrl
-              ? `visited ${pageUrl}`
-              : `action=${action}${instruction ? ` (${instruction.slice(0, 80)})` : ''}`,
-        page_text: pageText,
-        url: pageUrl,
-      },
-      decision: { action, reasoning, instruction, done: Boolean(a.taskCompleted) },
-      tool: { tool: action, target: instruction ?? '' },
-    });
-  }
-
-  // Final turn: post-agent page state. This is where the scoring LLM
-  // finds the real evidence — if the agent ended on a checkout page,
-  // this turn's text/a11y will reflect that.
-  turns.push({
-    turn: turns.length,
-    observation: {
-      summary: bookends.final.text
-        ? `최종 페이지 상태 — ${bookends.final.title || bookends.final.url}: ${bookends.final.text.slice(0, 400)}`
-        : `ended at ${bookends.final.url || '(unknown)'}`,
-      page_text: bookends.final.text,
-      url: bookends.final.url,
-      title: bookends.final.title,
-      a11y: bookends.final.a11y,
-    },
-    decision: { action: 'observe', reasoning: 'post-agent final state', done: true },
-    tool: { tool: 'observe', target: bookends.final.url },
-  });
-
-  return turns;
+async function capturePageStateLite(
+  page: unknown,
+): Promise<{ url: string; title: string }> {
+  const p = page as { url(): string; title(): Promise<string> };
+  let url = '';
+  let title = '';
+  try { url = p.url(); } catch { /* ignore */ }
+  try { title = await p.title(); } catch { /* ignore */ }
+  return { url, title };
 }
+
+const MAX_DISCOVERY = 4;
 
 export async function runStagehandHybrid(
   args: RunHybridArgs,
@@ -258,93 +242,336 @@ export async function runStagehandHybrid(
 
   await stagehand.init();
   const screenshotPaths: string[] = [];
-  const actions: Array<Record<string, unknown>> = [];
-  let outcome = 'task_complete';
+  const turns: HybridSessionLog['turns'] = [];
+  let outcome: string = 'task_complete';
   let endIso = '';
 
-  let initialState = { url: args.url, title: '', text: '', a11y: '' };
-  let finalState = { url: args.url, title: '', text: '', a11y: '' };
+  // Per-turn capture helper. Takes a screenshot, reads light page state
+  // (url + title), and appends to turns[]. Rich state (innerText/a11y)
+  // only captured when the caller passes captureRich=true, because
+  // innerText + a11y snapshots together take ~300-800ms each and we
+  // don't want that on every turn of a 20-turn session.
+  async function captureTurn(opts: {
+    page: unknown;
+    action: string;
+    reasoning: string;
+    instruction?: string;
+    target?: string;
+    done?: boolean;
+    captureRich?: boolean;
+    outcomeTag?: 'ok' | 'failed' | 'error' | null;
+  }) {
+    const turnIdx = turns.length;
+    // Screenshot
+    try {
+      const shot = path.join(
+        args.screenshotsDir,
+        `turn_${turnIdx.toString().padStart(2, '0')}.png`,
+      );
+      const buf = await (
+        opts.page as { screenshot(o: { fullPage: boolean; type: 'png' }): Promise<Buffer> }
+      ).screenshot({ fullPage: false, type: 'png' });
+      fs.writeFileSync(shot, buf);
+      screenshotPaths.push(shot);
+    } catch {
+      /* non-blocking */
+    }
+
+    const obs = opts.captureRich
+      ? await capturePageState(opts.page)
+      : { ...(await capturePageStateLite(opts.page)), text: '', a11y: '' };
+
+    const label = opts.instruction ?? opts.target ?? opts.action;
+    const resultSuffix = opts.outcomeTag ? ` → ${opts.outcomeTag}` : '';
+    const baseSummary = `[${opts.action}] ${label}${resultSuffix}`;
+    const richSuffix = obs.text ? ` — ${obs.title || obs.url}: ${obs.text.slice(0, 300)}` : '';
+
+    turns.push({
+      turn: turnIdx,
+      observation: {
+        summary: baseSummary + richSuffix,
+        page_text: obs.text || undefined,
+        url: obs.url || undefined,
+        title: obs.title || undefined,
+        a11y: obs.a11y || undefined,
+      },
+      decision: {
+        action: opts.action,
+        reasoning: opts.reasoning,
+        instruction: opts.instruction,
+        done: opts.done ?? false,
+      },
+      tool: { tool: opts.action, target: opts.target ?? opts.instruction ?? '' },
+    });
+  }
 
   try {
     const page = stagehand.context.pages()[0];
+
+    // ── Initial navigation (turn 0, rich capture) ──
     await page.goto(args.url, { waitUntil: 'domcontentloaded', timeoutMs: 30_000 });
+    await new Promise((r) => setTimeout(r, 1_500));
+    await captureTurn({
+      page,
+      action: 'goto',
+      reasoning: 'initial navigation',
+      instruction: args.url,
+      target: args.url,
+      captureRich: true,
+    });
 
-    // Capture initial page state (url/title/text/a11y) for turn 0 —
-    // gives the scoring adapter a real baseline to compare against the
-    // post-agent state.
-    initialState = await capturePageState(page);
-
-    // Capture an initial screenshot before the agent takes any action
-    const initialShot = path.join(args.screenshotsDir, `turn_00.png`);
+    // ── Phase A: Site discovery ──
+    const baseOrigin = new URL(args.url).origin;
+    let discoveredLinks: string[] = [];
+    let navLabels: string[] = [];
     try {
-      const buf = await page.screenshot({ fullPage: false, type: 'png' });
-      fs.writeFileSync(initialShot, buf);
-      screenshotPaths.push(initialShot);
+      discoveredLinks = await page.evaluate((origin: string) => {
+        const links = Array.from(document.querySelectorAll('a[href]'));
+        const paths = links
+          .map((a) => {
+            try {
+              const u = new URL((a as HTMLAnchorElement).href, origin);
+              return u.origin === origin ? u.pathname : null;
+            } catch {
+              return null;
+            }
+          })
+          .filter((p): p is string => p !== null && p !== '/' && p.length > 1);
+        return [...new Set(paths)];
+      }, baseOrigin);
+    } catch {
+      /* non-blocking */
+    }
+    try {
+      navLabels = await page.evaluate(() => {
+        const items = Array.from(
+          document.querySelectorAll(
+            'nav a, [role="navigation"] a, header a, .nav a, .menu a, .sidebar a',
+          ),
+        );
+        return items
+          .map((el) => (el as HTMLElement).textContent?.trim() || '')
+          .filter((t) => t.length > 1 && t.length < 30)
+          .slice(0, 10);
+      });
     } catch {
       /* non-blocking */
     }
 
-    // Persona-flavoured instructions guide the agent's action choices.
-    // The agent itself handles its own multi-step reasoning loop; we
-    // don't loop on our side — Stagehand's action selection is what
-    // we're trying to benchmark.
-    const agent = stagehand.agent({
-      model: 'anthropic/claude-sonnet-4-6',
-      systemPrompt: [
-        `You are testing a website as ${args.personaOneliner}.`,
-        `Focus on real UX issues a human tester would flag.`,
-        `If you can't complete the task in a few steps, explain why.`,
-        `Be efficient — do the task, don't explore tangents.`,
-      ].join(' '),
-    });
+    const visitedPaths = new Set<string>([new URL(args.url).pathname]);
+    const toVisit = discoveredLinks
+      .filter((p) => !visitedPaths.has(p))
+      .filter((p) => !p.includes('#') && !/\.(pdf|png|jpg|jpeg|gif|svg)$/i.test(p))
+      .slice(0, MAX_DISCOVERY);
 
-    const result = await agent.execute({
-      instruction: args.task,
-      maxSteps: args.maxSteps ?? 8,
-    });
-
-    // Non-streaming agent returns AgentResult whose shape includes
-    // actions[]; the typed union also allows AgentStreamResult so we
-    // cast through unknown.
-    const r = result as unknown as { actions?: unknown; completed?: boolean };
-    if (Array.isArray(r.actions)) {
-      actions.push(...(r.actions as Array<Record<string, unknown>>));
+    if (toVisit.length > 0) {
+      for (const pagePath of toVisit) {
+        try {
+          await page.goto(`${baseOrigin}${pagePath}`, {
+            waitUntil: 'domcontentloaded',
+            timeoutMs: 15_000,
+          });
+          await new Promise((r) => setTimeout(r, 1_500));
+          visitedPaths.add(pagePath);
+          await captureTurn({
+            page,
+            action: 'goto',
+            reasoning: 'phase_a_discovery',
+            instruction: pagePath,
+            target: pagePath,
+          });
+        } catch {
+          /* non-blocking, just log the skip in action log */
+        }
+      }
+    } else if (navLabels.length > 0) {
+      // No href-based discovery worked (likely an SPA) — click nav items instead.
+      const clicked = new Set<string>();
+      for (const label of navLabels.slice(0, MAX_DISCOVERY)) {
+        if (clicked.has(label)) continue;
+        try {
+          const result = (await stagehand.act(
+            `Click the navigation item or link labeled "${label}"`,
+          )) as { success?: boolean };
+          await new Promise((r) => setTimeout(r, 1_500));
+          clicked.add(label);
+          await captureTurn({
+            page,
+            action: 'act',
+            reasoning: 'phase_a_discovery_nav',
+            instruction: `Click nav "${label}"`,
+            target: label,
+            outcomeTag: result?.success ? 'ok' : 'failed',
+          });
+        } catch {
+          /* non-blocking */
+        }
+      }
     }
 
-    // Capture final page state for the last turn. Same motivation as
-    // initialState — without this the scoring adapter only sees the
-    // thin decision reasoning, not the actual UI that ended the run.
-    finalState = await capturePageState(page);
+    // Return to the target URL so Phase C starts clean.
+    if (toVisit.length > 0 || navLabels.length > 0) {
+      try {
+        await page.goto(args.url, { waitUntil: 'domcontentloaded', timeoutMs: 15_000 });
+        await new Promise((r) => setTimeout(r, 1_500));
+      } catch {
+        /* non-blocking */
+      }
+    }
 
-    // Post-run screenshot
+    // ── Phase B: Scroll exploration ──
     try {
-      const finalShot = path.join(args.screenshotsDir, `turn_${String(screenshotPaths.length).padStart(2, '0')}.png`);
-      const buf = await page.screenshot({ fullPage: false, type: 'png' });
-      fs.writeFileSync(finalShot, buf);
-      screenshotPaths.push(finalShot);
+      const pageHeight = await page.evaluate(
+        () => document.documentElement.scrollHeight,
+      );
+      const viewportHeight = await page.evaluate(() => window.innerHeight);
+      if (pageHeight > viewportHeight * 2) {
+        for (const pos of [
+          { y: Math.round(pageHeight * 0.4), label: 'middle section' },
+          { y: Math.round(pageHeight * 0.8), label: 'bottom section' },
+        ]) {
+          try {
+            await page.evaluate((y: number) => window.scrollTo(0, y), pos.y);
+            await new Promise((r) => setTimeout(r, 800));
+            await captureTurn({
+              page,
+              action: 'scroll',
+              reasoning: 'phase_b_scroll',
+              instruction: pos.label,
+              target: `${pos.y}px`,
+            });
+          } catch {
+            /* non-blocking */
+          }
+        }
+        try {
+          await page.evaluate(() => window.scrollTo(0, 0));
+          await new Promise((r) => setTimeout(r, 300));
+        } catch {
+          /* ignore */
+        }
+      }
     } catch {
       /* non-blocking */
     }
 
-    if (r.completed === false) outcome = 'partial';
+    // ── Phase C: Checklist verification ──
+    // Each item gets its own stagehand.act call + dedicated screenshot.
+    // If the checklist is empty the scoring adapter still gets bookend
+    // + Phase A/B turns and will fall through to outcome-only scoring.
+    for (const item of args.checklist ?? []) {
+      try {
+        const res = (await stagehand.act(item.task)) as { success?: boolean };
+        await captureTurn({
+          page,
+          action: 'act',
+          reasoning: `checklist ${item.id}`,
+          instruction: item.task,
+          target: item.id,
+          outcomeTag: res?.success ? 'ok' : 'failed',
+        });
+      } catch (err) {
+        console.warn(
+          `[stagehand_hybrid] checklist ${item.id} errored:`,
+          err instanceof Error ? err.message : err,
+        );
+        await captureTurn({
+          page,
+          action: 'act',
+          reasoning: `checklist ${item.id}`,
+          instruction: item.task,
+          target: item.id,
+          outcomeTag: 'error',
+        });
+      }
+    }
 
-    // Pull Stagehand's own metrics so the unified usage log reflects
-    // both sides of the hybrid cost (Stagehand + persona-engine).
+    // ── Phase D: Persona-specific exploration ──
+    // Deferred import so the base runner stays decoupled from the
+    // persona action generator (which itself does an LLM call).
+    if (args.personaVector) {
+      try {
+        const { generatePersonaActions } = await import('./llm.js');
+        const personaActions = await generatePersonaActions(
+          args.personaVector as Parameters<typeof generatePersonaActions>[0],
+          args.url,
+          (args.checklist ?? []).map((c) => ({ id: c.id, task: c.task })),
+          discoveredLinks.slice(0, 8),
+          navLabels.slice(0, 8),
+        );
+        for (const pa of personaActions) {
+          try {
+            const res = (await stagehand.act(pa.action)) as { success?: boolean };
+            await captureTurn({
+              page,
+              action: 'act',
+              reasoning: `phase_d_persona ${pa.id}: ${pa.reason ?? ''}`,
+              instruction: pa.action,
+              target: pa.id,
+              outcomeTag: res?.success ? 'ok' : 'failed',
+            });
+          } catch (err) {
+            console.warn(
+              `[stagehand_hybrid] persona action ${pa.id} errored:`,
+              err instanceof Error ? err.message : err,
+            );
+            await captureTurn({
+              page,
+              action: 'act',
+              reasoning: `phase_d_persona ${pa.id}`,
+              instruction: pa.action,
+              target: pa.id,
+              outcomeTag: 'error',
+            });
+          }
+        }
+      } catch (err) {
+        // Non-blocking — persona exploration is enrichment, not required.
+        console.warn(
+          '[stagehand_hybrid] generatePersonaActions failed:',
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
+    // ── Final capture (rich) ──
+    await captureTurn({
+      page,
+      action: 'observe',
+      reasoning: 'final state',
+      instruction: 'end',
+      done: true,
+      captureRich: true,
+    });
+
+    // Stagehand usage metrics → shared JSONL so usage-summary.ts can
+    // attribute tokens to the hybrid path.
     try {
       const m = (await stagehand.metrics) as unknown as Record<string, number>;
       if (m) logStagehandUsage(sessionId, m);
     } catch {
-      /* metrics fetch is best-effort */
+      /* non-blocking */
     }
   } catch (err) {
     outcome = 'error';
-    console.warn('[stagehand_hybrid] run failed:', err instanceof Error ? err.message : err);
+    console.warn(
+      '[stagehand_hybrid] run failed:',
+      err instanceof Error ? err.message : err,
+    );
   } finally {
-    try { await stagehand.close(); } catch { /* ignore */ }
+    try {
+      await stagehand.close();
+    } catch {
+      /* ignore */
+    }
     endIso = new Date().toISOString();
   }
 
-  const turns = actionsToTurns(actions, { initial: initialState, final: finalState });
+  // If nothing captured at all the browser never booted — outcome=error
+  // so the scoring adapter reflects reality rather than pretending the
+  // session completed.
+  if (turns.length === 0) outcome = 'error';
+
   const durationSec = Math.max(0.001, (Date.now() - started) / 1000);
 
   const sessionLog: HybridSessionLog = {
