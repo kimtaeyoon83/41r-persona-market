@@ -521,11 +521,11 @@ export default function TestDetailPage() {
           <>
             <div className="hf-card p-4 flex items-start justify-between gap-4">
               <div>
-                <p className="t-body-s font-medium">Final synthesis report</p>
+                <p className="t-body-s font-medium">UX Diagnosis</p>
                 <p className="t-caption mt-0.5">
-                  Aggregates all {reports.length} reports into a single Jupiter-style UX
-                  diagnosis (Korean markdown). Uses Claude Sonnet — costs ~$0.20-0.40 per
-                  generation.
+                  Consolidates {reports.length} reports into a single UX diagnosis —
+                  key verdict, top friction points, and prioritized recommendations.
+                  Generation takes 30-60 seconds.
                 </p>
                 {diagnosis?.generatedAt && (
                   <p className="t-caption mt-1">
@@ -534,7 +534,7 @@ export default function TestDetailPage() {
                         Last generated{' '}
                         {new Date(diagnosis.generatedAt).toLocaleString()}
                         {' '}from {diagnosis.generatedForReportCount} reports —
-                        {' '}{reports.length - (diagnosis.generatedForReportCount ?? 0)} new since.
+                        {' '}{reports.length - (diagnosis.generatedForReportCount ?? 0)} new report{reports.length - (diagnosis.generatedForReportCount ?? 0) > 1 ? 's' : ''} since.
                       </span>
                     ) : (
                       <span className="text-[var(--fg-3)]">
@@ -555,7 +555,7 @@ export default function TestDetailPage() {
                     ? 'Generating...'
                     : diagnosis?.markdown
                       ? 'Regenerate'
-                      : 'Generate Final Report'}
+                      : 'Generate diagnosis'}
                 </button>
               )}
             </div>
@@ -573,7 +573,7 @@ export default function TestDetailPage() {
                 <p className="t-body-s text-[var(--fg-1)]">
                   No diagnosis generated yet.{' '}
                   {canRetry
-                    ? 'Click Generate Final Report to create one.'
+                    ? 'Click the Generate button above to create one.'
                     : 'Only the owning company wallet can generate this.'}
                 </p>
               </div>
