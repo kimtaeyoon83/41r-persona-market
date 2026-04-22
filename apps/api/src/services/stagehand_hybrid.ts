@@ -212,6 +212,36 @@ async function capturePageStateLite(
 
 const MAX_DISCOVERY = 4;
 
+/** Per-action cap. Stagehand v3 has no built-in act timeout, and on
+ *  sites with aggressive redirects (together.ai → signin) we've seen
+ *  individual stagehand.act() calls hang indefinitely. Wrapping each
+ *  call with a 30s race gives the phase loop a chance to move on. */
+const ACT_TIMEOUT_MS = 30_000;
+/** Absolute session cap. If the whole run goes silent (browser wedged,
+ *  Playwright CDP frozen) this ceiling lets the caller recover and the
+ *  sequential chain's next persona still gets its turn. */
+const RUN_TIMEOUT_MS = 5 * 60 * 1000;
+
+class TimeoutError extends Error {
+  constructor(label: string, ms: number) {
+    super(`timeout after ${ms}ms: ${label}`);
+    this.name = 'TimeoutError';
+  }
+}
+
+function raceWithTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new TimeoutError(label, ms)), ms),
+    ),
+  ]);
+}
+
 export async function runStagehandHybrid(
   args: RunHybridArgs,
 ): Promise<RunHybridResult> {
@@ -245,6 +275,13 @@ export async function runStagehandHybrid(
   const turns: HybridSessionLog['turns'] = [];
   let outcome: string = 'task_complete';
   let endIso = '';
+
+  // Absolute run-level deadline. If any phase hangs past this we bail
+  // with outcome='patience_exceeded' and let the sequential chain's
+  // next persona start. Before this, a single stuck act() could lock
+  // the whole auto-queue (observed on together.ai test 5ea07fde).
+  const runDeadline = Date.now() + RUN_TIMEOUT_MS;
+  const deadlineExceeded = () => Date.now() > runDeadline;
 
   // Per-turn capture helper. Takes a screenshot, reads light page state
   // (url + title), and appends to turns[]. Rich state (innerText/a11y)
@@ -390,8 +427,12 @@ export async function runStagehandHybrid(
       for (const label of navLabels.slice(0, MAX_DISCOVERY)) {
         if (clicked.has(label)) continue;
         try {
-          const result = (await stagehand.act(
-            `Click the navigation item or link labeled "${label}"`,
+          const result = (await raceWithTimeout(
+            stagehand.act(
+              `Click the navigation item or link labeled "${label}"`,
+            ),
+            ACT_TIMEOUT_MS,
+            `phase_a nav "${label}"`,
           )) as { success?: boolean };
           await new Promise((r) => setTimeout(r, 1_500));
           clicked.add(label);
@@ -403,8 +444,19 @@ export async function runStagehandHybrid(
             target: label,
             outcomeTag: result?.success ? 'ok' : 'failed',
           });
-        } catch {
-          /* non-blocking */
+        } catch (err) {
+          console.warn(
+            `[stagehand_hybrid] phase_a nav "${label}" skipped:`,
+            err instanceof Error ? err.message : err,
+          );
+          await captureTurn({
+            page,
+            action: 'act',
+            reasoning: 'phase_a_discovery_nav (timed out)',
+            instruction: `Click nav "${label}"`,
+            target: label,
+            outcomeTag: 'error',
+          });
         }
       }
     }
@@ -459,9 +511,21 @@ export async function runStagehandHybrid(
     // Each item gets its own stagehand.act call + dedicated screenshot.
     // If the checklist is empty the scoring adapter still gets bookend
     // + Phase A/B turns and will fall through to outcome-only scoring.
+    if (deadlineExceeded()) {
+      outcome = 'patience_exceeded';
+      console.warn('[stagehand_hybrid] run deadline exceeded before Phase C');
+    }
     for (const item of args.checklist ?? []) {
+      if (deadlineExceeded()) {
+        outcome = 'patience_exceeded';
+        break;
+      }
       try {
-        const res = (await stagehand.act(item.task)) as { success?: boolean };
+        const res = (await raceWithTimeout(
+          stagehand.act(item.task),
+          ACT_TIMEOUT_MS,
+          `checklist ${item.id}`,
+        )) as { success?: boolean };
         await captureTurn({
           page,
           action: 'act',
@@ -489,7 +553,11 @@ export async function runStagehandHybrid(
     // ── Phase D: Persona-specific exploration ──
     // Deferred import so the base runner stays decoupled from the
     // persona action generator (which itself does an LLM call).
-    if (args.personaVector) {
+    if (deadlineExceeded()) {
+      outcome = 'patience_exceeded';
+      console.warn('[stagehand_hybrid] run deadline exceeded before Phase D — skipping');
+    }
+    if (args.personaVector && !deadlineExceeded()) {
       try {
         const { generatePersonaActions } = await import('./llm.js');
         const personaActions = await generatePersonaActions(
@@ -500,8 +568,16 @@ export async function runStagehandHybrid(
           navLabels.slice(0, 8),
         );
         for (const pa of personaActions) {
+          if (deadlineExceeded()) {
+            outcome = 'patience_exceeded';
+            break;
+          }
           try {
-            const res = (await stagehand.act(pa.action)) as { success?: boolean };
+            const res = (await raceWithTimeout(
+              stagehand.act(pa.action),
+              ACT_TIMEOUT_MS,
+              `phase_d ${pa.id}`,
+            )) as { success?: boolean };
             await captureTurn({
               page,
               action: 'act',
