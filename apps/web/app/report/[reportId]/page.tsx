@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { reportApi, API_BASE } from "@/lib/api";
+import { reportApi, testApi, API_BASE } from "@/lib/api";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/loading";
 import { ErrorDisplay } from "@/components/error-display";
@@ -86,10 +86,20 @@ function SolanaExplorerLink({ signature, label }: { signature: string; label?: s
   );
 }
 
+// Questionnaire item metadata we pull from test_cases so the answer
+// renderer can pick the right rating scale (1-5 vs 1-10) instead of
+// hardcoding "/ 5".
+interface QuestionItem {
+  id: string;
+  question: string;
+  type?: "rating_1_5" | "rating_1_10" | "free_text";
+}
+
 export default function ReportDetailPage() {
   const params = useParams();
   const reportId = params.reportId as string;
   const [report, setReport] = useState<Report | null>(null);
+  const [questionById, setQuestionById] = useState<Map<string, QuestionItem>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,7 +108,22 @@ export default function ReportDetailPage() {
     setLoading(true);
     setError(null);
     (reportApi.get(reportId) as Promise<Report>)
-      .then(setReport)
+      .then(async (r) => {
+        setReport(r);
+        // Best-effort fetch of test_cases so the questionnaire renderer
+        // can look up per-question type. Failure is non-fatal — we fall
+        // back to scale inference below.
+        try {
+          const test = await (testApi.get(r.testId) as Promise<{ test_cases?: { questionnaire?: QuestionItem[] } }>);
+          const map = new Map<string, QuestionItem>();
+          for (const q of test?.test_cases?.questionnaire ?? []) {
+            if (q?.id) map.set(q.id, q);
+          }
+          setQuestionById(map);
+        } catch {
+          /* ignore — rating scale falls back to inference */
+        }
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load report"))
       .finally(() => setLoading(false));
   };
@@ -107,6 +132,17 @@ export default function ReportDetailPage() {
     loadReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId]);
+
+  // Pick the right scale for a numeric answer. Prefer the test_cases
+  // declared type; if the test call failed, infer from the value —
+  // answer > 5 is only valid on rating_1_10 anyway, and Q02/Q03-style
+  // rating_1_10 items typically land there.
+  function scaleFor(qid: string, answer: number): number {
+    const q = questionById.get(qid);
+    if (q?.type === "rating_1_10") return 10;
+    if (q?.type === "rating_1_5") return 5;
+    return answer > 5 ? 10 : 5;
+  }
 
   if (loading) return <LoadingSpinner text="Loading report..." />;
   if (error) return <ErrorDisplay message={error} onRetry={loadReport} />;
@@ -359,22 +395,33 @@ export default function ReportDetailPage() {
           <h2 className="t-display-s mb-3">Questionnaire Answers</h2>
           <div className="space-y-2">
             {report.questionnaireAnswers
-              .filter((qa) => String(qa.answer) !== "[object Object]")
-              .map((qa) => (
-              <div key={qa.id} className="hf-card p-3">
-                <span className="text-xs font-mono text-sol-green">{qa.id.replace(/_/g, " ")}</span>
-                <p className="text-sm mt-1">
-                  {typeof qa.answer === "number" ? (
-                    <span className="flex items-center gap-2">
-                      <span className="text-lg font-display font-bold text-[var(--status-warning)]">{qa.answer}</span>
-                      <span className="text-xs text-[var(--text-tertiary)]">/ 5</span>
-                    </span>
-                  ) : (
-                    <span className="text-[var(--text-primary)] leading-relaxed">{String(qa.answer)}</span>
-                  )}
-                </p>
-              </div>
-            ))}
+              // Hide internal sentinels that ship alongside the real
+              // answers (_structured_report / _quality_breakdown /
+              // _source). Old "[object Object]" rows are also filtered.
+              .filter((qa) => !qa.id.startsWith("_") && String(qa.answer) !== "[object Object]")
+              .map((qa) => {
+                const q = questionById.get(qa.id);
+                return (
+                  <div key={qa.id} className="hf-card p-3">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-xs font-mono text-sol-green">{qa.id}</span>
+                      {q?.question && (
+                        <span className="text-xs text-[var(--text-tertiary)] truncate">{q.question}</span>
+                      )}
+                    </div>
+                    <p className="text-sm mt-1">
+                      {typeof qa.answer === "number" ? (
+                        <span className="flex items-center gap-2">
+                          <span className="text-lg font-display font-bold text-[var(--status-warning)]">{qa.answer}</span>
+                          <span className="text-xs text-[var(--text-tertiary)]">/ {scaleFor(qa.id, qa.answer)}</span>
+                        </span>
+                      ) : (
+                        <span className="text-[var(--text-primary)] leading-relaxed">{String(qa.answer)}</span>
+                      )}
+                    </p>
+                  </div>
+                );
+              })}
           </div>
         </div>
       )}
