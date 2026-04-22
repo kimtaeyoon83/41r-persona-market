@@ -39,17 +39,128 @@ interface ReportRow {
   qualityScore: number | null;
 }
 
-function buildFallbackVector(reports: ReportRow[]) {
+/**
+ * Profile-driven fallback. Produces a deterministic vector keyed to the
+ * tester's profile (expertise strings, crypto_experience, primary_device,
+ * design_matters, occupation, frustration_triggers). Two testers with
+ * different profiles → different vectors; same profile → same output.
+ * Keeps auto-queue matching meaningful even when generatePersona's LLM
+ * call fails (pre-change every fallback persona collapsed to identical
+ * hardcoded numbers, defeating the matcher).
+ */
+type FallbackProfile = {
+  expertise?: string[];
+  crypto_experience?: string;
+  occupation?: string;
+  primary_device?: string;
+  design_matters?: boolean;
+  frustration_triggers?: string[];
+  age_range?: string;
+  region?: string;
+  experience_level?: string;
+};
+
+function has(arr: string[] | undefined, ...needles: string[]): boolean {
+  if (!arr || arr.length === 0) return false;
+  const set = new Set(arr.map((s) => String(s).toLowerCase()));
+  return needles.some((n) => set.has(n.toLowerCase()));
+}
+
+function hasSubstring(haystack: string | undefined, ...needles: string[]): boolean {
+  if (!haystack) return false;
+  const h = haystack.toLowerCase();
+  return needles.some((n) => h.includes(n.toLowerCase()));
+}
+
+function clamp(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+function buildFallbackVector(reports: ReportRow[], profile?: FallbackProfile) {
+  const p: FallbackProfile = profile ?? {};
+  const cryptoExp = String(p.crypto_experience ?? '').toLowerCase();
+  const advanced = cryptoExp === 'advanced';
+  const intermediate = cryptoExp === 'intermediate';
+  const none = cryptoExp === 'none' || cryptoExp === '';
+
+  const expertiseArr = p.expertise ?? [];
+
+  // Expertise: start at a baseline matching crypto_experience, add per
+  // declared expertise tag.
+  const baseDomain = none ? 0.15 : intermediate ? 0.35 : advanced ? 0.5 : 0.25;
+  const expertise = {
+    defi: clamp(baseDomain + (has(expertiseArr, 'defi', 'trading', 'finance') ? 0.4 : 0) + (hasSubstring(p.occupation, 'trader', 'defi') ? 0.1 : 0)),
+    nft: clamp(baseDomain + (has(expertiseArr, 'nft', 'art', 'collectibles') ? 0.4 : 0)),
+    gaming: clamp(baseDomain + (has(expertiseArr, 'gaming', 'games') ? 0.4 : 0)),
+    ai_tools: clamp(baseDomain + (has(expertiseArr, 'ai', 'ml', 'llm', 'ai-tools') ? 0.4 : 0) + (hasSubstring(p.occupation, 'engineer', 'developer', 'scientist') ? 0.15 : 0)),
+    general_web: clamp(0.5 + (has(expertiseArr, 'web3', 'web', 'saas', 'e-commerce', 'product') ? 0.3 : 0.1)),
+  };
+
+  // Feedback pattern: drives matcher + Phase D persona actions.
+  const triggers = p.frustration_triggers ?? [];
+  const feedback_pattern = {
+    ui_critical: clamp(
+      (p.design_matters ? 0.7 : 0.4) +
+      (has(expertiseArr, 'design', 'design-systems', 'ui', 'ux') ? 0.25 : 0) +
+      (hasSubstring(p.occupation, 'design', 'ux') ? 0.1 : 0),
+    ),
+    security_aware: clamp(
+      (advanced ? 0.55 : intermediate ? 0.35 : 0.2) +
+      (has(expertiseArr, 'security', 'audit') ? 0.4 : 0) +
+      (hasSubstring(p.occupation, 'security', 'audit') ? 0.2 : 0),
+    ),
+    performance_sensitive: clamp(
+      0.45 +
+      (has(expertiseArr, 'performance', 'backend', 'infra') ? 0.35 : 0) +
+      (hasSubstring(p.occupation, 'engineer', 'developer') ? 0.1 : 0) +
+      (p.primary_device === 'mobile' ? 0.1 : 0),
+    ),
+    accessibility_focus: clamp(
+      0.3 +
+      (has(expertiseArr, 'accessibility', 'a11y') ? 0.5 : 0) +
+      (p.primary_device === 'mobile' ? 0.15 : 0) +
+      (p.design_matters ? 0.1 : 0),
+    ),
+    detail_oriented: clamp(
+      0.5 +
+      (has(expertiseArr, 'qa', 'testing', 'audit') ? 0.3 : 0) +
+      (advanced ? 0.15 : intermediate ? 0.05 : 0) +
+      (triggers.length >= 2 ? 0.1 : 0),
+    ),
+  };
+
+  // Test style — advanced users test faster/broader, novices more cautious.
+  const test_style = {
+    thoroughness: clamp(advanced ? 0.75 : intermediate ? 0.6 : 0.5),
+    speed: clamp(advanced ? 0.7 : intermediate ? 0.5 : 0.35),
+    ux_focus: clamp(feedback_pattern.ui_critical * 0.8 + 0.15),
+    bug_detection: clamp(feedback_pattern.detail_oriented * 0.7 + (advanced ? 0.15 : 0)),
+    creativity: clamp(0.4 + (has(expertiseArr, 'design', 'product', 'research') ? 0.3 : 0)),
+  };
+
+  // Reliability — keep the existing "avg quality / 5" calibration.
+  const avgQ = reports.reduce((sum, r) => sum + (r.qualityScore ?? 3), 0) / Math.max(1, reports.length);
+
+  const voiceBits: string[] = [];
+  if (p.occupation) voiceBits.push(`${p.occupation} 관점에서`);
+  else if (advanced) voiceBits.push('크립토 숙련자로서');
+  else if (none) voiceBits.push('일반 사용자로서');
+  if (p.design_matters) voiceBits.push('디자인 일관성에 민감하며');
+  if (feedback_pattern.security_aware > 0.7) voiceBits.push('보안/신뢰 신호를 먼저 확인하고');
+  if (feedback_pattern.performance_sensitive > 0.7) voiceBits.push('성능·로딩 지연을 놓치지 않으며');
+  if (triggers.length > 0) voiceBits.push(`${triggers.slice(0, 2).join('·')} 에 특히 예민합니다`);
+  else voiceBits.push('실제 사용 관점에서 구체적인 피드백을 남깁니다');
+
   return {
-    test_style: { thoroughness: 0.7, speed: 0.6, ux_focus: 0.8, bug_detection: 0.5, creativity: 0.6 },
-    expertise: { defi: 0.5, nft: 0.3, gaming: 0.2, ai_tools: 0.4, general_web: 0.7 },
-    feedback_pattern: { ui_critical: 0.7, security_aware: 0.5, performance_sensitive: 0.6, accessibility_focus: 0.4, detail_oriented: 0.7 },
+    test_style,
+    expertise,
+    feedback_pattern,
     reliability: {
-      quality_score: (reports.reduce((sum, r) => sum + (r.qualityScore ?? 3), 0) / Math.max(1, reports.length)) / 5,
-      consistency: 0.7,
+      quality_score: clamp(avgQ / 5),
+      consistency: clamp(0.65 + (reports.length >= 5 ? 0.1 : 0)),
       response_rate: 1.0,
     },
-    voice_sample: 'This tester provides balanced feedback with attention to UI details and practical suggestions.',
+    voice_sample: voiceBits.join(' ') + '.',
   };
 }
 
@@ -80,21 +191,42 @@ export async function recomputePersona(
   if (reports.length < MIN_REPORTS_FOR_PERSONA) return null;
 
   // Generate vector via LLM, fall back to deterministic skeleton on error.
+  // LLM call is retried once with a short delay — most failures are
+  // transient (rate limits, network blips). If both attempts fail, we
+  // drop to the profile-based fallback AND log at error level so
+  // persistent failures are visible in Railway logs (pre-change these
+  // were fire-and-forget silent, so a broken ANTHROPIC_API_KEY could
+  // produce weeks of look-alike fallback personas before anyone noticed).
   const profileData = (tester.profile as Record<string, unknown>) || {};
+  const reportPayload = reports.map((r) => ({
+    checklist_results: r.checklistResults,
+    scenario_log: r.scenarioLog,
+    questionnaire_answers: r.questionnaireAnswers,
+    quality_score: r.qualityScore,
+  }));
+
   let vector;
-  try {
-    vector = await generatePersona(
-      profileData,
-      reports.map((r) => ({
-        checklist_results: r.checklistResults,
-        scenario_log: r.scenarioLog,
-        questionnaire_answers: r.questionnaireAnswers,
-        quality_score: r.qualityScore,
-      })),
+  let llmErr: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      vector = await generatePersona(profileData, reportPayload);
+      llmErr = null;
+      break;
+    } catch (err) {
+      llmErr = err;
+      if (attempt === 1) {
+        console.warn(
+          `[persona] generatePersona attempt ${attempt} failed for ${testerAddr} (trigger=${trigger}): ${err instanceof Error ? err.message : String(err)} — retrying in 2s`,
+        );
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  }
+  if (!vector) {
+    console.error(
+      `[persona] generatePersona failed twice for ${testerAddr} (trigger=${trigger}) — falling back to profile-based vector. last error: ${llmErr instanceof Error ? llmErr.message : String(llmErr)}`,
     );
-  } catch (err) {
-    console.warn(`[persona] LLM failed for ${testerAddr}, using fallback:`, err instanceof Error ? err.message : err);
-    vector = buildFallbackVector(reports);
+    vector = buildFallbackVector(reports, profileData as FallbackProfile);
   }
 
   const avgQuality = reports.reduce((s, r) => s + (r.qualityScore ?? 3), 0) / reports.length;
