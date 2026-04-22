@@ -38,6 +38,7 @@ export default function TestDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [retryMsg, setRetryMsg] = useState<string | null>(null);
+  const [retryIncludeSessionLimited, setRetryIncludeSessionLimited] = useState(false);
   const { publicKey, signMessage } = useWalletContext();
 
   const loadData = () => {
@@ -71,18 +72,32 @@ export default function TestDetailPage() {
     try {
       const result = await testApi.retryAutotest(
         testId,
-        { company_wallet: publicKey },
+        {
+          company_wallet: publicKey,
+          force_retry_low_quality: retryIncludeSessionLimited,
+        },
         signMessage,
-      ) as { queued: number; skipped_existing: number; message?: string };
+      ) as {
+        queued: number;
+        skipped_existing: number;
+        deleted_low_quality?: number;
+        message?: string;
+      };
+      const deletedNote = (result.deleted_low_quality ?? 0) > 0
+        ? ` ${result.deleted_low_quality} session-limited report${result.deleted_low_quality! > 1 ? 's' : ''} cleared.`
+        : '';
       if (result.queued > 0) {
         setRetryMsg(
           `Queued ${result.queued} persona run${result.queued > 1 ? 's' : ''}. ` +
-          `Reports will appear in 3-10 minutes. ` +
-          `${result.skipped_existing > 0 ? `(${result.skipped_existing} already complete.)` : ''}`,
+          `Reports will appear in 3-10 minutes.` +
+          deletedNote +
+          (result.skipped_existing > 0 ? ` (${result.skipped_existing} already complete.)` : ''),
         );
       } else {
-        setRetryMsg(result.message ?? 'All matched personas already have reports.');
+        setRetryMsg((result.message ?? 'All matched personas already have reports.') + deletedNote);
       }
+      // Reload reports so the UI reflects the deletions / new queue state.
+      loadData();
     } catch (err) {
       setRetryMsg(`Retry failed: ${err instanceof Error ? err.message : 'unknown error'}`);
     } finally {
@@ -154,25 +169,45 @@ export default function TestDetailPage() {
         </div>
       </div>
 
-      {canRetry && (
-        <div className="mb-6 hf-card p-4 flex items-center justify-between gap-4">
-          <div>
-            <p className="t-body-s font-medium">Re-run auto-test personas</p>
-            <p className="t-caption mt-0.5">
-              Personas that already have a report for this test are skipped.
-              Use this when a previous run got stuck on a redirect wall or timed out.
-            </p>
-            {retryMsg && <p className="t-caption mt-1 text-sol-blue">{retryMsg}</p>}
+      {canRetry && (() => {
+        const sessionLimited = reports.filter(
+          (r) => r.isPersonaTest && Number(r.qualityScore) < 1.5,
+        ).length;
+        return (
+          <div className="mb-6 hf-card p-4 flex items-start justify-between gap-4">
+            <div>
+              <p className="t-body-s font-medium">Re-run auto-test personas</p>
+              <p className="t-caption mt-0.5">
+                Personas that already have a report for this test are skipped.
+                Use this when a previous run got stuck on a redirect wall or timed out.
+              </p>
+              {sessionLimited > 0 && (
+                <label className="flex items-center gap-2 mt-2 t-caption cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={retryIncludeSessionLimited}
+                    onChange={(e) => setRetryIncludeSessionLimited(e.target.checked)}
+                    className="w-3.5 h-3.5 accent-sol-blue"
+                  />
+                  <span>
+                    Include {sessionLimited} session-limited report{sessionLimited > 1 ? 's' : ''}
+                    {' '}
+                    <span className="text-[var(--fg-3)]">(old rows will be cleared)</span>
+                  </span>
+                </label>
+              )}
+              {retryMsg && <p className="t-caption mt-1 text-sol-blue">{retryMsg}</p>}
+            </div>
+            <button
+              onClick={handleRetryAutotest}
+              disabled={retrying}
+              className="hf-btn sm shrink-0"
+            >
+              {retrying ? 'Queuing...' : 'Retry auto-test'}
+            </button>
           </div>
-          <button
-            onClick={handleRetryAutotest}
-            disabled={retrying}
-            className="hf-btn sm"
-          >
-            {retrying ? 'Queuing...' : 'Retry auto-test'}
-          </button>
-        </div>
-      )}
+        );
+      })()}
 
       {reports.filter(r => Number(r.qualityScore) >= 1.5).some(r => r.isPersonaTest) && reports.filter(r => Number(r.qualityScore) >= 1.5).some(r => !r.isPersonaTest) && (
         <a

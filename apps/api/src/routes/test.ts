@@ -1,5 +1,5 @@
 import { Router, type Router as RouterType } from 'express';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray, lt } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { generateTestCases } from '../services/llm.js';
 import {
@@ -198,7 +198,7 @@ router.post('/:id/retry-autotest',
   async (req, res) => {
     try {
       const id = String(req.params.id);
-      const { company_wallet, max_personas } = req.body;
+      const { company_wallet, max_personas, force_retry_low_quality } = req.body;
 
       const signedWallet = (req as unknown as { signedWallet: string }).signedWallet;
       if (signedWallet !== company_wallet) {
@@ -230,6 +230,31 @@ router.post('/:id/retry-autotest',
         max_personas ?? 3,
       );
 
+      // When force_retry_low_quality is set we drop the session-limited
+      // persona reports (quality < 1.5) + their settlements first, so
+      // the matcher's picks aren't filtered out of toRun by the
+      // "already has a report" skip below. Manual reports are left
+      // untouched — the whole idea of "session limited" is persona-
+      // specific.
+      let forcedDeleted = 0;
+      if (force_retry_low_quality) {
+        const lowQuality = await db.select({ id: schema.testReports.id }).from(schema.testReports).where(
+          and(
+            eq(schema.testReports.testId, id),
+            eq(schema.testReports.isPersonaTest, true),
+            lt(schema.testReports.qualityScore, 1.5),
+          ),
+        );
+        const lowIds = lowQuality.map((r) => r.id);
+        if (lowIds.length > 0) {
+          // Delete dependent settlement rows first (FK constraint).
+          await db.delete(schema.settlements).where(inArray(schema.settlements.reportId, lowIds));
+          await db.delete(schema.testReports).where(inArray(schema.testReports.id, lowIds));
+          forcedDeleted = lowIds.length;
+          console.log(`[AutoTest-retry] force_retry_low_quality=true — deleted ${forcedDeleted} session-limited reports for test ${id}`);
+        }
+      }
+
       // Skip personas that already produced a report for this test — the
       // unique index (tester, test, isPersonaTest=true) would make the
       // insert a no-op, but we also don't want to burn LLM tokens on a
@@ -253,8 +278,11 @@ router.post('/:id/retry-autotest',
           test_id: id,
           queued: 0,
           skipped_existing: skipped.length,
+          deleted_low_quality: forcedDeleted,
           auto_tests: [],
-          message: 'all matched personas already have reports',
+          message: forcedDeleted > 0
+            ? `${forcedDeleted} low-quality reports deleted, but no personas need retry (matcher picks already complete)`
+            : 'all matched personas already have reports',
         });
         return;
       }
@@ -288,6 +316,7 @@ router.post('/:id/retry-autotest',
         test_id: id,
         queued: autoTestJobs.length,
         skipped_existing: skipped.length,
+        deleted_low_quality: forcedDeleted,
         auto_tests: autoTestJobs,
       });
     } catch (error) {

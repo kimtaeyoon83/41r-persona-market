@@ -60,7 +60,7 @@ export const testApi = {
 
   retryAutotest: (
     id: string,
-    data: { company_wallet: string; max_personas?: number },
+    data: { company_wallet: string; max_personas?: number; force_retry_low_quality?: boolean },
     signMessage: SignMessage,
   ) => signedRequest(
     `/api/test/${id}/retry-autotest`,

@@ -63,6 +63,12 @@ export const retryAutotestBodySchema = z.object({
   /** Optional cap on how many personas to (re)queue. Defaults to 3 —
    *  same as the matcher used by POST /api/test/register. */
   max_personas: z.number().int().positive().max(10).optional(),
+  /** When true, persona reports below the 1.5 reward threshold for
+   *  this test get deleted (along with their settlements rows) so the
+   *  "already-has-a-report" skip doesn't filter them out of the
+   *  matcher's picks. Safe default is false — we only re-queue
+   *  personas that have no prior report at all. */
+  force_retry_low_quality: z.boolean().optional(),
 });
 
 export type RegisterTestBody = z.infer<typeof registerTestBodySchema>;
