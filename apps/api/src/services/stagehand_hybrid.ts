@@ -153,18 +153,31 @@ async function capturePageState(page: unknown): Promise<{
     innerText(sel: string, opts?: unknown): Promise<string>;
     accessibility: { snapshot(opts?: { interestingOnly?: boolean }): Promise<unknown> };
   };
+  // Every Playwright read is raced against a short cap because on
+  // wedged browsers these methods can block forever. iter1: previously
+  // `p.title()` etc were awaited without a timeout, so a single stuck
+  // page operation would hang the whole sequential chain (observed on
+  // vercel.com test 243d289d).
   let url = '';
   let title = '';
   let text = '';
   let a11y = '';
   try { url = p.url(); } catch { /* ignore */ }
-  try { title = await p.title(); } catch { /* ignore */ }
+  try { title = await raceWithTimeout(p.title(), 3_000, 'page.title'); } catch { /* ignore */ }
   try {
-    const t = await p.innerText('body', { timeout: 2000 } as unknown as Record<string, unknown>);
+    const t = await raceWithTimeout(
+      p.innerText('body', { timeout: 2000 } as unknown as Record<string, unknown>),
+      4_000,
+      'page.innerText',
+    );
     text = String(t).slice(0, 1500);
   } catch { /* ignore */ }
   try {
-    const tree = await p.accessibility.snapshot({ interestingOnly: true });
+    const tree = await raceWithTimeout(
+      p.accessibility.snapshot({ interestingOnly: true }),
+      6_000,
+      'accessibility.snapshot',
+    );
     a11y = JSON.stringify(tree).slice(0, 4000);
   } catch { /* ignore */ }
   return { url, title, text, a11y };
@@ -206,7 +219,7 @@ async function capturePageStateLite(
   let url = '';
   let title = '';
   try { url = p.url(); } catch { /* ignore */ }
-  try { title = await p.title(); } catch { /* ignore */ }
+  try { title = await raceWithTimeout(p.title(), 3_000, 'page.title (lite)'); } catch { /* ignore */ }
   return { url, title };
 }
 
@@ -283,6 +296,22 @@ export async function runStagehandHybrid(
   const runDeadline = Date.now() + RUN_TIMEOUT_MS;
   const deadlineExceeded = () => Date.now() > runDeadline;
 
+  // Hard-cut safety net. The deadline checks above only fire at phase
+  // boundaries; if a single stagehand.act() / page.screenshot hangs
+  // INSIDE a phase, the in-flight await never unwinds. This timer
+  // forcibly closes the browser context when the ceiling hits — any
+  // pending page.* call then rejects with "browser has been closed",
+  // which captures catches into the outer try block and the run exits
+  // with outcome='patience_exceeded'. Iter1 fix for the vercel.com
+  // test 243d289d chain-wedge.
+  let hardCut = false;
+  const hardCutTimer = setTimeout(() => {
+    hardCut = true;
+    outcome = 'patience_exceeded';
+    console.warn(`[stagehand_hybrid] run hard-cut at ${RUN_TIMEOUT_MS}ms for persona ${args.personaId}`);
+    stagehand.close().catch(() => { /* swallow — close errors during hard-cut are expected */ });
+  }, RUN_TIMEOUT_MS);
+
   // Per-turn capture helper. Takes a screenshot, reads light page state
   // (url + title), and appends to turns[]. Rich state (innerText/a11y)
   // only captured when the caller passes captureRich=true, because
@@ -299,19 +328,25 @@ export async function runStagehandHybrid(
     outcomeTag?: 'ok' | 'failed' | 'error' | null;
   }) {
     const turnIdx = turns.length;
-    // Screenshot
+    // Screenshot — wrapped in raceWithTimeout because on wedged pages
+    // (observed on together.ai + vercel.com after stagehand.act timeouts)
+    // page.screenshot can hang indefinitely. 5s cap is enough for a
+    // non-fullPage PNG; any longer means the renderer is stuck.
     try {
       const shot = path.join(
         args.screenshotsDir,
         `turn_${turnIdx.toString().padStart(2, '0')}.png`,
       );
-      const buf = await (
-        opts.page as { screenshot(o: { fullPage: boolean; type: 'png' }): Promise<Buffer> }
-      ).screenshot({ fullPage: false, type: 'png' });
+      const buf = await raceWithTimeout(
+        (opts.page as { screenshot(o: { fullPage: boolean; type: 'png' }): Promise<Buffer> })
+          .screenshot({ fullPage: false, type: 'png' }),
+        5_000,
+        `page.screenshot turn_${turnIdx}`,
+      );
       fs.writeFileSync(shot, buf);
       screenshotPaths.push(shot);
     } catch {
-      /* non-blocking */
+      /* non-blocking — the turn still gets logged with whatever state we have */
     }
 
     const obs = opts.captureRich
@@ -635,12 +670,14 @@ export async function runStagehandHybrid(
       err instanceof Error ? err.message : err,
     );
   } finally {
+    clearTimeout(hardCutTimer);
     try {
-      await stagehand.close();
+      await raceWithTimeout(stagehand.close(), 5_000, 'stagehand.close');
     } catch {
-      /* ignore */
+      /* ignore — browser may already be closed by hard-cut */
     }
     endIso = new Date().toISOString();
+    if (hardCut && outcome !== 'patience_exceeded') outcome = 'patience_exceeded';
   }
 
   // If nothing captured at all the browser never booted — outcome=error
