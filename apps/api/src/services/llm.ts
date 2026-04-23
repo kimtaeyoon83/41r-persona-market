@@ -612,6 +612,62 @@ Return ONLY: ["keyword1", "keyword2", ...]`,
   return parseJsonSafe(respText);
 }
 
+// Rough domain classifier used by Phase D so a persona's domain-
+// specific focus (DeFi slippage, NFT metadata) only fires when the
+// target site actually matches that domain. Without this, a blockchain
+// security auditor running on vercel.com would ask Stagehand to
+// "check token approval UI" which doesn't exist on the site, wastes
+// act budget, and adds noise to the diagnosis. Pure heuristic —
+// host + requirements text match is enough to drop the obviously
+// misaligned bucket; ambiguous cases fall through to generic_saas
+// which inherits only the feedback_pattern focuses (UI, security,
+// performance, accessibility), not expertise-scoped ones.
+export type DomainCategory =
+  | 'defi'
+  | 'nft'
+  | 'gaming'
+  | 'ai_tools'
+  | 'devtools'
+  | 'ecommerce'
+  | 'media'
+  | 'generic_saas';
+
+export function classifyDomain(targetUrl: string, requirements: string = ''): DomainCategory {
+  const url = String(targetUrl).toLowerCase();
+  const req = String(requirements).toLowerCase();
+  const blob = `${url} ${req}`;
+
+  // Order matters — more specific categories first.
+  if (
+    /\b(defi|dex|swap|slippage|liquidity|yield|lending|stake|amm|staking)\b/.test(blob) ||
+    /(uniswap|sushiswap|curve|aave|compound|pancakeswap|jupiter|raydium|orca)/.test(url)
+  ) return 'defi';
+  if (
+    /\b(nft|mint|collectible|opensea|magic eden|rarible)\b/.test(blob) ||
+    /(opensea|magiceden|rarible|blur\.io)/.test(url)
+  ) return 'nft';
+  if (
+    /\b(gaming|esports|game|playable)\b/.test(blob) ||
+    /(steam|epicgames|itch\.io|inven\.co\.kr)/.test(url)
+  ) return 'gaming';
+  if (
+    /\b(llm|model|ai|prompt|completion|embedding|fine[- ]tune)\b/.test(blob) ||
+    /(anthropic|openai|together\.ai|huggingface|replicate|cohere)/.test(url)
+  ) return 'ai_tools';
+  if (
+    /\b(docs?|developer|api|sdk|framework|deploy|ci\/cd|devops)\b/.test(blob) ||
+    /(vercel|netlify|railway|render\.com|fly\.io|github\.com|gitlab|docs\.)/.test(url)
+  ) return 'devtools';
+  if (
+    /\b(shop|cart|checkout|product|order|stock|shipping)\b/.test(blob) ||
+    /(shopify|amazon|coupang|11st|gmarket)/.test(url)
+  ) return 'ecommerce';
+  if (
+    /\b(article|news|post|blog|webzine|editorial|media)\b/.test(blob)
+  ) return 'media';
+  return 'generic_saas';
+}
+
 // ─── Generate Persona-Specific Browser Actions (Haiku - fast) ────
 export async function generatePersonaActions(
   persona: PersonaVector,
@@ -619,18 +675,38 @@ export async function generatePersonaActions(
   baseChecklist: Array<{ id: string; task: string }>,
   discoveredLinks: string[] = [],
   navLabels: string[] = [],
+  requirements: string = '',
 ): Promise<Array<{ id: string; action: string; reason: string }>> {
+  const domainCategory = classifyDomain(targetUrl, requirements);
+  const isDefi = domainCategory === 'defi';
+  const isNft = domainCategory === 'nft';
+  const isGaming = domainCategory === 'gaming';
+  const isAiTools = domainCategory === 'ai_tools';
   // Build a focus summary from the persona's top traits
   const focusAreas: string[] = [];
 
-  // Technical focus areas
-  if (persona.feedback_pattern.security_aware > 0.7) focusAreas.push('security (check HTTPS, token approvals, suspicious scripts, error handling on invalid input)');
+  // General focuses (domain-agnostic) — always apply when the persona
+  // trait is strong. security here is ABSTRACT security (HTTPS, CSP,
+  // input validation) not blockchain-specific security.
+  if (persona.feedback_pattern.security_aware > 0.7) {
+    focusAreas.push(
+      isDefi || isNft
+        ? 'security (HTTPS, token approval scopes, suspicious scripts, slippage+approval safety, error handling)'
+        : 'security (HTTPS, CSP headers, OAuth scope clarity, input validation, error messages, rate-limit visibility)',
+    );
+  }
   if (persona.feedback_pattern.performance_sensitive > 0.7) focusAreas.push('performance (loading speed, animation smoothness, lazy-load behavior)');
   if (persona.feedback_pattern.ui_critical > 0.7) focusAreas.push('UI quality (visual glitches, alignment, color contrast, responsive layout)');
   if (persona.feedback_pattern.accessibility_focus > 0.7) focusAreas.push('accessibility (screen reader labels, keyboard navigation, font sizes)');
-  if (persona.expertise.defi > 0.7) focusAreas.push('DeFi specifics (slippage controls, price impact display, fee breakdown, MEV protection, route transparency)');
-  if (persona.expertise.nft > 0.7) focusAreas.push('NFT specifics (image loading, metadata display, ownership verification)');
-  if (persona.expertise.gaming > 0.7) focusAreas.push('gaming specifics (frame rate, input latency, tutorial flow)');
+
+  // Domain-scoped focuses — only fire when the persona's expertise
+  // AND the target domain both align. Prevents "check slippage on a
+  // generic SaaS" noise that plagued Iter1.
+  if (persona.expertise.defi > 0.7 && isDefi) focusAreas.push('DeFi specifics (slippage controls, price impact display, fee breakdown, MEV protection, route transparency)');
+  if (persona.expertise.nft > 0.7 && isNft) focusAreas.push('NFT specifics (image loading, metadata display, ownership verification)');
+  if (persona.expertise.gaming > 0.7 && isGaming) focusAreas.push('gaming specifics (frame rate, input latency, tutorial flow)');
+  if (persona.expertise.ai_tools > 0.7 && isAiTools) focusAreas.push('AI tools specifics (model catalog clarity, pricing per token, rate limits, playground latency)');
+
   if (persona.test_style.thoroughness > 0.8) focusAreas.push('edge cases (empty states, error recovery, boundary values)');
 
   // Demographics-driven focus areas
@@ -677,11 +753,36 @@ export async function generatePersonaActions(
     siteContext += `\n\nNavigation menu items found: ${navLabels.join(', ')}`;
   }
 
+  // Domain guardrails — prevents blockchain-audit-flavoured actions on
+  // a general SaaS site and vice versa. Keep short; the focus list
+  // above already filters most of it, this is a belt-and-suspenders.
+  const domainGuardrail = (() => {
+    switch (domainCategory) {
+      case 'defi':
+      case 'nft':
+        return 'This is a blockchain/web3 site — slippage, wallet approval, gas, token metadata checks ARE relevant.';
+      case 'devtools':
+        return 'This is a devtools/deploy platform — focus on docs discoverability, API/SDK clarity, pricing tiers, onboarding friction. Do NOT ask for slippage, token approval, NFT metadata, or DeFi-specific checks.';
+      case 'ai_tools':
+        return 'This is an AI platform — model catalog, pricing per token, rate limits, playground matter. Do NOT ask for slippage, wallet connect, NFT mint checks.';
+      case 'gaming':
+        return 'This is a gaming site — tutorial flow, FPS stability, controller/keyboard mapping, matchmaking matter. Skip blockchain-specific checks unless the persona is a web3 gaming expert.';
+      case 'ecommerce':
+        return 'This is an ecommerce site — cart flow, checkout friction, product discovery matter. Skip blockchain-specific checks.';
+      case 'media':
+        return 'This is a content/media site — article readability, search precision, ad density matter. Skip blockchain checks.';
+      default:
+        return 'This is a general SaaS / marketing site. Do NOT ask for slippage, token approval, NFT metadata, DeFi-specific, or other blockchain-specific checks — they do not apply. Focus on UI quality, accessibility, performance, conversion clarity.';
+    }
+  })();
+
   const prompt = `You are generating browser test actions for a QA tester with these focus areas:
 ${focusAreas.map((f, i) => `${i + 1}. ${f}`).join('\n')}
 ${personaContext}
 
 Target URL: ${targetUrl}
+Domain category: ${domainCategory}
+${domainGuardrail}
 ${siteContext}
 
 The tester already performed these base checklist actions:
@@ -693,6 +794,7 @@ Generate 5-8 ADDITIONAL browser actions this persona would specifically do. CRIT
 3. Actions must be concrete and executable by a browser automation tool (click, scroll, type, navigate)
 4. Each action should result in a visually DIFFERENT screen state from the others
 5. Do NOT repeat actions already in the checklist
+6. **Stay on-domain** per the "Domain category" above — off-topic actions waste budget and produce false signals in the diagnosis.
 
 Return as JSON array:
 \`\`\`json

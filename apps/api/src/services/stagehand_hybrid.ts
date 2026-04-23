@@ -225,6 +225,36 @@ async function capturePageStateLite(
 
 const MAX_DISCOVERY = 4;
 
+/** Auth-wall detection — URLs the automation can't meaningfully work
+ *  past because they require OAuth / signin / external identity flows.
+ *  When the browser lands on one of these, we record the turn as
+ *  blocked (environmental constraint) rather than failed, and
+ *  page.goBack() so subsequent checklist items don't all fail for the
+ *  same reason. Without this, D8u48MaH on vercel.com produced 0/10
+ *  passed because every act() redirected to GitHub OAuth and the
+ *  scoring adapter interpreted it as a genuine site defect (R4
+ *  false-positive recommendation in the Iter1 diagnosis). */
+const AUTH_WALL_PATTERNS: RegExp[] = [
+  /\/login(\b|\/|\?)/i,
+  /\/signin(\b|\/|\?)/i,
+  /\/sign-in(\b|\/|\?)/i,
+  /\/signup(\b|\/|\?)/i,
+  /\/sign-up(\b|\/|\?)/i,
+  /\/register(\b|\/|\?)/i,
+  /\/oauth(\b|\/|\?)/i,
+  /\/auth\/(login|signin|callback|authorize)/i,
+  /github\.com\/(login|signup)/i,
+  /accounts\.google\.com/i,
+  /login\.microsoftonline\.com/i,
+  /facebook\.com\/login/i,
+  /member\..*\/user\/.*\/mlogin/i, // inven.co.kr style
+];
+
+function isAuthWall(url: string): boolean {
+  if (!url) return false;
+  return AUTH_WALL_PATTERNS.some((p) => p.test(url));
+}
+
 /** Per-action cap. Stagehand v3 has no built-in act timeout, and on
  *  sites with aggressive redirects (together.ai → signin) we've seen
  *  individual stagehand.act() calls hang indefinitely. Wrapping each
@@ -288,6 +318,12 @@ export async function runStagehandHybrid(
   const turns: HybridSessionLog['turns'] = [];
   let outcome: string = 'task_complete';
   let endIso = '';
+  // Count how often the browser landed behind a login/OAuth wall. If
+  // the fraction is high (≥ half the checklist turns) we mark the
+  // session 'abandoned' — the environment blocked enough evidence
+  // gathering that reporting as task_complete would be misleading.
+  let authWallHits = 0;
+  let authWallBlockedChecklist = 0;
 
   // Absolute run-level deadline. If any phase hangs past this we bail
   // with outcome='patience_exceeded' and let the sequential chain's
@@ -325,7 +361,7 @@ export async function runStagehandHybrid(
     target?: string;
     done?: boolean;
     captureRich?: boolean;
-    outcomeTag?: 'ok' | 'failed' | 'error' | null;
+    outcomeTag?: 'ok' | 'failed' | 'error' | 'blocked' | null;
   }) {
     const turnIdx = turns.length;
     // Screenshot — wrapped in raceWithTimeout because on wedged pages
@@ -434,6 +470,10 @@ export async function runStagehandHybrid(
     const toVisit = discoveredLinks
       .filter((p) => !visitedPaths.has(p))
       .filter((p) => !p.includes('#') && !/\.(pdf|png|jpg|jpeg|gif|svg)$/i.test(p))
+      // Skip paths that obviously gate on auth — we can't get past them
+      // and crawling them burns Phase A budget. isAuthWall() uses full
+      // URL patterns, so we synthesise a fake URL to test the path.
+      .filter((p) => !isAuthWall(`https://example${p}`))
       .slice(0, MAX_DISCOVERY);
 
     if (toVisit.length > 0) {
@@ -561,6 +601,40 @@ export async function runStagehandHybrid(
           ACT_TIMEOUT_MS,
           `checklist ${item.id}`,
         )) as { success?: boolean };
+
+        // Post-act: did the browser end up on an auth wall? If yes,
+        // the act didn't genuinely verify anything — record as blocked
+        // (env constraint) and try to return to the target URL so the
+        // next checklist item starts from the landing page again.
+        const postUrl = (() => {
+          try { return (page as { url(): string }).url(); } catch { return ''; }
+        })();
+        if (isAuthWall(postUrl)) {
+          authWallHits += 1;
+          authWallBlockedChecklist += 1;
+          try {
+            await raceWithTimeout(
+              (page as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
+                args.url, { waitUntil: 'domcontentloaded', timeoutMs: 10_000 } as unknown,
+              ),
+              12_000,
+              `auth-wall recovery goto`,
+            );
+            await new Promise((r) => setTimeout(r, 800));
+          } catch {
+            /* recovery best-effort */
+          }
+          await captureTurn({
+            page,
+            action: 'act',
+            reasoning: `checklist ${item.id}: blocked by auth-wall at ${postUrl}`,
+            instruction: item.task,
+            target: item.id,
+            outcomeTag: 'blocked',
+          });
+          continue;
+        }
+
         await captureTurn({
           page,
           action: 'act',
@@ -585,6 +659,17 @@ export async function runStagehandHybrid(
       }
     }
 
+    // If the auth wall blocked more than half the checklist we treat
+    // the session as abandoned — the scoring adapter + diagnosis then
+    // know the low coverage is environmental, not a site defect.
+    const checklistCount = (args.checklist ?? []).length;
+    if (checklistCount > 0 && authWallBlockedChecklist >= Math.ceil(checklistCount / 2)) {
+      outcome = 'abandoned';
+      console.warn(
+        `[stagehand_hybrid] ${authWallBlockedChecklist}/${checklistCount} checklist items hit auth-wall — outcome=abandoned`,
+      );
+    }
+
     // ── Phase D: Persona-specific exploration ──
     // Deferred import so the base runner stays decoupled from the
     // persona action generator (which itself does an LLM call).
@@ -601,6 +686,7 @@ export async function runStagehandHybrid(
           (args.checklist ?? []).map((c) => ({ id: c.id, task: c.task })),
           discoveredLinks.slice(0, 8),
           navLabels.slice(0, 8),
+          args.task, // used for classifyDomain inside generatePersonaActions
         );
         for (const pa of personaActions) {
           if (deadlineExceeded()) {
@@ -613,6 +699,35 @@ export async function runStagehandHybrid(
               ACT_TIMEOUT_MS,
               `phase_d ${pa.id}`,
             )) as { success?: boolean };
+
+            // Same auth-wall recovery as Phase C so persona exploration
+            // doesn't all collapse into one login landing page.
+            const postUrl = (() => {
+              try { return (page as { url(): string }).url(); } catch { return ''; }
+            })();
+            if (isAuthWall(postUrl)) {
+              authWallHits += 1;
+              try {
+                await raceWithTimeout(
+                  (page as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
+                    args.url, { waitUntil: 'domcontentloaded', timeoutMs: 10_000 } as unknown,
+                  ),
+                  12_000,
+                  `auth-wall recovery goto (phase_d)`,
+                );
+                await new Promise((r) => setTimeout(r, 800));
+              } catch { /* best-effort */ }
+              await captureTurn({
+                page,
+                action: 'act',
+                reasoning: `phase_d_persona ${pa.id}: blocked by auth-wall at ${postUrl}`,
+                instruction: pa.action,
+                target: pa.id,
+                outcomeTag: 'blocked',
+              });
+              continue;
+            }
+
             await captureTurn({
               page,
               action: 'act',
