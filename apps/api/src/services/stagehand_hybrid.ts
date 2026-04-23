@@ -18,6 +18,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { BROWSER_QUIRKS, runDetectors, isAuthWallUrl } from './browser_quirks/index.js';
+import type { BrowserQuirk, QuirkContext } from './browser_quirks/index.js';
 
 const USAGE_LOG_PATH = process.env.USAGE_LOG_PATH || '/tmp/llm-usage.jsonl';
 
@@ -74,6 +76,12 @@ export interface HybridSessionLog {
   start_time: string;
   end_time: string;
   duration_sec: number;
+  /** Environmental obstacles hit during the run. Keyed by quirk name
+   *  (auth_wall, cookie_consent, …). Surfaced into the scoring
+   *  session_log + the diagnosis aggregate so synthesis prompts can
+   *  contextualise a low coverage session as "browser couldn't push
+   *  past X banner", not a product defect. */
+  quirks?: Record<string, number>;
   turns: Array<{
     turn: number;
     observation: {
@@ -225,35 +233,11 @@ async function capturePageStateLite(
 
 const MAX_DISCOVERY = 4;
 
-/** Auth-wall detection — URLs the automation can't meaningfully work
- *  past because they require OAuth / signin / external identity flows.
- *  When the browser lands on one of these, we record the turn as
- *  blocked (environmental constraint) rather than failed, and
- *  page.goBack() so subsequent checklist items don't all fail for the
- *  same reason. Without this, D8u48MaH on vercel.com produced 0/10
- *  passed because every act() redirected to GitHub OAuth and the
- *  scoring adapter interpreted it as a genuine site defect (R4
- *  false-positive recommendation in the Iter1 diagnosis). */
-const AUTH_WALL_PATTERNS: RegExp[] = [
-  /\/login(\b|\/|\?)/i,
-  /\/signin(\b|\/|\?)/i,
-  /\/sign-in(\b|\/|\?)/i,
-  /\/signup(\b|\/|\?)/i,
-  /\/sign-up(\b|\/|\?)/i,
-  /\/register(\b|\/|\?)/i,
-  /\/oauth(\b|\/|\?)/i,
-  /\/auth\/(login|signin|callback|authorize)/i,
-  /github\.com\/(login|signup)/i,
-  /accounts\.google\.com/i,
-  /login\.microsoftonline\.com/i,
-  /facebook\.com\/login/i,
-  /member\..*\/user\/.*\/mlogin/i, // inven.co.kr style
-];
-
-function isAuthWall(url: string): boolean {
-  if (!url) return false;
-  return AUTH_WALL_PATTERNS.some((p) => p.test(url));
-}
+// Auth-wall + cookie-banner + future-quirk detection lives in
+// services/browser_quirks/ — see that module for the 2-tier
+// (fast → LLM) detector pipeline. isAuthWallUrl stays used here
+// only for Phase A's discovery pre-filter (we skip login paths
+// before we even goto them).
 
 /** Per-action cap. Stagehand v3 has no built-in act timeout, and on
  *  sites with aggressive redirects (together.ai → signin) we've seen
@@ -318,12 +302,47 @@ export async function runStagehandHybrid(
   const turns: HybridSessionLog['turns'] = [];
   let outcome: string = 'task_complete';
   let endIso = '';
-  // Count how often the browser landed behind a login/OAuth wall. If
-  // the fraction is high (≥ half the checklist turns) we mark the
-  // session 'abandoned' — the environment blocked enough evidence
-  // gathering that reporting as task_complete would be misleading.
-  let authWallHits = 0;
-  let authWallBlockedChecklist = 0;
+  // Per-quirk counters. Registry in services/browser_quirks/.
+  // quirkHits is surfaced into sessionLog.quirks so the scoring
+  // adapters + diagnosis prompt see "X sessions blocked by cookie
+  // consent banners" rather than having to infer it.
+  const quirkHits: Record<string, number> = {};
+  let quirkBlockedChecklist = 0;
+  const recordQuirkHit = (name: string) => {
+    quirkHits[name] = (quirkHits[name] ?? 0) + 1;
+  };
+
+  // Bookkeeping helper: run all registered quirk detectors against
+  // the current page state, recover on hit, record the turn.
+  async function checkAndHandleQuirks(
+    phase: QuirkContext['phase'],
+    currentUrl: string,
+    onBlock: (note: string, quirk: BrowserQuirk) => Promise<void>,
+  ): Promise<{ triggered: BrowserQuirk | null; recovered: boolean }> {
+    const ctx: QuirkContext = {
+      page: stagehand.context.pages()[0],
+      url: currentUrl,
+      phase,
+      targetUrl: args.url,
+      recoverTimeoutMs: 12_000,
+    };
+    const det = await runDetectors(BROWSER_QUIRKS, ctx);
+    if (!det) return { triggered: null, recovered: false };
+    recordQuirkHit(det.quirk.name);
+    let rec = { recovered: false, note: '' };
+    try {
+      rec = await raceWithTimeout(
+        det.quirk.recover(ctx),
+        ctx.recoverTimeoutMs,
+        `quirk.${det.quirk.name}.recover`,
+      );
+    } catch (err) {
+      rec.note = `recover timed out: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    const note = `${det.quirk.name}: ${det.hit.note ?? ''} ${rec.note ? `· recover=${rec.note}` : ''}`.trim();
+    await onBlock(note, det.quirk);
+    return { triggered: det.quirk, recovered: rec.recovered };
+  }
 
   // Absolute run-level deadline. If any phase hangs past this we bail
   // with outcome='patience_exceeded' and let the sequential chain's
@@ -471,9 +490,9 @@ export async function runStagehandHybrid(
       .filter((p) => !visitedPaths.has(p))
       .filter((p) => !p.includes('#') && !/\.(pdf|png|jpg|jpeg|gif|svg)$/i.test(p))
       // Skip paths that obviously gate on auth — we can't get past them
-      // and crawling them burns Phase A budget. isAuthWall() uses full
+      // and crawling them burns Phase A budget. isAuthWallUrl uses full
       // URL patterns, so we synthesise a fake URL to test the path.
-      .filter((p) => !isAuthWall(`https://example${p}`))
+      .filter((p) => !isAuthWallUrl(`https://example${p}`))
       .slice(0, MAX_DISCOVERY);
 
     if (toVisit.length > 0) {
@@ -602,38 +621,24 @@ export async function runStagehandHybrid(
           `checklist ${item.id}`,
         )) as { success?: boolean };
 
-        // Post-act: did the browser end up on an auth wall? If yes,
-        // the act didn't genuinely verify anything — record as blocked
-        // (env constraint) and try to return to the target URL so the
-        // next checklist item starts from the landing page again.
+        // Post-act: any registered browser quirk present on the
+        // resulting page? Harness detects auth walls, cookie banners,
+        // etc, attempts recovery, and tags the turn blocked.
         const postUrl = (() => {
           try { return (page as { url(): string }).url(); } catch { return ''; }
         })();
-        if (isAuthWall(postUrl)) {
-          authWallHits += 1;
-          authWallBlockedChecklist += 1;
-          try {
-            await raceWithTimeout(
-              (page as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
-                args.url, { waitUntil: 'domcontentloaded', timeoutMs: 10_000 } as unknown,
-              ),
-              12_000,
-              `auth-wall recovery goto`,
-            );
-            await new Promise((r) => setTimeout(r, 800));
-          } catch {
-            /* recovery best-effort */
-          }
+        const quirk = await checkAndHandleQuirks('C', postUrl, async (note, q) => {
+          quirkBlockedChecklist += 1;
           await captureTurn({
             page,
             action: 'act',
-            reasoning: `checklist ${item.id}: blocked by auth-wall at ${postUrl}`,
+            reasoning: `checklist ${item.id}: ${note}`,
             instruction: item.task,
             target: item.id,
-            outcomeTag: 'blocked',
+            outcomeTag: (q.classifyBlockedAs ?? 'blocked'),
           });
-          continue;
-        }
+        });
+        if (quirk.triggered) continue;
 
         await captureTurn({
           page,
@@ -659,14 +664,14 @@ export async function runStagehandHybrid(
       }
     }
 
-    // If the auth wall blocked more than half the checklist we treat
-    // the session as abandoned — the scoring adapter + diagnosis then
+    // If quirks blocked more than half the checklist we treat the
+    // session as abandoned — the scoring adapter + diagnosis then
     // know the low coverage is environmental, not a site defect.
     const checklistCount = (args.checklist ?? []).length;
-    if (checklistCount > 0 && authWallBlockedChecklist >= Math.ceil(checklistCount / 2)) {
+    if (checklistCount > 0 && quirkBlockedChecklist >= Math.ceil(checklistCount / 2)) {
       outcome = 'abandoned';
       console.warn(
-        `[stagehand_hybrid] ${authWallBlockedChecklist}/${checklistCount} checklist items hit auth-wall — outcome=abandoned`,
+        `[stagehand_hybrid] ${quirkBlockedChecklist}/${checklistCount} checklist items blocked by browser quirks — outcome=abandoned`,
       );
     }
 
@@ -700,33 +705,21 @@ export async function runStagehandHybrid(
               `phase_d ${pa.id}`,
             )) as { success?: boolean };
 
-            // Same auth-wall recovery as Phase C so persona exploration
-            // doesn't all collapse into one login landing page.
+            // Post-act quirk handling (harness shared with Phase C).
             const postUrl = (() => {
               try { return (page as { url(): string }).url(); } catch { return ''; }
             })();
-            if (isAuthWall(postUrl)) {
-              authWallHits += 1;
-              try {
-                await raceWithTimeout(
-                  (page as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
-                    args.url, { waitUntil: 'domcontentloaded', timeoutMs: 10_000 } as unknown,
-                  ),
-                  12_000,
-                  `auth-wall recovery goto (phase_d)`,
-                );
-                await new Promise((r) => setTimeout(r, 800));
-              } catch { /* best-effort */ }
+            const quirk = await checkAndHandleQuirks('D', postUrl, async (note, q) => {
               await captureTurn({
                 page,
                 action: 'act',
-                reasoning: `phase_d_persona ${pa.id}: blocked by auth-wall at ${postUrl}`,
+                reasoning: `phase_d_persona ${pa.id}: ${note}`,
                 instruction: pa.action,
                 target: pa.id,
-                outcomeTag: 'blocked',
+                outcomeTag: (q.classifyBlockedAs ?? 'blocked'),
               });
-              continue;
-            }
+            });
+            if (quirk.triggered) continue;
 
             await captureTurn({
               page,
@@ -815,6 +808,7 @@ export async function runStagehandHybrid(
     duration_sec: Number(durationSec.toFixed(3)),
     turns,
     screenshot_paths: screenshotPaths,
+    quirks: Object.keys(quirkHits).length > 0 ? quirkHits : undefined,
   };
 
   return { sessionLog, screenshotPaths };

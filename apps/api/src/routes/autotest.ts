@@ -465,6 +465,12 @@ export async function runStagehandHybridAndPersist(args: {
     { id: '_structured_report', answer: JSON.stringify(structuredReport) },
     { id: '_quality_breakdown', answer: JSON.stringify(qualityBreakdown) },
     { id: '_source', answer: 'stagehand_hybrid' },
+    // Browser-quirk hits from the run — auth_wall, cookie_consent, etc.
+    // Stored as a JSON sentinel so the diagnosis aggregator can sum
+    // across sessions without a schema change. See browser_quirks/.
+    ...((sessionLog as { quirks?: Record<string, number> }).quirks
+      ? [{ id: '_quirks', answer: JSON.stringify((sessionLog as { quirks: Record<string, number> }).quirks) }]
+      : []),
   ];
 
   const [inserted] = await db.insert(schema.testReports).values({

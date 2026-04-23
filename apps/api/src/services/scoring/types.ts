@@ -66,6 +66,12 @@ export interface SessionLog {
   duration_sec: number;
   turns: SessionTurn[];
   screenshot_paths: string[];
+  /** Environmental obstacles (auth walls, cookie banners, etc.)
+   *  registered by the browser-quirk harness during the run. Keyed by
+   *  quirk name → hit count. The diagnosis aggregator surfaces this
+   *  so synthesis prompts can tell "low coverage caused by X banner"
+   *  apart from "low coverage because product is genuinely broken". */
+  quirks?: Record<string, number>;
 }
 
 // ─── Checklist ──────────────────────────────────────────────────────

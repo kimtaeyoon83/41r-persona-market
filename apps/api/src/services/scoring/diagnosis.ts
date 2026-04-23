@@ -81,6 +81,13 @@ export interface DiagnosisAggregate {
   painPointFrequency: Array<{ description: string; count: number; citations: PainPointCitation[] }>;
   allPositiveSignals: string[];
   allRecommendations: string[];
+  /** Browser-quirk hits summed across every persona session that ran
+   *  in browser mode. Keyed by quirk name; values are total hits.
+   *  Feeds into the synthesis prompt so the LLM can contextualise
+   *  low-coverage sessions ("12 auth_wall hits across 3 browser runs
+   *  → the site's checklist coverage here reflects an automation
+   *  limitation, not a product defect"). */
+  quirksEncountered: Record<string, number>;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -123,6 +130,7 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
       painPointFrequency: [],
       allPositiveSignals: [],
       allRecommendations: [],
+      quirksEncountered: {},
     };
   }
 
@@ -166,6 +174,7 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
   const allPositiveSignals = new Set<string>();
   const allRecommendations = new Set<string>();
   const quality: number[] = [];
+  const quirksEncountered: Record<string, number> = {};
 
   for (const r of reports) {
     const cl = (r.checklistResults as Array<{ id: string; status: string; memo: string }> | null) ?? [];
@@ -198,6 +207,18 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
       answers.find((a) => a.id === '_quality_breakdown')?.answer,
     );
     const source = String(answers.find((a) => a.id === '_source')?.answer ?? (r.isPersonaTest ? 'persona' : 'manual'));
+
+    // Sum _quirks sentinel into aggregate counter.
+    const quirksSentinel = parseSentinelJson<Record<string, number>>(
+      answers.find((a) => a.id === '_quirks')?.answer,
+    );
+    if (quirksSentinel) {
+      for (const [k, v] of Object.entries(quirksSentinel)) {
+        if (typeof v === 'number' && Number.isFinite(v)) {
+          quirksEncountered[k] = (quirksEncountered[k] ?? 0) + v;
+        }
+      }
+    }
 
     // Outcome reconstruction from outcome_weight — not perfect, but
     // gives the synth prompt a label. Weight → outcome inverse lookup:
@@ -311,6 +332,7 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
     painPointFrequency,
     allPositiveSignals: [...allPositiveSignals],
     allRecommendations: [...allRecommendations],
+    quirksEncountered,
   };
 }
 
@@ -337,6 +359,7 @@ const SYNTH_SYSTEM = `당신은 UX 리서치 분석가입니다. 여러 AI 페�
 - **'session_limited' 카테고리를 숨기지 마세요.** 어떤 persona 가 세션 중도 이탈했다면 그것도 진단의 일부.
 - severity=high 는 태스크 실패를 유발한 마찰만.
 - **검증 불가한 A/B 수치 약속 금지** — "R1 적용 시 +X% 개선" 같은 문장 만들지 마세요.
+- **quirksEncountered 맥락화**: 이 필드가 비어있지 않다면 browser 자동화가 환경적 장애물(auth wall, cookie consent, captcha 등)을 만났다는 뜻. 관련 checklist 실패를 "제품 결함" 으로 해석하지 말고 "자동화 환경 한계" 로 구분해서 신뢰도 섹션에 명시하세요. 예: \`{"auth_wall": 4, "cookie_consent": 2}\` → "browser 세션의 6개 체크리스트 실패는 로그인/쿠키 배너 차단에 기인 — 실제 사용자는 이 장애물을 이미 통과한 상태이므로 별도 수동 검증 필요".
 
 ## 출력 형식
 \`\`\`markdown
@@ -416,6 +439,7 @@ export async function synthesizeDiagnosis(
     })),
     commonPositiveSignals: aggregate.allPositiveSignals.slice(0, 10),
     commonRecommendations: aggregate.allRecommendations.slice(0, 15),
+    quirksEncountered: aggregate.quirksEncountered,
   };
 
   const userMsg = `다음 aggregate 데이터로 UX 진단 리포트를 작성하세요.\n\n` +
