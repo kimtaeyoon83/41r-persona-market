@@ -66,7 +66,7 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
 pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
-pnpm --filter api test      # Run vitest (98 tests)
+pnpm --filter api test      # Run vitest (185 tests)
 pnpm --filter api db:generate  # Emit a new versioned migration from schema changes → apps/api/drizzle/*.sql
 pnpm --filter api db:migrate   # Apply pending migrations to DATABASE_URL (preferred for Railway deploys)
 pnpm --filter api db:push      # Dev only: push schema directly, bypassing migration files
@@ -87,7 +87,8 @@ cd apps/persona-engine
 
 ### Backend (apps/api)
 - All routes under `src/routes/`, mounted in `src/index.ts`
-- Services in `src/services/` — llm.ts, solana.ts, autotest.ts, matching.ts, sas.ts, r2.ts
+- Services in `src/services/` — llm.ts, solana.ts, autotest.ts, matching.ts,
+  sas.ts, r2.ts, dashboard.ts (landing aggregate), scoring/, browser_quirks/
 - Database: Drizzle ORM with PostgreSQL, schema in `src/db/schema.ts`
 - LLM models: Claude Sonnet 4.6 (generation), Claude Haiku 4.5 (scoring/extraction)
 - JSON from LLM: always use `parseJsonSafe()` which has `repairJson()` fallback
@@ -97,7 +98,8 @@ cd apps/persona-engine
 ### Frontend (apps/web)
 - Next.js 14 App Router, all pages in `app/`
 - Shared API URL: `import { API_BASE } from '@/lib/api'` — never hardcode localhost
-- API client: `lib/api.ts` exports `testApi`, `reportApi`, `personaApi`, `testerApi`, `autoTestApi`
+- API client: `lib/api.ts` exports `testApi`, `reportApi`, `personaApi`,
+  `testerApi`, `autoTestApi`, `dashboardApi` (landing KPIs / activity)
 - Loading: use `<LoadingSpinner>` or `<Loading>` from `components/loading.tsx`
 - Errors: use `<ErrorDisplay message={...} onRetry={...}>` from `components/error-display.tsx`
 - Design system: Hi-Fi dark theme built on OKLCH neutrals + Solana brand accent
@@ -188,8 +190,11 @@ await signedRequest('/api/...', { method: 'POST', body }, { wallet, signMessage 
   Useful for browser E2E that can't easily mock web3.js internals.
 
 ### Testing
-- Vitest for API unit tests (`apps/api/src/__tests__/`) — **98 tests**
-  (auth, cors, env, schemas, settlement-worker + prior suites)
+- Vitest for API unit tests (`apps/api/src/__tests__/`) — **185 tests**
+  (auth, cors, env, schemas, settlement-worker, scoring suites, and the
+  **43-test dashboard suite** covering timeAgo / spark7* / countInWindow /
+  avgInWindow / formatCountDelta / formatSumDelta / formatAvgDelta — all
+  pure helpers in `services/dashboard.ts`, no DB fixtures needed)
 - Pytest for persona-engine (`apps/persona-engine/tests/`) — 35 tests
 - Browser E2E harness at `/tmp/e2e-flows.py` (Phantom mock via tweetnacl +
   playwright). Covers tester register → report submit → persona generate
@@ -215,6 +220,61 @@ Route table (default is now **stagehand_hybrid** as of 2026-04-19):
 - **persona_agent native**: In-process vision+decision loop with patience
   budget. Kept for research but trips mid-flow on complex SPAs.
 - Legacy `services/autotest.ts` path still exists when `USE_PERSONA_ENGINE=0`.
+
+## Landing Dashboard (`/` + `/api/dashboard`)
+
+One-shot aggregate that powers every live widget on the Home page.
+**Never put hardcoded KPIs / lists / sparklines back in `apps/web/app/page.tsx`** —
+thread them through `GET /api/dashboard?role=&wallet=` instead.
+
+```
+role=company | tester             # required
+wallet=<solana pubkey>            # optional — no wallet = platform-wide view
+```
+
+Response shape (see `apps/api/src/services/dashboard.ts` for the source of
+truth; mirrored in `apps/web/lib/api.ts` for the client):
+
+```ts
+{
+  role, wallet,
+  kpis:          [{ label, value, unit?, delta, spark: number[7] }, x4],
+  primary_list:  [{ id, title, status, meta, pay, tone, href }, x≤4],
+  activity:      [{ at, t, text, kind, tone, meta? }, x≤20],
+  stats:         { total_tests, total_personas },
+  top_personas?: [{ id, tester_addr, voice_sample, vector, avg_quality,
+                    report_count }, x3],          // company view
+  my_persona?:   PersonaSummary | null,           // tester view (falls back to
+                                                  //  top community persona when
+                                                  //  wallet is absent)
+}
+```
+
+- **Delta is always 7d vs prior 7d**, even in the no-wallet branch, so the
+  landing never feels static. Formatters: `formatCountDelta`,
+  `formatSumDelta`, `formatAvgDelta`. Keep `spark` and `delta` on the same
+  window — otherwise "+3 this week" disagrees with a 14-day chart.
+- **Sparklines are 7 chronological points** (index 0 = 6d ago, index 6 =
+  today). Use `spark7` for counts, `spark7Avg` for avg-style (null bucket →
+  0), `spark7Cumulative` for running totals like Tier.
+- **Activity is a heterogeneous feed** (`kind: 'report' | 'test' | 'settlement'`)
+  sorted by `at` desc, capped at 20. Tone is auto-assigned from quality:
+  ≥4.0 success / <3.0 warn / else neutral. Tests are `accent`, settlements `info`.
+- **No-wallet UX**: the Home page shows a `Platform view — connect a wallet…`
+  hint, KPIs become platform-wide, and `my_persona` falls back to the
+  highest-avg-quality persona so the radar card is never empty.
+
+### Diagnosis / retry owner gate (devnet beta)
+
+`POST /api/test/:id/diagnosis` and `POST /api/test/:id/retry-autotest` used
+to require `test.companyAddr === signedWallet`. On devnet beta that check
+is **intentionally dropped** — any signed wallet may regenerate. Rationale:
+lets the team and demo viewers drive the full flow without needing to hold
+the exact owner key. `requireSignedRequest` still gates both routes, so
+anonymous writes are still refused. When promoting to mainnet, re-instate
+the owner check in `apps/api/src/routes/test.ts` at the `/retry-autotest`
+and `/:id/diagnosis` handlers (the deleted lines are in the
+`feat(api,web): realtime dashboard + loosened diagnosis gate` commit).
 
 ## Experiment Dashboard
 
@@ -372,6 +432,14 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   `.hf-card` / `.hf-card-inset`. Same for chips (`.chip.<variant>`) and
   buttons (`.hf-btn`). Migrating older pages to these classes is always
   a safe follow-up.
+- Hardcode KPIs / sparklines / activity back into `apps/web/app/page.tsx`.
+  Every widget on the landing must read from `dashboardApi.get(role, wallet)`
+  so the page stays live. If you need a new metric, add it to
+  `services/dashboard.ts` and surface it through the same payload.
+- Re-add the owner check on `POST /api/test/:id/diagnosis` or
+  `/retry-autotest` while on devnet beta — it's intentionally off (see
+  Landing Dashboard §). Flip it back on as part of the mainnet hardening
+  checklist, not as a drive-by fix.
 
 ## Investor Dashboard Narrative
 
