@@ -132,10 +132,8 @@ export default function TestDetailPage() {
     }
   }
 
-  const canRetry =
-    !!publicKey &&
-    !!data &&
-    (data.test.companyAddr ? data.test.companyAddr === publicKey : true);
+  // Devnet beta: any connected wallet may retry / generate diagnosis.
+  const canRetry = !!publicKey && !!data;
 
   async function handleGenerateDiagnosis() {
     if (!publicKey || !signMessage || !data) return;
@@ -574,7 +572,7 @@ export default function TestDetailPage() {
                   No diagnosis generated yet.{' '}
                   {canRetry
                     ? 'Click the Generate button above to create one.'
-                    : 'Only the owning company wallet can generate this.'}
+                    : 'Connect a wallet to generate.'}
                 </p>
               </div>
             )}

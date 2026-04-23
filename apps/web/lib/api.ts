@@ -125,6 +125,58 @@ export const personaApi = {
   list: () => request('/api/personas'),
 };
 
+// ─── Dashboard API ───────────────────────────────────
+export interface DashboardKpi {
+  label: string;
+  value: string;
+  unit?: string;
+  delta: string;
+  /** 7 chronological datapoints (index 0 = 6 days ago, index 6 = today). */
+  spark: number[];
+}
+export interface DashboardListItem {
+  id: string;
+  title: string;
+  status: string;
+  meta: string;
+  pay: string;
+  tone: 'success' | 'warn' | 'info' | 'accent' | '';
+  href: string;
+}
+export interface DashboardActivityItem {
+  t: string;
+  text: string;
+  at: string;
+  kind: 'report' | 'test' | 'settlement';
+  tone: 'success' | 'warn' | 'info' | 'accent' | '';
+  meta?: string;
+}
+export interface PersonaSummary {
+  id: string;
+  tester_addr: string;
+  voice_sample: string;
+  vector: Record<string, unknown>;
+  avg_quality: number | null;
+  report_count: number;
+}
+export interface DashboardResponse {
+  role: 'company' | 'tester';
+  wallet: string | null;
+  kpis: DashboardKpi[];
+  primary_list: DashboardListItem[];
+  activity: DashboardActivityItem[];
+  stats: { total_tests: number; total_personas: number };
+  top_personas?: PersonaSummary[];
+  my_persona?: PersonaSummary | null;
+}
+export const dashboardApi = {
+  get: (role: 'company' | 'tester', wallet?: string | null) => {
+    const params = new URLSearchParams({ role });
+    if (wallet) params.set('wallet', wallet);
+    return request(`/api/dashboard?${params.toString()}`) as Promise<DashboardResponse>;
+  },
+};
+
 // ─── Auto Test APIs ──────────────────────────────────
 export const autoTestApi = {
   run: (data: { test_id: string; persona_id: string; payment_tx?: string }) =>

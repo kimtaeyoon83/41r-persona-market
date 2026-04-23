@@ -225,10 +225,7 @@ router.post('/:id/retry-autotest',
         res.status(404).json({ error: 'Test not found' });
         return;
       }
-      if (test.companyAddr !== company_wallet) {
-        res.status(403).json({ error: 'only the owning company may retry this test' });
-        return;
-      }
+      // Devnet beta: any signed wallet may retry any test (was: owner-only).
 
       // Re-match personas deterministically (same path /register uses)
       const allPersonas = await db.select().from(schema.personas).where(eq(schema.personas.isActive, true));
@@ -424,10 +421,7 @@ router.post(
         res.status(404).json({ error: 'Test not found' });
         return;
       }
-      if (test.companyAddr !== company_wallet) {
-        res.status(403).json({ error: 'only the owning company may generate this diagnosis' });
-        return;
-      }
+      // Devnet beta: any signed wallet may generate diagnosis (was: owner-only).
 
       const reports = await db.select({ id: schema.testReports.id })
         .from(schema.testReports)

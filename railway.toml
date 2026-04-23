@@ -1,6 +1,6 @@
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "apps/persona-engine/Dockerfile"
+dockerfilePath = "apps/api/Dockerfile"
 
 [deploy]
 restartPolicyType = "ON_FAILURE"
