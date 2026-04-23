@@ -11,6 +11,8 @@ import autotestBscRouter from './routes/autotest-bsc.js';
 import helloRouter from './routes/hello.js';
 import x402DemoRouter from './routes/x402-demo.js';
 import authRouter from './routes/auth.js';
+import devRouter from './routes/dev.js';
+import { devHarnessEnabled } from './middleware/dev_auth.js';
 import {
   createX402Middleware,
   createFallbackPaymentMiddleware,
@@ -81,6 +83,13 @@ app.use('/api/personas', personaRouter);
 app.use('/api/autotest', autotestRouter);
 app.use('/api/autotest-bsc', autotestBscRouter);
 app.use('/api/x402-demo', x402DemoRouter);
+
+// Dev harness — only mounted when DEV_TEST_KEY is set in env.
+// See middleware/dev_auth.ts + routes/dev.ts. Absent env ⇒ 404.
+if (devHarnessEnabled) {
+  app.use('/api/dev', devRouter);
+  logger.info('[dev] harness mounted at /api/dev (DEV_TEST_KEY is set)');
+}
 
 // Static file serving for screenshots (local dev fallback, production uses R2 CDN)
 if (process.env.NODE_ENV !== 'production') {
