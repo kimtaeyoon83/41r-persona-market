@@ -3,6 +3,15 @@
 41rpm API(Express)가 persona_agent의 분석 엔진을 HTTP로 호출하는 방식.
 엔진은 stateless — Solana/USDC/DB는 기존 Express 레이어가 계속 담당.
 
+> **⚠️ 2026-04-22 업데이트**: `stagehand_hybrid` (기본 모드)는 더 이상
+> persona-engine `/analyses/score`를 호출하지 않습니다. 체크리스트 /
+> 설문 / structured_report / quality 어댑터가 전부 Node로 포팅돼
+> `apps/api/src/services/scoring/*` 에 인-프로세스 실행됩니다. 이
+> 문서의 "HTTP 계약" 부분은 `mode=text` 와 legacy
+> `persona_agent_browser` 모드에만 유효합니다. stagehand_hybrid 경로
+> 변경 시 `routes/autotest.ts:439` 주변 + `CLAUDE.md` §Diagnosis
+> validation pipeline 을 참조하세요.
+
 ## 구성
 
 ```

@@ -66,7 +66,7 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
 pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
-pnpm --filter api test      # Run vitest (185 tests)
+pnpm --filter api test      # Run vitest (204 tests)
 pnpm --filter api db:generate  # Emit a new versioned migration from schema changes → apps/api/drizzle/*.sql
 pnpm --filter api db:migrate   # Apply pending migrations to DATABASE_URL (preferred for Railway deploys)
 pnpm --filter api db:push      # Dev only: push schema directly, bypassing migration files
@@ -190,11 +190,14 @@ await signedRequest('/api/...', { method: 'POST', body }, { wallet, signMessage 
   Useful for browser E2E that can't easily mock web3.js internals.
 
 ### Testing
-- Vitest for API unit tests (`apps/api/src/__tests__/`) — **185 tests**
-  (auth, cors, env, schemas, settlement-worker, scoring suites, and the
+- Vitest for API unit tests (`apps/api/src/__tests__/`) — **204 tests**
+  (auth, cors, env, schemas, settlement-worker, scoring suites, the
   **43-test dashboard suite** covering timeAgo / spark7* / countInWindow /
-  avgInWindow / formatCountDelta / formatSumDelta / formatAvgDelta — all
-  pure helpers in `services/dashboard.ts`, no DB fixtures needed)
+  avgInWindow / formatCountDelta / formatSumDelta / formatAvgDelta, and
+  the **14-test diagnosis suite** covering `validateAuditCitations` +
+  `computeFidelityBand` + `clusterPainPointDescriptions` — the
+  `clusterPainPointDescriptions` tests mock `services/anthropic_client`
+  via `vi.mock` so the LLM path is exercised without real API calls)
 - Pytest for persona-engine (`apps/persona-engine/tests/`) — 35 tests
 - Browser E2E harness at `/tmp/e2e-flows.py` (Phantom mock via tweetnacl +
   playwright). Covers tester register → report submit → persona generate
@@ -214,9 +217,13 @@ Route table (default is now **stagehand_hybrid** as of 2026-04-19):
 | `"text"`                                | persona-engine text mode      | ~5¢      | Bulk experiments, fast       |
 | `"persona_agent"` / `"persona_agent_browser"` | persona_agent native browser | ~17¢     | Persona-fidelity research    |
 
-- **stagehand_hybrid**: Node-side Stagehand drives Playwright, persona-engine
-  `/analyses/score` runs checklist/questionnaire/report adapters. Produces
-  actionable pain_points tied to real UI elements.
+- **stagehand_hybrid**: Node-side Stagehand drives Playwright. Scoring
+  (checklist / questionnaire / structured_report / quality breakdown) is
+  now **fully in-process TypeScript** — see `services/scoring/*` ported
+  from the persona-engine Python adapters on 2026-04-22. Produces
+  actionable pain_points tied to real UI elements. The cross-language
+  hop to persona-engine `/analyses/score` is gone; persona-engine is
+  only needed for `mode=text` and the legacy `persona_agent` paths.
 - **persona_agent native**: In-process vision+decision loop with patience
   budget. Kept for research but trips mid-flow on complex SPAs.
 - Legacy `services/autotest.ts` path still exists when `USE_PERSONA_ENGINE=0`.
@@ -278,12 +285,106 @@ and `/:id/diagnosis` handlers (the deleted lines are in the
 
 ## Experiment Dashboard
 
-- `/experiment` — list of active tests with manual/persona/paired counts
-- `/experiment/[testId]` — 6 charts + Key findings + By-cohort breakdown
-- `/api/reports/compare/:testId` — aggregates headline + cohort metrics + findings
-- Cohort key defaults to `crypto_experience` (4 buckets). Matching personas to
-  humans within same demographic reveals "persona ≈ human at 100% in novice
-  cohort, diverges in expert cohort" — the real investor story.
+- `/experiment` — list of active tests. Tests where `manualCount === 0 ||
+  personaCount === 0` are tagged **`pending comparison`** so users know
+  up front that the dashboard will be partial. Don't filter them out —
+  one-sided tests still have a detail page users may want to reach.
+- `/experiment/[testId]` — charts + Key findings + By-cohort + **Cohort ×
+  checklist matrix** + per-item breakdown. When `manual.count === 0 ||
+  persona.count === 0` the page renders a single-side banner and
+  **hides** cohort / convergence / confusion / paired scatter / rating
+  distribution — those panels either show fake agreement or broken
+  charts when one side is empty (we hit this on a test with 3 humans
+  + 0 personas: rating histogram plotted the persona=0 bucket as a tall
+  bar). Keep: headline, findings, per-item breakdown.
+- `/api/reports/compare/:testId` — aggregates headline + cohort metrics +
+  findings + **`by_cohort_item`** cross-table. Each cell carries
+  `{cohort, itemId, humanN, personaN, humanFailRate, personaFailRate,
+  flag}` with flag ∈ `both-fail | persona-worse | human-worse |
+  both-pass | split | insufficient`. `insufficient` fires whenever
+  either side has n<2 so a cell is always either actionable or clearly
+  unreadable — not misleadingly shown as "0%/0%".
+- `CohortMetrics` numeric fields (`humanMeanQuality`, `personaMeanQuality`,
+  `qualityAbsDiff`, `itemAgreementRate`, `ksStatisticQuality`) are
+  **nullable when their side is empty** (see `services/comparison.ts`
+  `computeCohortMetrics`). Previously `|0 − personaMean|` rendered as a
+  real gap in the dashboard; `findings.ts` + the UI now skip null cells.
+- Cohort key defaults to `crypto_experience` (4 buckets). Matching personas
+  to humans within same demographic reveals "persona ≈ human at 100% in
+  novice cohort, diverges in expert cohort" — the real investor story.
+
+## Diagnosis validation pipeline (`services/scoring/diagnosis.ts`)
+
+A UX diagnosis for a test is **audit-grounded markdown** — every claim
+traces back to a concrete report row, and the reader sees up front how
+much to trust persona-derived findings. Four mechanisms layered on top
+of the base Sonnet synthesis call:
+
+### 1. Audit-chain citations
+- `PainPointCitation` carries `{reportId, evidenceTurn, isPersona,
+  personaTester, severity, description}`. The synthesis prompt instructs
+  the model to cite sources as `[<reportId8>·t<turn>]` and
+  `validateAuditCitations()` scans the output for any id not present in
+  the aggregate's `perPersona[].reportId`.
+- Unknown citations get a trailing `> ⚠ **Audit check**: N citation(s)
+  reference report IDs not in this test's data` footer — the
+  DiagnosisMarkdown UI renders this as a red warning card.
+- The validator regex matches **only inside `[...]` brackets** —
+  matching bare hex across the whole document was a bug that flagged
+  hex colour codes like `14F195` (Solana brand) as hallucinated report
+  IDs. There's a dedicated regression test for this.
+
+### 2. Confirmation labels (both / human-only / persona-only)
+- Pain-points are sourced from two places: persona reports' upstream
+  `_structured_report` sentinel (from Stagehand+Node scoring), and a
+  Task-#12 Haiku pass that extracts pain-points from **manual reports'**
+  free-text. Without the second pass, confirmation labels were
+  permanently "persona-only" — humans had no seat in the pain-point map.
+- Each `painPointFrequency` entry splits citations by `isPersona` and
+  the prompt is required to tag each pain-point with
+  `confirmation: both | human-only | persona-only`. UI convention:
+  persona-only gets a "수동 재현 필요" caveat in the reliability
+  section.
+
+### 3. Semantic clustering (unlock "both" label)
+- Before rendering, `clusterPainPointDescriptions()` batches every
+  description into a single Haiku call that groups semantically
+  equivalent phrasings — "로그인 벽 접근 불가" and "지갑 연결 시 진입
+  차단" collapse into one canonical cluster. Without this, the
+  whitespace+lowercase dedup in `normalizeStr()` left each phrasing
+  as its own entry and `both` never fired.
+- Failure mode is identity-map (each description as its own cluster),
+  not a crash — a transient LLM outage still ships a diagnosis.
+- Cost ~$0.0015/diagnosis. Exported so tests can mock `client.messages.
+  create` via `vi.mock('../services/anthropic_client.js', …)`.
+
+### 4. Fidelity gate banner
+- `computeFidelityBand(itemAgreementRate, pairedCount)` → `'high' |
+  'medium' | 'low' | 'n/a'`. Thresholds mirror `services/findings.ts`
+  (paired ≥ 5 + agreement ≥ 0.6 ⇒ high, ≥ 0.4 ⇒ medium, else low; 0
+  paired ⇒ n/a). Prepended to the markdown output as a blockquote with
+  one of `⚠️ / ✅ / ℹ️ / 🟡` so the DiagnosisMarkdown React component
+  can pick it out and render as a coloured banner card.
+- Recommendations are required by prompt to carry
+  `[해결 대상: N순위 <pain point 이름>]` so R1..Rn trace back to
+  specific pain points. The LLM is allowed to say
+  `[해결 대상: 없음 — <alternative evidence>]` when no rank fits,
+  which is preferred over inventing a rank.
+
+### Client-side rendering split (`components` in page.tsx files)
+- `/company/test/[id]` diagnosis tab parses the markdown into
+  `{banner, body, auditWarning}` via `parseDiagnosisMarkdown()`, then
+  renders each as a separate styled card. Don't hand the raw markdown
+  back to `ReactMarkdown` — the banner + audit-footer would turn into
+  plain blockquotes and lose their colour coding.
+- `/report/[reportId]` renders a **Structured Report** section parsed
+  from the `_structured_report` sentinel: summary + ux_scores bars +
+  pain_points (severity chips + evidence_turn) + positive_signals +
+  recommendations. Before Task #22 this data was stored but never
+  surfaced — the filter-only codepath hid it entirely. `_structured_
+  report` / `_quality_breakdown` / `_source` / `_quirks` are still
+  filtered out of the generic Questionnaire Answers list; the
+  Structured Report section is the structured rendering.
 
 ## LLM Usage Tracking
 
@@ -295,6 +396,13 @@ and `/:id/diagnosis` handlers (the deleted lines are in the
   AsyncLocalStorage; tag via `withRoute('...', () => client.messages.create(...))`
 - `scripts/usage-summary.ts` — totals by model/service/route, heaviest calls,
   duplicate-prompt detection
+- Route tags used by the diagnosis pipeline:
+  `diagnosis` (Sonnet synthesis),
+  `diagnosis.cluster_pain_points` (Haiku semantic clustering),
+  `diagnosis.human_pain_points` (Haiku per-manual-report extraction).
+  Each diagnosis run is one `diagnosis` + one `cluster_pain_points` +
+  N `human_pain_points` (parallel across manual reports with no
+  upstream `_structured_report` sentinel).
 
 ## Cost Optimization Notes (persona-engine)
 
@@ -440,6 +548,60 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   `/retry-autotest` while on devnet beta — it's intentionally off (see
   Landing Dashboard §). Flip it back on as part of the mainnet hardening
   checklist, not as a drive-by fix.
+- Replace the semantic clustering pass in `diagnosis.ts` with
+  whitespace+lowercase dedup. `normalizeStr()` still exists as a
+  **fallback** for when the clusterer has no input or the LLM call
+  fails; making it the primary path permanently blocks the `both`
+  confirmation label from ever firing (same phrasing from a human and
+  a persona become two separate entries).
+- Hand raw `_structured_report` / `_quality_breakdown` / `_source` /
+  `_quirks` sentinels to `ReactMarkdown` or the Questionnaire Answers
+  list — they're internal sentinels, not user-facing answers. Parse
+  them into the Structured Report section on `/report/[id]` (see
+  Diagnosis validation pipeline §).
+- Render the experiment page's cohort / convergence / confusion /
+  paired-scatter / rating-distribution panels when `manual.count === 0
+  || persona.count === 0`. They either silently show "0%" (reads as
+  "perfect agreement") or plot the zero bucket as a tall bar. The
+  single-side banner + hidden sections is the contract.
+- Leave `DEV_TEST_KEY` set on the production API longer than the
+  window needed to run the dev harness. `/api/dev/*` bypasses payment
+  verification and signed-request auth; the key must be rotated/removed
+  as soon as validation is done. `railway variable delete DEV_TEST_KEY
+  --service api && railway redeploy -y --service api` flips the routes
+  back to 404 (dev_auth.ts gate).
+
+## Dev harness (`/api/dev/*`)
+
+One-shot endpoints for driving the full pipeline without the wallet-
+signing loop. Entire router is mounted only when `DEV_TEST_KEY` is set
+(≥12 chars) — absent env ⇒ 404 via `middleware/dev_auth.ts`, which
+**loads `.env` at module init** (ESM imports run before `index.ts`'s
+`dotenv.config`, so without that early load the key-gate never fires
+in local dev).
+
+Routes:
+- `POST /tester` — create a tester wallet + profile (idempotent)
+- `POST /test` — create a test + auto-generate test cases via LLM
+  (long-running, ~90s on fresh target — use timeout ≥ 180s from clients)
+- `POST /report/manual` — submit a human report, runs quality scoring
+  + bumps `testsDone`
+- `POST /persona/recompute` — run `recomputePersona` (requires
+  testsDone ≥ 3). Returns `{personaId, versionNum, ...}` — note
+  **camelCase**, not snake_case; earlier E2E scripts missed the key
+  and silently got `id=undefined`.
+- `POST /autotest/trigger` — queue stagehand_hybrid + text runs for
+  matching personas (or a specific `persona_id`). Fire-and-forget:
+  the chain resolves in background, poll `/snapshot/:test_id` to see
+  `reports_by_mode: {stagehand_hybrid, text, manual}` increment.
+- `POST /diagnosis/generate` — full `generateAndStoreDiagnosis` pass
+- `POST /flow/full` — one-shot orchestration: company + test + test
+  cases + queue persona runs + create manual tester wallets (does not
+  submit manual reports; caller runs `/report/manual` per wallet).
+
+Key: sent via `x-dev-key` header on every call. The sentinel `204`
+test-count + `diagnosis.test.ts` verify the router is gated when the
+env var is absent.
 
 ## Investor Dashboard Narrative
 
@@ -455,3 +617,12 @@ alongside aggregates — the honest finding is:
 
 Keep this framing in mind when adding features or running experiments. Do not
 pitch a single aggregate ρ number without the cohort context.
+
+The **3-layer trust contract** the diagnosis ships with (fidelity band →
+confirmation label → audit citation) is what turns "LLM wrote an essay"
+into "reader can verify every claim traces to a report row". When
+considering a change that relaxes any of these, think in terms of what
+breaks if a company reads a persona-only pain point as a real product
+defect — the `both` / `human-only` / `persona-only` split is how we
+prevent that failure mode, and the semantic clustering pass is what
+makes that split meaningful.
