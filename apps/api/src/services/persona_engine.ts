@@ -163,20 +163,6 @@ export async function runAutoTestWithEngine(
 }
 
 /**
- * Health check — use during boot to confirm engine is reachable.
- * Returns false on any failure (timeouts included) so the API can fall back
- * to Stagehand.
- */
-export async function isEngineHealthy(): Promise<boolean> {
-  try {
-    const h = await client().health();
-    return h.status === 'ok';
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Whether new autotest requests should be routed through the engine.
  * Set `USE_PERSONA_ENGINE=1` in Railway env after engine is deployed.
  */

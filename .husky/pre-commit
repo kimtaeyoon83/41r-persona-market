@@ -1,0 +1,12 @@
+set -e
+
+echo "▸ [1/3] typecheck"
+pnpm -s typecheck
+
+echo "▸ [2/3] lint"
+pnpm -s lint
+
+echo "▸ [3/3] build"
+pnpm -s build
+
+echo "✓ pre-commit gates passed"

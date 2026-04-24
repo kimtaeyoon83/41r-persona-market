@@ -162,9 +162,3 @@ export function startSettlementWorker(): void {
   timer.unref?.();
 }
 
-export function stopSettlementWorker(): void {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
-}

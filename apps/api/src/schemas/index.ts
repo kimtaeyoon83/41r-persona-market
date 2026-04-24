@@ -80,15 +80,6 @@ export const retryAutotestBodySchema = z.object({
   modes: z.array(z.enum(['stagehand_hybrid', 'text'])).min(1).max(2).optional(),
 });
 
-export type RegisterTestBody = z.infer<typeof registerTestBodySchema>;
-export type RegisterTesterBody = z.infer<typeof registerTesterBodySchema>;
-export type UpdateTesterBody = z.infer<typeof updateTesterBodySchema>;
-export type SubmitReportBody = z.infer<typeof submitReportBodySchema>;
-export type AutotestRunBody = z.infer<typeof autotestRunBodySchema>;
-export type PersonaGenerateBody = z.infer<typeof personaGenerateBodySchema>;
-export type RetryAutotestBody = z.infer<typeof retryAutotestBodySchema>;
-export type GenerateDiagnosisBody = z.infer<typeof generateDiagnosisBodySchema>;
-
 // Returns an Express RequestHandler that validates req.body against the
 // schema. Kept fully generic so the route's param/query types aren't
 // narrowed when the handler chain is composed.

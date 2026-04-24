@@ -14,5 +14,5 @@ export const BROWSER_QUIRKS: BrowserQuirk[] = [
 ];
 
 export { runDetectors } from './types.js';
-export type { BrowserQuirk, QuirkContext, QuirkDetectionResult, QuirkRecoveryResult } from './types.js';
+export type { BrowserQuirk, QuirkContext } from './types.js';
 export { isAuthWallUrl } from './auth_wall.js';

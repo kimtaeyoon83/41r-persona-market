@@ -5,10 +5,13 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "test": "turbo test",
-    "lint": "turbo lint"
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "prepare": "husky"
   },
   "devDependencies": {
     "dotenv": "^16.6.1",
+    "husky": "^9.1.7",
     "tsx": "^4.21.0",
     "turbo": "^2.3.0",
     "typescript": "^5.7.0",
