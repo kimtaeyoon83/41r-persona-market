@@ -113,9 +113,9 @@ async function runAutoTest(job: AutoTestJob): Promise<void> {
   job.progress = 30;
 
   // 3. Browser automation (Stagehand) — per-action screenshots
-  let allBase64: string[] = [];          // base64 for LLM (capped at 6)
-  let allSteps: StepScreenshot[] = [];   // labeled step screenshots
-  let actionLog: string[] = [];
+  const allBase64: string[] = [];          // base64 for LLM (capped at 6)
+  const allSteps: StepScreenshot[] = [];   // labeled step screenshots
+  const actionLog: string[] = [];
   let stepCounter = 0;
 
   let stagehandInstance: { close(): Promise<void> } | null = null;

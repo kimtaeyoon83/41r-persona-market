@@ -96,7 +96,7 @@ router.post('/register', llmGenerateLimiter, requireSignedRequest, validateBody(
     await db.update(schema.tests).set({ status: 'active' }).where(eq(schema.tests.id, test.id));
 
     // Auto-test: match personas and queue
-    let autoTestJobs: Array<{ persona_id: string; tester_addr: string; job_id: string }> = [];
+    const autoTestJobs: Array<{ persona_id: string; tester_addr: string; job_id: string }> = [];
     if (enable_auto_test) {
       try {
         // Load all active personas with their vectors

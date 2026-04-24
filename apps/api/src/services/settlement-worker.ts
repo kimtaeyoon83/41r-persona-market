@@ -14,7 +14,7 @@
  *   - on InsufficientFundsError, skips remaining rows for this tick and
  *     logs PAYER_DRY so ops can top up the payer wallet
  */
-import { and, asc, eq, like } from 'drizzle-orm';
+import { asc, eq, like } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { InsufficientFundsError, solanaService } from './solana.js';
 import { childLogger } from '../logger.js';

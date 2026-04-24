@@ -9,9 +9,40 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
+  },
+  "eslintConfig": {
+    "root": true,
+    "env": { "node": true, "es2022": true },
+    "parser": "@typescript-eslint/parser",
+    "parserOptions": { "ecmaVersion": 2022, "sourceType": "module" },
+    "plugins": ["@typescript-eslint"],
+    "extends": [
+      "eslint:recommended",
+      "plugin:@typescript-eslint/recommended"
+    ],
+    "ignorePatterns": ["dist/**", "drizzle/**", "node_modules/**", "*.cjs"],
+    "rules": {
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }
+      ],
+      "@typescript-eslint/no-explicit-any": "warn",
+      "no-empty": ["error", { "allowEmptyCatch": true }],
+      "@typescript-eslint/no-var-requires": "off"
+    },
+    "overrides": [
+      {
+        "files": ["src/__tests__/**/*.ts"],
+        "rules": {
+          "@typescript-eslint/no-explicit-any": "off",
+          "@typescript-eslint/no-non-null-assertion": "off"
+        }
+      }
+    ]
   },
   "dependencies": {
     "@41rpm/persona-client": "workspace:*",
@@ -44,7 +75,10 @@
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
     "drizzle-kit": "^0.30.0",
+    "eslint": "^8.57.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
