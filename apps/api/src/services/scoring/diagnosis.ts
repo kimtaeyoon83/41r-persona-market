@@ -824,7 +824,10 @@ export async function synthesizeDiagnosis(
   const resp = await withRoute('diagnosis', () =>
     client.messages.create({
       model: SCORING_MODELS.sonnet,
-      max_tokens: 8000,
+      // 8000 hit the cap on a ~11k-char Korean+English report (mixed
+      // scripts token-poorly and 43-report aggregates are common). 16k
+      // gives headroom without approaching Sonnet 4.6's 64k output cap.
+      max_tokens: 16000,
       temperature: 0.4,
       system: SYNTH_SYSTEM,
       messages: [{ role: 'user', content: userMsg }],
@@ -847,10 +850,23 @@ export async function synthesizeDiagnosis(
   // model invented a source — we surface it in a footer so a reader
   // (and the test suite) can spot it rather than silently ship.
   const validation = validateAuditCitations(markdown, aggregate);
+  // If Sonnet hit max_tokens the markdown is almost certainly cut off
+  // mid-sentence (typically in the confidence section). Surface it as
+  // a footer rather than silently shipping a truncated trust contract.
+  const truncated = resp.stop_reason === 'max_tokens';
+
+  const footers: string[] = [];
   if (validation.unknown.length > 0) {
-    return `${withBanner}\n\n> ⚠ **Audit check**: ${validation.unknown.length} citation(s) reference report IDs not in this test's data: \`${validation.unknown.join(', ')}\`. Treat the surrounding claims as unverified.`;
+    footers.push(
+      `> ⚠ **Audit check**: ${validation.unknown.length} citation(s) reference report IDs not in this test's data: \`${validation.unknown.join(', ')}\`. Treat the surrounding claims as unverified.`,
+    );
   }
-  return withBanner;
+  if (truncated) {
+    footers.push(
+      `> ⚠ **Truncation check**: 리포트가 token 한도(\`max_tokens\`)로 중간에 잘렸습니다. 마지막 섹션(신뢰도 / Rec)이 불완전할 수 있으니 재생성하거나 aggregate를 줄여 다시 시도하세요.`,
+    );
+  }
+  return footers.length > 0 ? `${withBanner}\n\n${footers.join('\n\n')}` : withBanner;
 }
 
 /**
