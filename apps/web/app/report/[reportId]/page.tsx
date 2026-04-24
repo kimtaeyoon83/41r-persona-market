@@ -56,6 +56,33 @@ interface Report {
   settlements: Settlement[];
 }
 
+// Shape mirrors persona-engine's StructuredReport payload (stored under
+// the `_structured_report` sentinel inside questionnaireAnswers). Rendering
+// this is what lets a reader see *why* a persona scored the way it did —
+// summary, per-axis UX scores, observed pain points, positive signals,
+// and recommendations. Before Task #22 these fields were only consumed
+// by the diagnosis aggregator; the per-report page hid them entirely.
+interface StructuredReport {
+  summary?: string;
+  ux_scores?: { clarity?: number; trust?: number; efficiency?: number; overall?: number };
+  pain_points?: Array<{ severity: "high" | "medium" | "low"; description: string; evidence_turn?: number | null }>;
+  positive_signals?: string[];
+  recommendations?: string[];
+}
+
+interface QualityBreakdown {
+  quality_score?: number;
+  raw_score?: number;
+  persona_faithfulness?: number;
+  outcome_weight?: number;
+  checklist_pass_rate?: number;
+}
+
+function parseSentinel<T>(raw: string | number | undefined): T | null {
+  if (typeof raw !== "string") return null;
+  try { return JSON.parse(raw) as T; } catch { return null; }
+}
+
 const statusColor = {
   passed: "text-sol-green bg-sol-green/10 border border-sol-green/20",
   failed: "text-[var(--status-error)] bg-[var(--status-error)]/10 border border-[var(--status-error)]/20",
@@ -169,6 +196,16 @@ export default function ReportDetailPage() {
     (qa) => qa.answer !== "" && qa.answer !== null && qa.answer !== undefined,
   ).length;
   const questionnaireTotal = (report.questionnaireAnswers || []).length;
+
+  // Extract the persona-engine-produced structured report + quality
+  // breakdown sentinels. Manual reports have neither of these; persona
+  // reports carry both. Each gets its own dedicated section below.
+  const structured = parseSentinel<StructuredReport>(
+    (report.questionnaireAnswers || []).find((a) => a.id === "_structured_report")?.answer,
+  );
+  const breakdown = parseSentinel<QualityBreakdown>(
+    (report.questionnaireAnswers || []).find((a) => a.id === "_quality_breakdown")?.answer,
+  );
 
   return (
     <div className="max-w-4xl">
@@ -345,6 +382,135 @@ export default function ReportDetailPage() {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* Structured Report — persona-engine's synthesized view over the
+          session (summary + ux_scores + pain_points + signals + recs).
+          Manual reports don't carry these sentinels, so this whole
+          block is skipped for them. */}
+      {(structured || breakdown) && (
+        <div className="mb-8 space-y-4">
+          <div className="flex items-baseline justify-between">
+            <h2 className="t-display-s">Structured Report</h2>
+            <span className="t-caption">persona-engine synthesis</span>
+          </div>
+
+          {structured?.summary && (
+            <div className="hf-card p-4">
+              <p className="t-caption mb-2">Summary</p>
+              <p className="text-sm leading-relaxed whitespace-pre-wrap text-[var(--text-primary)]">
+                {structured.summary}
+              </p>
+            </div>
+          )}
+
+          {structured?.ux_scores && (
+            <div className="hf-card p-4">
+              <p className="t-caption mb-3">UX scores (0–1)</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {(["clarity", "trust", "efficiency", "overall"] as const).map((k) => {
+                  const v = structured.ux_scores?.[k];
+                  if (typeof v !== "number") return null;
+                  const pct = Math.max(0, Math.min(1, v));
+                  const color = pct >= 0.7 ? "bg-sol-green" : pct >= 0.4 ? "bg-[var(--warn)]" : "bg-[var(--danger)]";
+                  return (
+                    <div key={k}>
+                      <div className="flex items-baseline justify-between">
+                        <span className="t-caption capitalize">{k}</span>
+                        <span className="text-sm font-mono">{v.toFixed(2)}</span>
+                      </div>
+                      <div className="mt-1 h-1.5 rounded bg-[var(--bg-2)] overflow-hidden">
+                        <div className={`h-full ${color}`} style={{ width: `${pct * 100}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {breakdown && (
+            <div className="hf-card p-4">
+              <p className="t-caption mb-3">Quality breakdown</p>
+              <dl className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                {breakdown.quality_score !== undefined && (
+                  <div>
+                    <dt className="t-caption">quality_score</dt>
+                    <dd className="font-mono">{breakdown.quality_score.toFixed(2)}</dd>
+                  </div>
+                )}
+                {breakdown.raw_score !== undefined && (
+                  <div>
+                    <dt className="t-caption">raw_score</dt>
+                    <dd className="font-mono">{breakdown.raw_score.toFixed(2)}</dd>
+                  </div>
+                )}
+                {breakdown.outcome_weight !== undefined && (
+                  <div>
+                    <dt className="t-caption">outcome_weight</dt>
+                    <dd className="font-mono">{breakdown.outcome_weight.toFixed(2)}</dd>
+                  </div>
+                )}
+                {breakdown.checklist_pass_rate !== undefined && (
+                  <div>
+                    <dt className="t-caption">checklist_pass_rate</dt>
+                    <dd className="font-mono">{(breakdown.checklist_pass_rate * 100).toFixed(0)}%</dd>
+                  </div>
+                )}
+                {breakdown.persona_faithfulness !== undefined && (
+                  <div>
+                    <dt className="t-caption">persona_faithfulness</dt>
+                    <dd className="font-mono">{breakdown.persona_faithfulness.toFixed(2)}</dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+          )}
+
+          {structured?.pain_points && structured.pain_points.length > 0 && (
+            <div className="hf-card p-4">
+              <p className="t-caption mb-3">Pain points ({structured.pain_points.length})</p>
+              <ul className="space-y-3">
+                {structured.pain_points.map((pp, i) => {
+                  const chip = pp.severity === "high" ? "danger"
+                    : pp.severity === "medium" ? "warn"
+                    : "info";
+                  return (
+                    <li key={i} className="flex gap-3">
+                      <span className={`chip ${chip} shrink-0`}>{pp.severity}</span>
+                      <div className="flex-1">
+                        <p className="text-sm text-[var(--text-primary)]">{pp.description}</p>
+                        {pp.evidence_turn !== null && pp.evidence_turn !== undefined && (
+                          <p className="t-caption mt-1">
+                            evidence turn {pp.evidence_turn}
+                          </p>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {structured?.positive_signals && structured.positive_signals.length > 0 && (
+            <div className="hf-card p-4">
+              <p className="t-caption mb-2">Positive signals</p>
+              <ul className="space-y-1 text-sm text-[var(--text-primary)] list-disc pl-5">
+                {structured.positive_signals.map((s, i) => <li key={i}>{s}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {structured?.recommendations && structured.recommendations.length > 0 && (
+            <div className="hf-card p-4">
+              <p className="t-caption mb-2">Recommendations</p>
+              <ol className="space-y-1 text-sm text-[var(--text-primary)] list-decimal pl-5">
+                {structured.recommendations.map((s, i) => <li key={i}>{s}</li>)}
+              </ol>
+            </div>
+          )}
         </div>
       )}
 

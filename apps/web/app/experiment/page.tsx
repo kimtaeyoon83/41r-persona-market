@@ -85,32 +85,46 @@ export default function ExperimentIndex() {
 
       {tests && tests.length > 0 && (
         <div className="space-y-3">
-          {tests.map((t) => (
-            <Link
-              key={t.id}
-              href={`/experiment/${t.id}`}
-              className="block hf-card p-5 hover:border-sol-green/30 hover:bg-surface-elevated transition-all"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="font-display font-semibold truncate">{t.targetUrl}</div>
-                  <div className="text-xs text-[var(--text-secondary)] font-mono mt-0.5 truncate">
-                    {t.id}
+          {tests.map((t) => {
+            // A test with zero reports on one side can't drive the
+            // cohort / convergence / paired panels — tell the reader
+            // up front so they don't click into a mostly-blank page.
+            const singleSide = t.manualCount === 0 || t.personaCount === 0;
+            const missingSide = t.manualCount === 0 ? 'manual reports' : 'persona autotests';
+            return (
+              <Link
+                key={t.id}
+                href={`/experiment/${t.id}`}
+                className="block hf-card p-5 hover:border-sol-green/30 hover:bg-surface-elevated transition-all"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <div className="font-display font-semibold truncate">{t.targetUrl}</div>
+                      {singleSide && (
+                        <span className="chip warn shrink-0" title={`Awaiting ${missingSide}`}>
+                          pending comparison
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-[var(--text-secondary)] font-mono mt-0.5 truncate">
+                      {t.id}
+                    </div>
+                    {t.requirements && (
+                      <p className="text-sm text-[var(--text-secondary)] mt-2 line-clamp-2">
+                        {t.requirements}
+                      </p>
+                    )}
                   </div>
-                  {t.requirements && (
-                    <p className="text-sm text-[var(--text-secondary)] mt-2 line-clamp-2">
-                      {t.requirements}
-                    </p>
-                  )}
+                  <div className="flex gap-6 shrink-0 text-right">
+                    <Pill label="Humans" value={t.manualCount} />
+                    <Pill label="Personas" value={t.personaCount} />
+                    <Pill label="Paired" value={t.pairedCount} />
+                  </div>
                 </div>
-                <div className="flex gap-6 shrink-0 text-right">
-                  <Pill label="Humans" value={t.manualCount} />
-                  <Pill label="Personas" value={t.personaCount} />
-                  <Pill label="Paired" value={t.pairedCount} />
-                </div>
-              </div>
-            </Link>
-          ))}
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>

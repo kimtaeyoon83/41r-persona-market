@@ -146,6 +146,12 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
   }
 
   const { manual, persona, comparison } = data;
+  // A test with zero reports on one side can't generate meaningful
+  // cohort-match / convergence / paired-scatter / rating-KS signals.
+  // Hide those sections entirely and show a single banner instead —
+  // previously we were rendering empty charts (and the rating histogram
+  // misleadingly plotted persona=0 as a tall bar).
+  const singleSide = manual.count === 0 || persona.count === 0;
 
   // Paired (human, persona) quality-score scatter points. The API gives
   // correlation aggregates but not the raw pairs, so we re-derive them
@@ -251,8 +257,29 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
         </section>
       )}
 
+      {/* ─── Single-side banner ──────────────────────────────────── */}
+      {singleSide && (
+        <section
+          className="hf-card p-4 flex gap-3 items-start"
+          style={{ borderColor: 'var(--warn-line)', background: 'var(--warn-soft)' }}
+        >
+          <span className="text-xl leading-none shrink-0" aria-hidden>ℹ️</span>
+          <div>
+            <p className="text-sm font-medium" style={{ color: 'var(--fg-0)' }}>
+              Comparative analysis unavailable
+            </p>
+            <p className="text-xs mt-1" style={{ color: 'var(--fg-2)' }}>
+              This test has {manual.count} human{manual.count === 1 ? '' : 's'} and {persona.count} persona{persona.count === 1 ? '' : 's'}.
+              Cohort agreement, convergence, rating distribution, and paired quality need at least one report on each side —
+              those sections are hidden below.
+              Submit a {manual.count === 0 ? 'manual report' : 'persona autotest'} against this test to unlock them.
+            </p>
+          </div>
+        </section>
+      )}
+
       {/* ─── Cohort matching ─────────────────────────────────────── */}
-      {comparison.by_cohort && comparison.by_cohort.length > 0 && (
+      {!singleSide && comparison.by_cohort && comparison.by_cohort.length > 0 && (
         <section className="hf-card p-5">
           <h2 className="font-display font-semibold mb-1">By cohort — demographic-matched agreement</h2>
           <p className="text-xs text-[var(--text-secondary)] mb-4">
@@ -265,7 +292,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
       )}
 
       {/* ─── Cohort × checklist matrix ───────────────────────────── */}
-      {comparison.by_cohort_item && comparison.by_cohort_item.length > 0 && (
+      {!singleSide && comparison.by_cohort_item && comparison.by_cohort_item.length > 0 && (
         <section className="hf-card p-5">
           <h2 className="font-display font-semibold mb-1">Cohort × checklist — who fails what</h2>
           <p className="text-xs text-[var(--text-secondary)] mb-4">
@@ -278,6 +305,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
       )}
 
       {/* ─── Convergence ─────────────────────────────────────────── */}
+      {!singleSide && (
       <section className="hf-card p-5">
         <h2 className="font-display font-semibold mb-1">Convergence</h2>
         <p className="text-xs text-[var(--text-secondary)] mb-4">
@@ -297,8 +325,10 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
           </ResponsiveContainer>
         )}
       </section>
+      )}
 
       {/* ─── Confusion matrix ───────────────────────────────────── */}
+      {!singleSide && (
       <section className="hf-card p-5">
         <h2 className="font-display font-semibold mb-1">Agreement matrix</h2>
         <p className="text-xs text-[var(--text-secondary)] mb-4">
@@ -306,8 +336,10 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
         </p>
         <ConfusionMatrix matrix={comparison.confusion_matrix} />
       </section>
+      )}
 
       {/* ─── Quality score scatter ───────────────────────────────── */}
+      {!singleSide && (
       <section className="hf-card p-5">
         <h2 className="font-display font-semibold mb-1">Quality score — paired</h2>
         <p className="text-xs text-[var(--text-secondary)] mb-4">
@@ -346,8 +378,10 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
           </ResponsiveContainer>
         )}
       </section>
+      )}
 
       {/* ─── Rating distribution histogram ──────────────────────── */}
+      {!singleSide && (
       <section className="hf-card p-5">
         <h2 className="font-display font-semibold mb-1">Questionnaire rating distribution</h2>
         <p className="text-xs text-[var(--text-secondary)] mb-4">
@@ -371,6 +405,7 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
           </ResponsiveContainer>
         )}
       </section>
+      )}
 
       {/* ─── Per-item details (debug / transparency) ─────────────── */}
       <section className="hf-card p-5">
