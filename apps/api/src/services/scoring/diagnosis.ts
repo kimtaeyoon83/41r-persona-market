@@ -24,13 +24,23 @@ import { and, eq } from 'drizzle-orm';
 import { db, schema } from '../../db/index.js';
 import { client, withRoute } from '../anthropic_client.js';
 import { SCORING_MODELS } from '../llm.js';
+import {
+  computePerItemAgreement,
+  pearson,
+  spearman,
+  type ChecklistItemResult,
+  type ChecklistStatus,
+} from '../comparison.js';
 
 // ── Aggregate shapes ────────────────────────────────────────────────
 
 interface PainPointCitation {
   severity: 'high' | 'medium' | 'low';
   description: string;
-  personaTester: string; // tester addr prefix for attribution
+  personaTester: string;      // tester addr prefix for attribution
+  reportId: string;           // audit chain: which report row spawned this pain point
+  evidenceTurn: number | null; // session-log turn index from upstream structured_report
+  isPersona: boolean;          // split "human-confirmed" vs "persona-only" at render time
 }
 
 interface PersonaSummary {
@@ -43,7 +53,7 @@ interface PersonaSummary {
   checklistBlocked: number;
   questionnaireFreeText: Array<{ id: string; question?: string; answer: string }>;
   uxScores?: Record<string, number>;
-  painPoints: Array<{ severity: string; description: string }>;
+  painPoints: Array<{ severity: string; description: string; evidenceTurn: number | null }>;
   positiveSignals: string[];
   recommendations: string[];
   profile?: Record<string, unknown>; // tester.profile for demographics
@@ -88,6 +98,18 @@ export interface DiagnosisAggregate {
    *  → the site's checklist coverage here reflects an automation
    *  limitation, not a product defect"). */
   quirksEncountered: Record<string, number>;
+  /** Fidelity snapshot — agreement between persona and human reports.
+   *  Drives the "trust this diagnosis" banner prepended to the
+   *  synthesis output. `itemAgreementRate` / `pairedCount` are `null`
+   *  when either side has zero reports (no comparison possible). */
+  fidelity: {
+    itemAgreementRate: number | null;
+    pairedCount: number;
+    spearman: number | null;
+    /** Overall verdict: 'high' / 'medium' / 'low' / 'n/a'. Computed
+     *  from the thresholds in `computeFidelityBand()`. */
+    band: 'high' | 'medium' | 'low' | 'n/a';
+  };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -106,6 +128,118 @@ function normalizeStr(s: string): string {
   // Real NLP similarity would be nicer; for MVP this catches obvious
   // duplicates like "로그인 벽 접근 불가" vs "로그인 벽 접근 불가 " .
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Fidelity bands — how much should a reader trust this diagnosis's
+ * persona-derived findings? The thresholds intentionally match
+ * services/findings.ts so the experiment dashboard and the diagnosis
+ * give the same verdict for the same test.
+ *   high   — paired ≥ 5, itemAgreementRate ≥ 0.6
+ *   medium — paired ≥ 5, itemAgreementRate 0.4–0.6
+ *   low    — everything else that has some paired data
+ *   n/a    — no paired humans ↔ personas, so no fidelity to compute
+ */
+export function computeFidelityBand(
+  itemAgreementRate: number | null,
+  pairedCount: number,
+): 'high' | 'medium' | 'low' | 'n/a' {
+  if (pairedCount === 0 || itemAgreementRate === null) return 'n/a';
+  if (pairedCount >= 5 && itemAgreementRate >= 0.6) return 'high';
+  if (pairedCount >= 5 && itemAgreementRate >= 0.4) return 'medium';
+  return 'low';
+}
+
+/**
+ * Extract pain_points from a human manual report's free-text answers
+ * via a single Haiku call. Human submissions have no `_structured_report`
+ * sentinel (that's produced by persona-engine on persona runs), so
+ * without this pass the diagnosis's confirmation labels would always
+ * be "persona-only" — humans never get a seat at the table.
+ *
+ * Returns the extracted pain_points (empty on failure — we never
+ * block diagnosis generation on an enrichment step). Cost is
+ * ~$0.001/report at review_inspection tier.
+ */
+async function extractHumanPainPoints(args: {
+  reportId: string;
+  freeText: Array<{ id: string; question?: string; answer: string }>;
+  checklistCounts: { passed: number; failed: number; blocked: number };
+}): Promise<Array<{ severity: 'high' | 'medium' | 'low'; description: string }>> {
+  if (args.freeText.length === 0) return [];
+
+  const system = `당신은 UX 리서치 애널리스트입니다. 인간 테스터가 직접 작성한 설문 답변에서 제품의 UX 페인 포인트만 추출하세요.
+
+## 원칙
+- 답변에 실제로 언급된 문제만 추출. 없는 내용 지어내지 마세요.
+- severity=high: 태스크 실패를 유발하거나 대안이 없을 정도의 마찰.
+- severity=medium: 진행은 가능하지만 혼란/좌절 발생.
+- severity=low: 개선 여지 수준의 사소한 관찰.
+- 긍정적 소감·제안은 제외 — 페인 포인트만.
+
+## 출력 (JSON object만)
+{
+  "pain_points": [
+    {"severity": "high|medium|low", "description": "구체적 문제 한 문장"}
+  ]
+}`;
+
+  const ftBody = args.freeText
+    .slice(0, 8)
+    .map((q) => `Q[${q.id}] ${q.question?.slice(0, 120) ?? ''}\nA: ${q.answer.slice(0, 500)}`)
+    .join('\n\n');
+  const user = `## 체크리스트 요약\npassed=${args.checklistCounts.passed} failed=${args.checklistCounts.failed} blocked=${args.checklistCounts.blocked}\n\n## 설문 답변\n${ftBody}`;
+
+  try {
+    const resp = await withRoute('diagnosis.human_pain_points', () =>
+      client.messages.create({
+        model: SCORING_MODELS.haiku,
+        max_tokens: 800,
+        temperature: 0.2,
+        system,
+        messages: [{ role: 'user', content: user }],
+      }),
+    );
+    const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}') + 1;
+    if (start < 0 || end <= start) return [];
+    const parsed = JSON.parse(raw.slice(start, end)) as {
+      pain_points?: Array<{ severity?: string; description?: string }>;
+    };
+    const out: Array<{ severity: 'high' | 'medium' | 'low'; description: string }> = [];
+    for (const p of parsed.pain_points ?? []) {
+      const desc = String(p.description ?? '').trim();
+      if (!desc) continue;
+      const sev = p.severity === 'high' || p.severity === 'medium' || p.severity === 'low' ? p.severity : 'low';
+      out.push({ severity: sev, description: desc });
+      if (out.length >= 10) break; // cap so one chatty report can't dominate the frequency map
+    }
+    return out;
+  } catch (err) {
+    // Non-fatal — we still emit the diagnosis. The manual report just
+    // contributes no pain_points this pass (same effective state as
+    // before Task #12 existed).
+    console.warn(`[diagnosis] human pain-point extraction failed for report=${args.reportId}:`,
+      err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+function fidelityBannerKor(f: DiagnosisAggregate['fidelity']): string {
+  const pct = f.itemAgreementRate === null ? 'n/a' : `${Math.round(f.itemAgreementRate * 100)}%`;
+  const sp = f.spearman === null ? 'n/a' : f.spearman.toFixed(2);
+  const common = `체크리스트 일치율 ${pct} · 품질 Spearman ρ ${sp} · paired=${f.pairedCount}`;
+  switch (f.band) {
+    case 'high':
+      return `> ✅ **신뢰도: 높음** — 페르소나와 인간의 판정이 강하게 일치. 이 리포트의 페르소나 기반 finding 들은 인간 관찰의 대리 지표로 사용 가능.\n> \`${common}\``;
+    case 'medium':
+      return `> 🟡 **신뢰도: 중간** — 페르소나가 일부 항목에서 인간과 어긋남. finding 은 "방향 지시자"로 읽고 중요한 결정은 인간 리포트로 교차 확인 권장.\n> \`${common}\``;
+    case 'low':
+      return `> ⚠️ **신뢰도: 낮음** — 페르소나와 인간의 판정이 크게 엇갈림. persona-only 로 라벨된 finding 은 제품 결함이 아닌 페르소나 아티팩트일 가능성이 높음. 인간 리포트 위주로 해석하세요.\n> \`${common}\``;
+    case 'n/a':
+      return `> ℹ️ **신뢰도: 측정 불가** — 이 테스트에서 동일 테스터의 manual+persona 페어가 없어 일치도를 계산할 수 없습니다. 진단은 단일 관점(페르소나 또는 인간)에 한정.\n> \`${common}\``;
+  }
 }
 
 // ── Aggregation (deterministic, no LLM) ─────────────────────────────
@@ -131,6 +265,7 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
       allPositiveSignals: [],
       allRecommendations: [],
       quirksEncountered: {},
+      fidelity: { itemAgreementRate: null, pairedCount: 0, spearman: null, band: 'n/a' },
     };
   }
 
@@ -175,6 +310,44 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
   const allRecommendations = new Set<string>();
   const quality: number[] = [];
   const quirksEncountered: Record<string, number> = {};
+
+  // Pre-pass: for each manual report that has no `_structured_report`
+  // sentinel yet, extract pain_points from its free-text with a single
+  // Haiku call. Runs in parallel so a test with 20 humans adds ~2s,
+  // not 20s. Keyed by reportId so the main loop can look them up.
+  const humanPainPointsByReport = new Map<string, Array<{ severity: 'high' | 'medium' | 'low'; description: string }>>();
+  const humanExtractionTasks: Promise<void>[] = [];
+  for (const r of reports) {
+    if (r.isPersonaTest) continue;
+    const answers = (r.questionnaireAnswers as Array<{ id: string; answer: string | number }> | null) ?? [];
+    if (answers.some((a) => a.id === '_structured_report')) continue;
+    const freeText = answers
+      .filter((a) => !a.id.startsWith('_') && typeof a.answer === 'string' && a.answer.length > 10)
+      .map((a) => ({
+        id: a.id,
+        question: questionById.get(a.id)?.question,
+        answer: String(a.answer),
+      }));
+    const cl = (r.checklistResults as Array<{ id: string; status: string }> | null) ?? [];
+    let p = 0, f = 0, b = 0;
+    for (const c of cl) {
+      if (c.status === 'passed') p += 1;
+      else if (c.status === 'failed') f += 1;
+      else if (c.status === 'blocked') b += 1;
+    }
+    humanExtractionTasks.push(
+      extractHumanPainPoints({
+        reportId: r.id,
+        freeText,
+        checklistCounts: { passed: p, failed: f, blocked: b },
+      }).then((pts) => {
+        humanPainPointsByReport.set(r.id, pts);
+      }),
+    );
+  }
+  if (humanExtractionTasks.length > 0) {
+    await Promise.all(humanExtractionTasks);
+  }
 
   for (const r of reports) {
     const cl = (r.checklistResults as Array<{ id: string; status: string; memo: string }> | null) ?? [];
@@ -246,21 +419,41 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
     const persona = personaByTester.get(r.testerAddr);
     const tester = testerByAddr.get(r.testerAddr);
 
-    // Roll pain points into the frequency map with persona attribution.
-    if (structured?.pain_points) {
-      for (const pp of structured.pain_points) {
-        if (!pp.description) continue;
-        const key = normalizeStr(pp.description);
-        if (!painPointMap.has(key)) painPointMap.set(key, { count: 0, citations: [] });
-        const entry = painPointMap.get(key)!;
-        entry.count += 1;
-        entry.citations.push({
-          severity: (pp.severity === 'high' || pp.severity === 'medium' || pp.severity === 'low')
-            ? pp.severity : 'low',
-          description: pp.description,
-          personaTester: r.testerAddr.slice(0, 10),
-        });
-      }
+    // Roll pain points into the frequency map with full audit-chain
+    // attribution. Each citation points back to the exact row + session
+    // turn that produced it — the synthesis prompt and downstream UI can
+    // both use these to prove a claim isn't hallucinated.
+    //
+    // Source of truth priority:
+    //   1. `structured?.pain_points` — persona-engine's LLM extraction
+    //      on persona runs, or a sentinel-backed manual pipeline if one
+    //      was ever added upstream.
+    //   2. `humanPainPointsByReport` — Task-#12 Haiku pass we just
+    //      ran for manual reports without a sentinel. Without this the
+    //      confirmation label was always "persona-only" and both /
+    //      human-only were dead code.
+    const painSource = structured?.pain_points
+      ?? humanPainPointsByReport.get(r.id)?.map((p) => ({
+        severity: p.severity,
+        description: p.description,
+        evidence_turn: null as number | null,
+      }))
+      ?? [];
+    for (const pp of painSource) {
+      if (!pp.description) continue;
+      const key = normalizeStr(pp.description);
+      if (!painPointMap.has(key)) painPointMap.set(key, { count: 0, citations: [] });
+      const entry = painPointMap.get(key)!;
+      entry.count += 1;
+      entry.citations.push({
+        severity: (pp.severity === 'high' || pp.severity === 'medium' || pp.severity === 'low')
+          ? pp.severity : 'low',
+        description: pp.description,
+        personaTester: r.testerAddr.slice(0, 10),
+        reportId: r.id,
+        evidenceTurn: typeof pp.evidence_turn === 'number' ? pp.evidence_turn : null,
+        isPersona: !!r.isPersonaTest,
+      });
     }
     for (const s of structured?.positive_signals ?? []) allPositiveSignals.add(s);
     for (const s of structured?.recommendations ?? []) allRecommendations.add(s);
@@ -277,10 +470,19 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
       checklistBlocked: blocked,
       questionnaireFreeText: freeText,
       uxScores: structured?.ux_scores,
-      painPoints: (structured?.pain_points ?? []).map((p) => ({
-        severity: String(p.severity),
-        description: String(p.description ?? ''),
-      })).filter((p) => p.description),
+      painPoints: (structured?.pain_points
+        ?? humanPainPointsByReport.get(r.id)?.map((p) => ({
+          severity: p.severity,
+          description: p.description,
+          evidence_turn: null as number | null,
+        }))
+        ?? [])
+        .map((p) => ({
+          severity: String(p.severity),
+          description: String(p.description ?? ''),
+          evidenceTurn: typeof p.evidence_turn === 'number' ? p.evidence_turn : null,
+        }))
+        .filter((p) => p.description),
       positiveSignals: structured?.positive_signals ?? [],
       recommendations: structured?.recommendations ?? [],
       profile: (tester?.profile ?? undefined) as Record<string, unknown> | undefined,
@@ -313,6 +515,36 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
 
   const checklistStats = [...checklistAgg.values()].sort((a, b) => a.passRate - b.passRate);
 
+  // ── Fidelity snapshot: matches the /api/reports/compare pairing
+  // logic so the diagnosis banner and the experiment dashboard agree.
+  const manualReports = reports.filter((r) => !r.isPersonaTest);
+  const personaReports = reports.filter((r) => r.isPersonaTest);
+  const manualChecklists = manualReports.map((r) =>
+    (r.checklistResults as Array<{ id: string; status: ChecklistStatus }> | null) ?? [],
+  ) as ChecklistItemResult[][];
+  const personaChecklists = personaReports.map((r) =>
+    (r.checklistResults as Array<{ id: string; status: ChecklistStatus }> | null) ?? [],
+  ) as ChecklistItemResult[][];
+  const { overallAgreementRate } = manualChecklists.length > 0 && personaChecklists.length > 0
+    ? computePerItemAgreement(manualChecklists, personaChecklists)
+    : { overallAgreementRate: null as number | null };
+
+  const manualByTester = new Map<string, number>();
+  for (const r of manualReports) manualByTester.set(r.testerAddr, r.qualityScore ?? 0);
+  const pairedManual: number[] = [];
+  const pairedPersona: number[] = [];
+  for (const p of personaReports) {
+    const m = manualByTester.get(p.testerAddr);
+    if (typeof m === 'number') {
+      pairedManual.push(m);
+      pairedPersona.push(p.qualityScore ?? 0);
+    }
+  }
+  const spearmanVal = pairedManual.length >= 2 ? spearman(pairedManual, pairedPersona) : null;
+  const _unusedPearson = pairedManual.length >= 2 ? pearson(pairedManual, pairedPersona) : null;
+  void _unusedPearson; // Spearman is enough for the banner; keep pearson available if we add it later.
+  const fidelityBand = computeFidelityBand(overallAgreementRate, pairedManual.length);
+
   return {
     testId,
     targetUrl: test.targetUrl,
@@ -333,6 +565,12 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
     allPositiveSignals: [...allPositiveSignals],
     allRecommendations: [...allRecommendations],
     quirksEncountered,
+    fidelity: {
+      itemAgreementRate: overallAgreementRate === null ? null : Number(overallAgreementRate.toFixed(3)),
+      pairedCount: pairedManual.length,
+      spearman: spearmanVal === null ? null : Number(spearmanVal.toFixed(3)),
+      band: fidelityBand,
+    },
   };
 }
 
@@ -359,6 +597,9 @@ const SYNTH_SYSTEM = `당신은 UX 리서치 분석가입니다. 여러 AI 페�
 - **'session_limited' 카테고리를 숨기지 마세요.** 어떤 persona 가 세션 중도 이탈했다면 그것도 진단의 일부.
 - severity=high 는 태스크 실패를 유발한 마찰만.
 - **검증 불가한 A/B 수치 약속 금지** — "R1 적용 시 +X% 개선" 같은 문장 만들지 마세요.
+- **모든 pain_point 와 인용문 뒤에 audit chain 삽입**. painPointFrequency[i].humanEvidence / personaEvidence 필드에 \`<reportId8자>·t<turn>\` 형식 citation 이 들어있습니다. 진단서 pain_point 문장 끝에 \`[<reportId>·t<turn>]\` 으로 붙이세요. aggregate 에 없는 ID 는 절대 지어내지 마세요. 예: "로그인 벽 접근 불가 [ab12cd34·t7, 9f3ac0e2·t3]".
+- **confirmation 라벨을 항상 표기**. 각 pain_point 의 confirmation 필드(\`both\` / \`human-only\` / \`persona-only\`)를 진단서에 명시. "persona-only" 는 **페르소나 아티팩트 가능성 → 수동 재현 필요** 라고 신뢰도 섹션에 적으세요.
+- **fidelity.band 반영**: aggregate.fidelity.band 가 \`low\` 또는 \`n/a\` 이면 신뢰도 섹션에 "페르소나-인간 일치도가 낮음/미측정 → persona-derived finding 은 참고용으로만 읽으세요" 라고 명시. \`high\`/\`medium\` 이면 그 대신 "일치율 X%" 수치를 인용하여 독자가 reliance level 을 조정할 수 있게 하세요.
 - **quirksEncountered 맥락화**: 이 필드가 비어있지 않다면 browser 자동화가 환경적 장애물(auth wall, cookie consent, captcha 등)을 만났다는 뜻. 관련 checklist 실패를 "제품 결함" 으로 해석하지 말고 "자동화 환경 한계" 로 구분해서 신뢰도 섹션에 명시하세요. 예: \`{"auth_wall": 4, "cookie_consent": 2}\` → "browser 세션의 6개 체크리스트 실패는 로그인/쿠키 배너 차단에 기인 — 실제 사용자는 이 장애물을 이미 통과한 상태이므로 별도 수동 검증 필요".
 
 ## 출력 형식
@@ -432,14 +673,31 @@ export async function synthesizeDiagnosis(
       painPoints: p.painPoints.slice(0, 4),
       topRecommendations: p.recommendations.slice(0, 3),
     })),
-    painPointFrequency: aggregate.painPointFrequency.slice(0, 10).map((pp) => ({
-      description: pp.description.slice(0, 280),
-      count: pp.count,
-      samplePersonas: pp.citations.slice(0, 3).map((c) => c.personaTester),
-    })),
+    painPointFrequency: aggregate.painPointFrequency.slice(0, 10).map((pp) => {
+      // Split citations by source so the LLM can label each pain point
+      // as human-confirmed, persona-confirmed, or both. Audit chain
+      // (reportId · turn) is sent so the prompt can cite real rows.
+      const humanCitations = pp.citations.filter((c) => !c.isPersona).slice(0, 3);
+      const personaCitations = pp.citations.filter((c) => c.isPersona).slice(0, 3);
+      const fmt = (c: PainPointCitation) =>
+        c.evidenceTurn !== null ? `${c.reportId.slice(0, 8)}·t${c.evidenceTurn}` : c.reportId.slice(0, 8);
+      return {
+        description: pp.description.slice(0, 280),
+        count: pp.count,
+        humanCount: humanCitations.length,
+        personaCount: personaCitations.length,
+        confirmation:
+          humanCitations.length > 0 && personaCitations.length > 0 ? 'both'
+          : humanCitations.length > 0 ? 'human-only'
+          : 'persona-only',
+        humanEvidence: humanCitations.map(fmt),
+        personaEvidence: personaCitations.map(fmt),
+      };
+    }),
     commonPositiveSignals: aggregate.allPositiveSignals.slice(0, 10),
     commonRecommendations: aggregate.allRecommendations.slice(0, 15),
     quirksEncountered: aggregate.quirksEncountered,
+    fidelity: aggregate.fidelity,
   };
 
   const userMsg = `다음 aggregate 데이터로 UX 진단 리포트를 작성하세요.\n\n` +
@@ -459,7 +717,54 @@ export async function synthesizeDiagnosis(
   const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
   // Strip any wrapping code fences the model added despite instructions.
   const fenceMatch = raw.match(/^```(?:markdown|md)?\s*([\s\S]*?)\s*```$/);
-  return (fenceMatch ? fenceMatch[1] : raw).trim();
+  const markdown = (fenceMatch ? fenceMatch[1] : raw).trim();
+
+  // Prepend the fidelity banner so a reader sees "can I trust this?"
+  // before reading the findings. Keeps the LLM output unchanged so the
+  // citation validator still scans the same text.
+  const banner = fidelityBannerKor(aggregate.fidelity);
+  const withBanner = `${banner}\n\n${markdown}`;
+
+  // Validate every `[abcd1234·tN]` style citation in the output against
+  // the actual reportIds in the aggregate. Any unknown id means the
+  // model invented a source — we surface it in a footer so a reader
+  // (and the test suite) can spot it rather than silently ship.
+  const validation = validateAuditCitations(markdown, aggregate);
+  if (validation.unknown.length > 0) {
+    return `${withBanner}\n\n> ⚠ **Audit check**: ${validation.unknown.length} citation(s) reference report IDs not in this test's data: \`${validation.unknown.join(', ')}\`. Treat the surrounding claims as unverified.`;
+  }
+  return withBanner;
+}
+
+/**
+ * Extract `[<reportId8>·t<turn>]` citations from the diagnosis markdown
+ * and classify each as known (present in the aggregate) or unknown
+ * (hallucinated by the model despite the prompt constraint). The
+ * caller prepends a warning footer for unknown refs. Exported so
+ * tests can exercise the validator without running the LLM.
+ */
+export function validateAuditCitations(
+  markdown: string,
+  aggregate: DiagnosisAggregate,
+): { known: string[]; unknown: string[] } {
+  const knownPrefixes = new Set(aggregate.perPersona.map((p) => p.reportId.slice(0, 8).toLowerCase()));
+  const found = new Set<string>();
+  // Only scan inside [...] brackets — matching bare hex across the
+  // whole document catches hex color codes (#14F195 → "14f195") and
+  // other false positives. Within a bracket we accept one or more
+  // `<id>·t<turn>` entries separated by commas / spaces / semicolons.
+  for (const bracket of markdown.matchAll(/\[([^\]]+)\]/g)) {
+    const inner = bracket[1];
+    for (const idMatch of inner.matchAll(/\b([0-9a-f]{8})(?:[·]t\d+)?\b/gi)) {
+      found.add(idMatch[1].toLowerCase());
+    }
+  }
+  const known: string[] = [];
+  const unknown: string[] = [];
+  for (const id of found) {
+    (knownPrefixes.has(id) ? known : unknown).push(id);
+  }
+  return { known, unknown };
 }
 
 // ── Convenience: full generation + persist ──────────────────────────

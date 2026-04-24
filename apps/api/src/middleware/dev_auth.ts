@@ -9,7 +9,13 @@
  * drive the full pipeline end-to-end without the wallet signing loop,
  * and should only ever carry a single operator secret.
  */
+import dotenv from 'dotenv';
 import type { Request, Response, NextFunction } from 'express';
+
+// ESM imports resolve before index.ts gets a chance to call dotenv.config,
+// so the key-gated mount in index.ts would never see .env-declared keys.
+// Mirror the early-load that db/index.ts already does.
+dotenv.config({ path: new URL('../../../../.env', import.meta.url).pathname });
 
 const DEV_KEY = process.env.DEV_TEST_KEY ?? '';
 

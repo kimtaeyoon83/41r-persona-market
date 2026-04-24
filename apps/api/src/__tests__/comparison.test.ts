@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildConfusionMatrix,
   cohortKey,
+  computeCohortItemMetrics,
   computeCohortMetrics,
   computePerItemAgreement,
   convergenceCurve,
@@ -267,5 +268,104 @@ describe('computeCohortMetrics', () => {
     expect(c.humanMeanQuality).toBe(4.5);
     expect(c.personaMeanQuality).toBe(3.5);
     expect(c.qualityAbsDiff).toBe(1);
+  });
+
+  it('nulls derived metrics when one side has zero reports', () => {
+    // Cohort with only personas — human mean / |Δ| / agreement / KS
+    // must not default to zero (previously |0 − 4|=4 was rendered as a
+    // real gap in the dashboard).
+    const reports = [
+      mk({ crypto_experience: 'advanced' }, true, 4.0, [{ id: 'a', status: 'passed' }]),
+      mk({ crypto_experience: 'advanced' }, true, 3.5, [{ id: 'a', status: 'failed' }]),
+    ];
+    const cohorts = computeCohortMetrics(reports);
+    const c = cohorts[0];
+    expect(c.humanCount).toBe(0);
+    expect(c.personaCount).toBe(2);
+    expect(c.humanMeanQuality).toBeNull();
+    expect(c.personaMeanQuality).toBe(3.75);
+    expect(c.qualityAbsDiff).toBeNull();
+    expect(c.itemAgreementRate).toBeNull();
+    expect(c.ksStatisticQuality).toBeNull();
+  });
+});
+
+describe('computeCohortItemMetrics', () => {
+  const mk = (profile: Record<string, unknown>, isPersona: boolean, cl: Array<{ id: string; status: 'passed' | 'failed' | 'blocked' }>) => ({
+    testerAddr: Math.random().toString(36).slice(2, 10),
+    isPersonaTest: isPersona,
+    checklistResults: cl,
+    profile,
+  });
+
+  it('flags a cohort×item where both sides fail as both-fail', () => {
+    const reports = [
+      // 3 humans, 3/3 fail on CL01 in novice
+      mk({ crypto_experience: 'novice' }, false, [{ id: 'CL01', status: 'failed' }]),
+      mk({ crypto_experience: 'novice' }, false, [{ id: 'CL01', status: 'failed' }]),
+      mk({ crypto_experience: 'novice' }, false, [{ id: 'CL01', status: 'failed' }]),
+      // 3 personas, 3/3 fail on CL01 in novice
+      mk({ crypto_experience: 'novice' }, true, [{ id: 'CL01', status: 'failed' }]),
+      mk({ crypto_experience: 'novice' }, true, [{ id: 'CL01', status: 'failed' }]),
+      mk({ crypto_experience: 'novice' }, true, [{ id: 'CL01', status: 'failed' }]),
+    ];
+    const metrics = computeCohortItemMetrics(reports);
+    const cell = metrics.find((m) => m.cohort === 'novice' && m.itemId === 'CL01');
+    expect(cell).toBeDefined();
+    expect(cell!.humanFailRate).toBe(1);
+    expect(cell!.personaFailRate).toBe(1);
+    expect(cell!.flag).toBe('both-fail');
+  });
+
+  it('flags persona-worse when persona fails >=30pp more than human', () => {
+    const reports = [
+      // 4 humans, all pass
+      mk({ crypto_experience: 'advanced' }, false, [{ id: 'CL02', status: 'passed' }]),
+      mk({ crypto_experience: 'advanced' }, false, [{ id: 'CL02', status: 'passed' }]),
+      mk({ crypto_experience: 'advanced' }, false, [{ id: 'CL02', status: 'passed' }]),
+      mk({ crypto_experience: 'advanced' }, false, [{ id: 'CL02', status: 'passed' }]),
+      // 4 personas, 3 fail 1 pass (75% fail) — classic bailout signature
+      mk({ crypto_experience: 'advanced' }, true, [{ id: 'CL02', status: 'failed' }]),
+      mk({ crypto_experience: 'advanced' }, true, [{ id: 'CL02', status: 'failed' }]),
+      mk({ crypto_experience: 'advanced' }, true, [{ id: 'CL02', status: 'failed' }]),
+      mk({ crypto_experience: 'advanced' }, true, [{ id: 'CL02', status: 'passed' }]),
+    ];
+    const metrics = computeCohortItemMetrics(reports);
+    const cell = metrics.find((m) => m.itemId === 'CL02')!;
+    expect(cell.humanFailRate).toBe(0);
+    expect(cell.personaFailRate).toBe(0.75);
+    expect(cell.flag).toBe('persona-worse');
+  });
+
+  it('marks a cell insufficient when one side has <2 samples', () => {
+    const reports = [
+      mk({ crypto_experience: 'novice' }, false, [{ id: 'CL01', status: 'failed' }]),
+      mk({ crypto_experience: 'novice' }, true, [{ id: 'CL01', status: 'failed' }]),
+      mk({ crypto_experience: 'novice' }, true, [{ id: 'CL01', status: 'failed' }]),
+    ];
+    const metrics = computeCohortItemMetrics(reports);
+    const cell = metrics.find((m) => m.itemId === 'CL01')!;
+    expect(cell.humanN).toBe(1);
+    expect(cell.personaN).toBe(2);
+    expect(cell.flag).toBe('insufficient');
+  });
+
+  it('excludes blocked statuses from the denominator', () => {
+    const reports = [
+      mk({ crypto_experience: 'novice' }, false, [{ id: 'CL01', status: 'passed' }]),
+      mk({ crypto_experience: 'novice' }, false, [{ id: 'CL01', status: 'passed' }]),
+      mk({ crypto_experience: 'novice' }, false, [{ id: 'CL01', status: 'blocked' }]),
+      mk({ crypto_experience: 'novice' }, true, [{ id: 'CL01', status: 'passed' }]),
+      mk({ crypto_experience: 'novice' }, true, [{ id: 'CL01', status: 'blocked' }]),
+    ];
+    const metrics = computeCohortItemMetrics(reports);
+    const cell = metrics.find((m) => m.itemId === 'CL01')!;
+    // 2 human non-blocked (both passed) / 1 persona non-blocked (passed)
+    expect(cell.humanN).toBe(2);
+    expect(cell.personaN).toBe(1);
+    expect(cell.humanFailRate).toBe(0);
+    expect(cell.personaFailRate).toBe(0);
+    // personaN<2 → insufficient regardless of rates
+    expect(cell.flag).toBe('insufficient');
   });
 });

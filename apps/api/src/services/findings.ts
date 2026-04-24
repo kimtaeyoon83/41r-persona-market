@@ -165,8 +165,21 @@ export function deriveFindings(inp: FindingsInput): Finding[] {
 
   // ─── Cohort-level findings (the real persona≈human story) ────
   if (inp.byCohort && inp.byCohort.length > 0) {
-    const hasEnoughSamples = (c: CohortMetrics) => c.humanCount >= 3 && c.personaCount >= 3;
-    const powered = inp.byCohort.filter(hasEnoughSamples);
+    // "Powered" requires both sides to have ≥3 samples AND the derived
+    // metrics to be non-null. The size check alone isn't enough because
+    // CohortMetrics returns null for qualityAbsDiff / itemAgreementRate
+    // when a side was empty — this guards against ranking a cohort on
+    // numbers that don't exist.
+    const powered = inp.byCohort.filter((c): c is CohortMetrics & {
+      qualityAbsDiff: number;
+      itemAgreementRate: number;
+      humanMeanQuality: number;
+      personaMeanQuality: number;
+    } =>
+      c.humanCount >= 3 && c.personaCount >= 3 &&
+      c.qualityAbsDiff !== null && c.itemAgreementRate !== null &&
+      c.humanMeanQuality !== null && c.personaMeanQuality !== null,
+    );
 
     if (powered.length >= 2) {
       // Best match — tightest |Δ| + strongest agreement.

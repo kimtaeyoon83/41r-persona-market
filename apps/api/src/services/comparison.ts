@@ -244,11 +244,18 @@ export interface CohortMetrics {
   cohort: CohortKey;
   humanCount: number;
   personaCount: number;
-  humanMeanQuality: number;
-  personaMeanQuality: number;
-  qualityAbsDiff: number;
-  itemAgreementRate: number;  // majority agreement on checklist items
-  ksStatisticQuality: number; // KS between human and persona quality distributions
+  /** `null` when no human reports exist in this cohort — `mean([])=0`
+   *  would masquerade as a real rating of 0. */
+  humanMeanQuality: number | null;
+  personaMeanQuality: number | null;
+  /** `null` when either side is empty. Computing `|0 − x|` on an empty
+   *  side produces a misleading gap equal to the non-empty mean. */
+  qualityAbsDiff: number | null;
+  /** `null` when either side has no checklist data — a "majority" over
+   *  zero votes is meaningless. */
+  itemAgreementRate: number | null;
+  /** `null` when either side has no quality scores. */
+  ksStatisticQuality: number | null;
 }
 
 /**
@@ -295,22 +302,134 @@ export function computeCohortMetrics(
 
   const out: CohortMetrics[] = [];
   for (const [key, b] of buckets.entries()) {
-    // Item-level agreement — majority vote on each side, count matches.
-    const { overallAgreementRate } = computePerItemAgreement(b.humanCL, b.personaCL);
+    const humanMean = b.humanQ.length ? round3(mean(b.humanQ)) : null;
+    const personaMean = b.personaQ.length ? round3(mean(b.personaQ)) : null;
+    const absDiff = humanMean !== null && personaMean !== null
+      ? round3(Math.abs(humanMean - personaMean))
+      : null;
+    // Item agreement and KS both require populated vectors on both
+    // sides; otherwise they produce 0 which reads as "perfect match".
+    const agreement = b.humanCL.length > 0 && b.personaCL.length > 0
+      ? round3(computePerItemAgreement(b.humanCL, b.personaCL).overallAgreementRate)
+      : null;
+    const ks = b.humanQ.length > 0 && b.personaQ.length > 0
+      ? round3(ksStatistic(b.humanQ, b.personaQ))
+      : null;
     out.push({
       cohort: key,
       humanCount: b.humanCL.length,
       personaCount: b.personaCL.length,
-      humanMeanQuality: round3(mean(b.humanQ)),
-      personaMeanQuality: round3(mean(b.personaQ)),
-      qualityAbsDiff: round3(Math.abs(mean(b.humanQ) - mean(b.personaQ))),
-      itemAgreementRate: round3(overallAgreementRate),
-      ksStatisticQuality: round3(ksStatistic(b.humanQ, b.personaQ)),
+      humanMeanQuality: humanMean,
+      personaMeanQuality: personaMean,
+      qualityAbsDiff: absDiff,
+      itemAgreementRate: agreement,
+      ksStatisticQuality: ks,
     });
   }
 
   // Sort by descending population — most-populated cohorts first.
   out.sort((a, b) => (b.humanCount + b.personaCount) - (a.humanCount + a.personaCount));
+  return out;
+}
+
+// ─── Cohort × checklist-item cross-table ────────────────────────────
+
+/** Per-cohort, per-item breakdown. This is the "who fails what" matrix
+ *  that a flat cohort metric can't surface — the signal that "novice
+ *  cohort fails onboarding item 80%, advanced cohort passes at 90%" is
+ *  only visible when you join cohorts with items. */
+export interface CohortItemMetric {
+  cohort: CohortKey;
+  itemId: string;
+  humanN: number;           // checklist attempts by humans in cohort, excluding 'blocked'
+  personaN: number;
+  humanFailRate: number | null;   // null when humanN === 0
+  personaFailRate: number | null;
+  /** Direction of the persona↔human signal. Drives UI colouring so a
+   *  cell telegraphs whether it's a real problem, a persona artifact,
+   *  or underpowered.
+   *    both-fail       — both sides fail ≥ 50% → genuine product issue
+   *    persona-worse   — persona fails ≥30pp more than human → likely
+   *                      persona artifact (agent gave up where humans
+   *                      recovered), warrants persona tuning.
+   *    human-worse     — human fails ≥30pp more than persona →
+   *                      persona glosses over a real problem.
+   *    both-pass       — both fail ≤ 20%
+   *    split           — disagreement that doesn't cleanly fit above
+   *    insufficient    — either side has n<2 samples (can't read). */
+  flag: 'both-fail' | 'persona-worse' | 'human-worse' | 'both-pass' | 'split' | 'insufficient';
+}
+
+/**
+ * Compute the cohort × item fail-rate matrix. Sits next to
+ * computeCohortMetrics; reuses the same bucketing logic but pivots to
+ * per-item rates. Blocked statuses are excluded from the denominator
+ * (matches ChecklistItemStats.passRate in diagnosis.ts).
+ */
+export function computeCohortItemMetrics(
+  reports: Array<{
+    testerAddr: string;
+    isPersonaTest: boolean;
+    checklistResults: ChecklistItemResult[] | null;
+    profile: Record<string, unknown> | null;
+  }>,
+  dimensions?: Parameters<typeof cohortKey>[1],
+): CohortItemMetric[] {
+  type CohortItemBucket = { humanPass: number; humanFail: number; personaPass: number; personaFail: number };
+  const buckets = new Map<string, { cohort: CohortKey; itemId: string; b: CohortItemBucket }>();
+
+  for (const r of reports) {
+    const ck = cohortKey(r.profile, dimensions);
+    const cl = Array.isArray(r.checklistResults) ? r.checklistResults : [];
+    for (const c of cl) {
+      if (!c?.id) continue;
+      if (c.status === 'blocked') continue; // excluded from rate denominators
+      const key = `${ck}::${c.id}`;
+      const row = buckets.get(key) ?? {
+        cohort: ck,
+        itemId: c.id,
+        b: { humanPass: 0, humanFail: 0, personaPass: 0, personaFail: 0 },
+      };
+      if (r.isPersonaTest) {
+        if (c.status === 'passed') row.b.personaPass += 1;
+        else if (c.status === 'failed') row.b.personaFail += 1;
+      } else {
+        if (c.status === 'passed') row.b.humanPass += 1;
+        else if (c.status === 'failed') row.b.humanFail += 1;
+      }
+      buckets.set(key, row);
+    }
+  }
+
+  const round3 = (v: number) => Math.round(v * 1000) / 1000;
+  const out: CohortItemMetric[] = [];
+
+  for (const { cohort, itemId, b } of buckets.values()) {
+    const humanN = b.humanPass + b.humanFail;
+    const personaN = b.personaPass + b.personaFail;
+    const humanFail = humanN === 0 ? null : round3(b.humanFail / humanN);
+    const personaFail = personaN === 0 ? null : round3(b.personaFail / personaN);
+
+    let flag: CohortItemMetric['flag'];
+    if (humanN < 2 || personaN < 2 || humanFail === null || personaFail === null) {
+      flag = 'insufficient';
+    } else if (humanFail >= 0.5 && personaFail >= 0.5) {
+      flag = 'both-fail';
+    } else if (humanFail <= 0.2 && personaFail <= 0.2) {
+      flag = 'both-pass';
+    } else if (personaFail - humanFail >= 0.3) {
+      flag = 'persona-worse';
+    } else if (humanFail - personaFail >= 0.3) {
+      flag = 'human-worse';
+    } else {
+      flag = 'split';
+    }
+
+    out.push({ cohort, itemId, humanN, personaN, humanFailRate: humanFail, personaFailRate: personaFail, flag });
+  }
+
+  // Sort cohort asc, then itemId asc — stable grid rendering.
+  out.sort((a, b) => a.cohort.localeCompare(b.cohort) || a.itemId.localeCompare(b.itemId));
   return out;
 }
 

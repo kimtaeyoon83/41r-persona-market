@@ -505,6 +505,9 @@ export default function TestDetailPage() {
         </div>
       </div>
 
+      {/* Task #6 — validated-report rendering: fidelity banner + audit
+          footer get hoisted out of the markdown into structured
+          components, the rest stays in ReactMarkdown. */}
       <div className={`space-y-4 ${tab === 3 ? '' : 'hidden'}`}>
         {reports.length < 3 ? (
           <div className="hf-card p-6 text-center">
@@ -559,13 +562,7 @@ export default function TestDetailPage() {
             </div>
 
             {diagnosis?.markdown ? (
-              <div className="hf-card p-6">
-                <div className="prose-diagnosis max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {diagnosis.markdown}
-                  </ReactMarkdown>
-                </div>
-              </div>
+              <DiagnosisMarkdown markdown={diagnosis.markdown} />
             ) : (
               <div className="hf-card p-6 text-center">
                 <p className="t-body-s text-[var(--fg-1)]">
@@ -579,6 +576,109 @@ export default function TestDetailPage() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Validated-report rendering (Task #6) ───────────────────────────
+// The diagnosis markdown returned by the API contains three layers:
+//   1. A top-of-document blockquote that opens with one of ⚠️ ✅ ℹ️ 🟡
+//      followed by "**신뢰도:" — this is the fidelity gate banner.
+//   2. The body (headings, tables, pain-point sections).
+//   3. An optional trailing blockquote that starts with "⚠ **Audit
+//      check**" — emitted by validateAuditCitations when the LLM
+//      invented a report ID.
+// We pull 1 & 3 out so they render as real components (colored border,
+// icon, distinct from generic blockquotes), and hand the middle to
+// ReactMarkdown as before.
+
+interface ParsedDiagnosis {
+  banner: { variant: 'danger' | 'warn' | 'success' | 'info'; icon: string; text: string } | null;
+  body: string;
+  auditWarning: string | null;
+}
+
+function parseDiagnosisMarkdown(md: string): ParsedDiagnosis {
+  let banner: ParsedDiagnosis['banner'] = null;
+  let auditWarning: string | null = null;
+  let body = md;
+
+  // Fidelity banner: leading blockquote whose first line has one of the
+  // four sentinel emojis + "**신뢰도:". Match the block (contiguous
+  // lines prefixed with "> ") and strip it.
+  const bannerRe = /^(>\s*(⚠️|✅|ℹ️|🟡)\s*\*\*신뢰도[\s\S]*?)(?=\n\n|\n#|\n---)/;
+  const bm = body.match(bannerRe);
+  if (bm) {
+    const raw = bm[1];
+    const icon = bm[2];
+    const variant: 'danger' | 'warn' | 'success' | 'info' =
+      icon === '⚠️' ? 'danger'
+      : icon === '✅' ? 'success'
+      : icon === '🟡' ? 'warn'
+      : 'info';
+    // Strip the leading "> " prefix from each line so we can re-render
+    // the banner text without nested-blockquote styling.
+    const text = raw.replace(/^>\s?/gm, '').replace(/^(⚠️|✅|ℹ️|🟡)\s*/, '').trim();
+    banner = { variant, icon, text };
+    body = body.slice(bm[0].length).replace(/^\s+/, '');
+  }
+
+  // Audit warning footer: trailing blockquote beginning with
+  // "> ⚠ **Audit check**" — split off and render separately.
+  const auditRe = /\n>\s*⚠\s*\*\*Audit check\*\*[\s\S]*$/;
+  const am = body.match(auditRe);
+  if (am) {
+    auditWarning = am[0].replace(/^\n>\s?/, '').replace(/\n>\s?/g, '\n').trim();
+    body = body.slice(0, am.index).trim();
+  }
+
+  return { banner, body, auditWarning };
+}
+
+function DiagnosisMarkdown({ markdown }: { markdown: string }) {
+  const { banner, body, auditWarning } = parseDiagnosisMarkdown(markdown);
+
+  const bannerStyle = banner && ({
+    danger: { borderColor: 'var(--danger-line)', background: 'var(--danger-soft)', color: 'var(--danger)' },
+    warn:   { borderColor: 'var(--warn-line)',   background: 'var(--warn-soft)',   color: 'var(--warn)'   },
+    success:{ borderColor: 'var(--success-line)',background: 'var(--success-soft)',color: 'var(--success)'},
+    info:   { borderColor: 'var(--info-line)',   background: 'var(--info-soft)',   color: 'var(--info)'   },
+  } as const)[banner.variant];
+
+  return (
+    <div className="space-y-4">
+      {banner && (
+        <div
+          className="hf-card p-4 flex gap-3 items-start"
+          style={{ borderColor: bannerStyle!.borderColor, background: bannerStyle!.background }}
+        >
+          <span className="text-xl leading-none shrink-0" aria-hidden>{banner.icon}</span>
+          <div className="prose-diagnosis max-w-none" style={{ color: 'var(--fg-0)' }}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{banner.text}</ReactMarkdown>
+          </div>
+        </div>
+      )}
+
+      <div className="hf-card p-6">
+        <div className="prose-diagnosis max-w-none">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+        </div>
+      </div>
+
+      {auditWarning && (
+        <div
+          className="hf-card p-4 flex gap-3 items-start"
+          style={{ borderColor: 'var(--danger-line)', background: 'var(--danger-soft)' }}
+        >
+          <span className="text-xl leading-none shrink-0" aria-hidden>⚠</span>
+          <div className="prose-diagnosis max-w-none" style={{ color: 'var(--fg-0)' }}>
+            <p className="t-caption" style={{ color: 'var(--danger)', marginTop: 0 }}>
+              Hallucinated citation detected
+            </p>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{auditWarning}</ReactMarkdown>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

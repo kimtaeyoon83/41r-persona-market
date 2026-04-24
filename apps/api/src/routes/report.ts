@@ -4,6 +4,7 @@ import { db, schema } from '../db/index.js';
 import { calculateQualityScore, QualityScoreTimeout, type QualityResult } from '../services/llm.js';
 import {
   buildConfusionMatrix,
+  computeCohortItemMetrics,
   computeCohortMetrics,
   computePerItemAgreement,
   convergenceCurve,
@@ -477,15 +478,15 @@ router.get('/compare/:testId', async (req, res) => {
     // running on jup.ag should look like a 20s/beginner/mobile human
     // running on jup.ag, not like the 40s/advanced expert in the next
     // row of the reports table.
-    const byCohort = computeCohortMetrics(
-      reports.map((r) => ({
-        testerAddr: r.testerAddr,
-        isPersonaTest: r.isPersonaTest,
-        qualityScore: r.qualityScore,
-        checklistResults: (r.checklistResults as Array<{ id: string; status: ChecklistStatus }> | null) ?? null,
-        profile: profileByWallet.get(r.testerAddr) ?? null,
-      })),
-    );
+    const cohortInput = reports.map((r) => ({
+      testerAddr: r.testerAddr,
+      isPersonaTest: r.isPersonaTest,
+      qualityScore: r.qualityScore,
+      checklistResults: (r.checklistResults as Array<{ id: string; status: ChecklistStatus }> | null) ?? null,
+      profile: profileByWallet.get(r.testerAddr) ?? null,
+    }));
+    const byCohort = computeCohortMetrics(cohortInput);
+    const byCohortItem = computeCohortItemMetrics(cohortInput);
 
     const findings = deriveFindings({
       manualCount: manual.length,
@@ -527,6 +528,7 @@ router.get('/compare/:testId', async (req, res) => {
         convergence,
         findings,
         by_cohort: byCohort,
+        by_cohort_item: byCohortItem,
       },
     });
   } catch (error) {

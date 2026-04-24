@@ -92,6 +92,7 @@ interface CompareResponse {
     convergence: Array<{ n: number; humanMean: number; personaMean: number; absDiff: number }>;
     findings?: Finding[];
     by_cohort?: CohortMetric[];
+    by_cohort_item?: CohortItemMetric[];
   };
 }
 
@@ -99,11 +100,23 @@ interface CohortMetric {
   cohort: string;
   humanCount: number;
   personaCount: number;
-  humanMeanQuality: number;
-  personaMeanQuality: number;
-  qualityAbsDiff: number;
-  itemAgreementRate: number;
-  ksStatisticQuality: number;
+  // Null when the corresponding side of the cohort is empty — prevents
+  // the "0 == real score" misread in the table.
+  humanMeanQuality: number | null;
+  personaMeanQuality: number | null;
+  qualityAbsDiff: number | null;
+  itemAgreementRate: number | null;
+  ksStatisticQuality: number | null;
+}
+
+interface CohortItemMetric {
+  cohort: string;
+  itemId: string;
+  humanN: number;
+  personaN: number;
+  humanFailRate: number | null;
+  personaFailRate: number | null;
+  flag: 'both-fail' | 'persona-worse' | 'human-worse' | 'both-pass' | 'split' | 'insufficient';
 }
 
 const MATRIX_LABELS: MatrixLabel[] = ['passed', 'failed', 'blocked', 'none'];
@@ -251,6 +264,19 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
         </section>
       )}
 
+      {/* ─── Cohort × checklist matrix ───────────────────────────── */}
+      {comparison.by_cohort_item && comparison.by_cohort_item.length > 0 && (
+        <section className="hf-card p-5">
+          <h2 className="font-display font-semibold mb-1">Cohort × checklist — who fails what</h2>
+          <p className="text-xs text-[var(--text-secondary)] mb-4">
+            Per-cohort, per-item fail rates. Cells flag whether a failure is confirmed by both
+            sides (real product issue), persona-only (likely persona artifact — tuning target),
+            or human-only (persona missed a real problem). Blocked attempts are excluded.
+          </p>
+          <CohortItemMatrix rows={comparison.by_cohort_item} />
+        </section>
+      )}
+
       {/* ─── Convergence ─────────────────────────────────────────── */}
       <section className="hf-card p-5">
         <h2 className="font-display font-semibold mb-1">Convergence</h2>
@@ -390,7 +416,12 @@ export default function ExperimentPage({ params }: { params: { testId: string } 
 }
 
 function CohortBreakdown({ cohorts }: { cohorts: CohortMetric[] }) {
-  const maxDiff = Math.max(0.01, ...cohorts.map((c) => c.qualityAbsDiff));
+  const chartData = cohorts
+    .filter((c) => c.qualityAbsDiff !== null)
+    .map((c) => ({ cohort: c.cohort, qualityAbsDiff: c.qualityAbsDiff as number }));
+  const maxDiff = Math.max(0.01, ...chartData.map((c) => c.qualityAbsDiff));
+  const fmt = (v: number | null, digits = 2) => v === null ? '—' : v.toFixed(digits);
+  const fmtPct = (v: number | null) => v === null ? '—' : `${Math.round(v * 100)}%`;
   const labelFor = (k: string) => ({
     none: 'No crypto background',
     beginner: 'Crypto beginner',
@@ -407,7 +438,7 @@ function CohortBreakdown({ cohorts }: { cohorts: CohortMetric[] }) {
           |human mean − persona mean| (closer to 0 = better match)
         </div>
         <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={cohorts} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
+          <BarChart data={chartData} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3a" />
             <XAxis dataKey="cohort" stroke="#8a8aa5" />
             <YAxis stroke="#8a8aa5" domain={[0, Math.max(2, Math.ceil(maxDiff))]} />
@@ -415,6 +446,11 @@ function CohortBreakdown({ cohorts }: { cohorts: CohortMetric[] }) {
             <Bar dataKey="qualityAbsDiff" fill="#14F195" />
           </BarChart>
         </ResponsiveContainer>
+        {chartData.length === 0 && (
+          <div className="text-xs text-[var(--text-secondary)] italic">
+            No cohort has reports on both human and persona sides yet — the |Δ| metric is undefined.
+          </div>
+        )}
       </div>
 
       {/* Table — full numbers with context */}
@@ -434,7 +470,15 @@ function CohortBreakdown({ cohorts }: { cohorts: CohortMetric[] }) {
           <tbody>
             {cohorts.map((c) => {
               const underpowered = c.humanCount < 3 || c.personaCount < 3;
-              const strong = !underpowered && c.qualityAbsDiff <= 0.5 && c.itemAgreementRate >= 0.6;
+              const strong = !underpowered
+                && c.qualityAbsDiff !== null && c.qualityAbsDiff <= 0.5
+                && c.itemAgreementRate !== null && c.itemAgreementRate >= 0.6;
+              const deltaColor = c.qualityAbsDiff === null
+                ? 'text-[var(--text-secondary)]'
+                : c.qualityAbsDiff < 0.5 ? 'text-sol-green'
+                : c.qualityAbsDiff > 1.5 ? 'text-amber-500' : '';
+              const agreeColor = c.itemAgreementRate !== null && c.itemAgreementRate >= 0.6
+                ? 'text-sol-green' : '';
               return (
                 <tr
                   key={c.cohort}
@@ -450,15 +494,11 @@ function CohortBreakdown({ cohorts }: { cohorts: CohortMetric[] }) {
                       <span className="text-amber-500 ml-1" title="N<3 underpowered">⚠</span>
                     )}
                   </td>
-                  <td className="text-right">{c.humanMeanQuality.toFixed(2)}</td>
-                  <td className="text-right">{c.personaMeanQuality.toFixed(2)}</td>
-                  <td className={`text-right ${c.qualityAbsDiff < 0.5 ? 'text-sol-green' : c.qualityAbsDiff > 1.5 ? 'text-amber-500' : ''}`}>
-                    {c.qualityAbsDiff.toFixed(2)}
-                  </td>
-                  <td className={`text-right ${c.itemAgreementRate >= 0.6 ? 'text-sol-green' : ''}`}>
-                    {Math.round(c.itemAgreementRate * 100)}%
-                  </td>
-                  <td className="text-right">{c.ksStatisticQuality.toFixed(2)}</td>
+                  <td className="text-right">{fmt(c.humanMeanQuality)}</td>
+                  <td className="text-right">{fmt(c.personaMeanQuality)}</td>
+                  <td className={`text-right ${deltaColor}`}>{fmt(c.qualityAbsDiff)}</td>
+                  <td className={`text-right ${agreeColor}`}>{fmtPct(c.itemAgreementRate)}</td>
+                  <td className="text-right">{fmt(c.ksStatisticQuality)}</td>
                 </tr>
               );
             })}
@@ -467,6 +507,86 @@ function CohortBreakdown({ cohorts }: { cohorts: CohortMetric[] }) {
         <p className="text-[10px] text-[var(--text-secondary)] mt-2">
           Rows in green highlight cohorts where persona tracks human closely (|Δ| ≤ 0.5 and
           agreement ≥ 60%). ⚠ marks underpowered cohorts (n&lt;3 on either side).
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function CohortItemMatrix({ rows }: { rows: CohortItemMetric[] }) {
+  // Pivot to grid: unique cohorts (rows) × unique items (columns).
+  const cohorts = [...new Set(rows.map((r) => r.cohort))].sort();
+  const items = [...new Set(rows.map((r) => r.itemId))].sort();
+  const byKey = new Map(rows.map((r) => [`${r.cohort}::${r.itemId}`, r]));
+
+  const flagStyle: Record<CohortItemMetric['flag'], { bg: string; fg: string; label: string }> = {
+    'both-fail':     { bg: 'rgba(248, 113, 113, 0.22)', fg: '#fecaca', label: 'both fail' },
+    'persona-worse': { bg: 'rgba(251, 191, 36, 0.22)',  fg: '#fde68a', label: 'persona worse' },
+    'human-worse':   { bg: 'rgba(96, 165, 250, 0.22)',  fg: '#bfdbfe', label: 'human worse' },
+    'both-pass':     { bg: 'rgba(20, 241, 149, 0.18)',  fg: '#bbf7d0', label: 'both pass' },
+    'split':         { bg: 'rgba(148, 163, 184, 0.18)', fg: '#cbd5e1', label: 'split' },
+    'insufficient':  { bg: 'transparent',               fg: 'var(--text-secondary)', label: 'n<2' },
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Legend */}
+      <div className="flex flex-wrap gap-2">
+        {(Object.keys(flagStyle) as Array<CohortItemMetric['flag']>).map((f) => (
+          <span
+            key={f}
+            className="px-2 py-0.5 rounded text-[11px] font-mono"
+            style={{ background: flagStyle[f].bg, color: flagStyle[f].fg }}
+          >
+            {flagStyle[f].label}
+          </span>
+        ))}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs font-mono border-separate border-spacing-0">
+          <thead>
+            <tr className="text-[var(--text-secondary)]">
+              <th className="py-2 pr-3 text-left">cohort</th>
+              {items.map((it) => (
+                <th key={it} className="px-2 py-2 text-center">{it}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {cohorts.map((c) => (
+              <tr key={c}>
+                <td className="py-1.5 pr-3 font-mono">{c}</td>
+                {items.map((it) => {
+                  const cell = byKey.get(`${c}::${it}`);
+                  if (!cell) {
+                    return <td key={it} className="px-2 py-1.5 text-center text-[var(--text-secondary)]">—</td>;
+                  }
+                  const s = flagStyle[cell.flag];
+                  const pct = (v: number | null) => v === null ? '—' : `${Math.round(v * 100)}%`;
+                  return (
+                    <td
+                      key={it}
+                      className="px-2 py-1.5 text-center rounded"
+                      style={{ background: s.bg, color: s.fg }}
+                      title={`${cell.cohort} · ${cell.itemId}\nhumans: n=${cell.humanN}, fail=${pct(cell.humanFailRate)}\npersonas: n=${cell.personaN}, fail=${pct(cell.personaFailRate)}\nflag: ${cell.flag}`}
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <span>{pct(cell.humanFailRate)}</span>
+                        <span className="opacity-50">/</span>
+                        <span>{pct(cell.personaFailRate)}</span>
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="text-[10px] text-[var(--text-secondary)] mt-2">
+          Cell format: <span className="font-mono">human_fail% / persona_fail%</span>. Hover a cell
+          for sample sizes. Cohort column is the <span className="font-mono">crypto_experience</span>
+          {' '}key; item column is the checklist id.
         </p>
       </div>
     </div>
