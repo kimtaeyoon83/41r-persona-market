@@ -1,9 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  clusterPainPointDescriptions,
   computeFidelityBand,
   validateAuditCitations,
   type DiagnosisAggregate,
 } from '../services/scoring/diagnosis.js';
+
+// Stub the Anthropic client at module level so we can control what
+// the clusterer "sees" without making real API calls.
+vi.mock('../services/anthropic_client.js', () => {
+  const mockCreate = vi.fn();
+  return {
+    client: { messages: { create: mockCreate } },
+    withRoute: <T>(_route: string, fn: () => Promise<T>) => fn(),
+    __mockCreate: mockCreate,
+  };
+});
 
 const makeAggregate = (reportIds: string[]): DiagnosisAggregate => ({
   testId: 'test-uuid',
@@ -33,6 +45,77 @@ const makeAggregate = (reportIds: string[]): DiagnosisAggregate => ({
   allRecommendations: [],
   quirksEncountered: {},
   fidelity: { itemAgreementRate: null, pairedCount: 0, spearman: null, band: 'n/a' },
+});
+
+describe('clusterPainPointDescriptions', () => {
+  it('returns empty map for empty input', async () => {
+    const out = await clusterPainPointDescriptions([]);
+    expect(out.size).toBe(0);
+  });
+
+  it('returns identity for a single description (no LLM call needed)', async () => {
+    const out = await clusterPainPointDescriptions(['wallet 연결 차단']);
+    expect(out.get('wallet 연결 차단')).toBe('wallet 연결 차단');
+  });
+
+  it('uses LLM output to merge similar descriptions into one canonical key', async () => {
+    const mod = await import('../services/anthropic_client.js') as unknown as {
+      __mockCreate: ReturnType<typeof vi.fn>;
+    };
+    mod.__mockCreate.mockResolvedValueOnce({
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          clusters: [
+            { canonical: '지갑 연결 벽에 의한 진입 차단', members: [0, 1, 2] },
+            { canonical: '트랜잭션 내역 미제공', members: [3] },
+          ],
+        }),
+      }],
+    });
+
+    const out = await clusterPainPointDescriptions([
+      '로그인 벽 접근 불가',
+      '지갑 연결 시 진입 차단',
+      'Cannot proceed without wallet',
+      '인앱 트랜잭션 내역 부재',
+    ]);
+    expect(out.get('로그인 벽 접근 불가')).toBe('지갑 연결 벽에 의한 진입 차단');
+    expect(out.get('지갑 연결 시 진입 차단')).toBe('지갑 연결 벽에 의한 진입 차단');
+    expect(out.get('Cannot proceed without wallet')).toBe('지갑 연결 벽에 의한 진입 차단');
+    expect(out.get('인앱 트랜잭션 내역 부재')).toBe('트랜잭션 내역 미제공');
+  });
+
+  it('falls back to identity map when LLM throws', async () => {
+    const mod = await import('../services/anthropic_client.js') as unknown as {
+      __mockCreate: ReturnType<typeof vi.fn>;
+    };
+    mod.__mockCreate.mockRejectedValueOnce(new Error('network blip'));
+
+    const out = await clusterPainPointDescriptions(['A', 'B', 'C']);
+    expect(out.get('A')).toBe('A');
+    expect(out.get('B')).toBe('B');
+    expect(out.get('C')).toBe('C');
+  });
+
+  it('fills in unassigned indices with their own canonical (under-merge, not drop)', async () => {
+    const mod = await import('../services/anthropic_client.js') as unknown as {
+      __mockCreate: ReturnType<typeof vi.fn>;
+    };
+    // LLM only clusters the first 2 of 3 — index 2 is omitted
+    mod.__mockCreate.mockResolvedValueOnce({
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          clusters: [{ canonical: 'merged', members: [0, 1] }],
+        }),
+      }],
+    });
+    const out = await clusterPainPointDescriptions(['x', 'y', 'z']);
+    expect(out.get('x')).toBe('merged');
+    expect(out.get('y')).toBe('merged');
+    expect(out.get('z')).toBe('z');
+  });
 });
 
 describe('computeFidelityBand', () => {

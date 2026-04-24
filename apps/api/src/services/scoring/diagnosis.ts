@@ -124,10 +124,98 @@ function parseSentinelJson<T>(raw: unknown): T | null {
 }
 
 function normalizeStr(s: string): string {
-  // Crude normalisation for pain-point dedup. Strip whitespace + lower.
-  // Real NLP similarity would be nicer; for MVP this catches obvious
-  // duplicates like "로그인 벽 접근 불가" vs "로그인 벽 접근 불가 " .
+  // Crude fallback used only when semantic clustering is unavailable
+  // (empty input, LLM failure). The production path in
+  // clusterPainPointDescriptions() groups "로그인 벽 접근 불가" with
+  // "지갑 연결 시 진입 차단" — something a whitespace-and-lowercase
+  // match could never catch.
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Group pain-point descriptions into semantic clusters via a single
+ * Haiku batch call. Returns a description → canonical-key map the
+ * aggregate builder uses as the dedup key, so "로그인 벽 접근 불가"
+ * (persona) and "지갑 연결 시 진입 차단" (human) collapse into one
+ * frequency-map entry — which is the only way the "both" confirmation
+ * label can fire in a corpus where humans and personas phrase the
+ * same problem differently.
+ *
+ * Cost ~$0.0015/diagnosis (one batched call, negligible tokens).
+ * Failure mode: each description is its own cluster (identity map),
+ * matching the pre-Task-#13 behaviour so a transient LLM outage
+ * doesn't lose us the diagnosis entirely.
+ *
+ * Exported so tests can exercise the parse path without DB fixtures.
+ */
+export async function clusterPainPointDescriptions(
+  descriptions: string[],
+): Promise<Map<string, string>> {
+  const unique = [...new Set(descriptions.map((d) => d.trim()).filter(Boolean))];
+  if (unique.length === 0) return new Map();
+  if (unique.length === 1) return new Map([[unique[0], unique[0]]]);
+
+  const system = `당신은 UX 리서치 애널리스트입니다. 제품 pain point 설명 문장들을 의미적으로 같은 문제끼리 묶으세요.
+
+## 원칙
+- 같은 근본 문제(예: "로그인 벽 접근 불가" / "지갑 연결 시 진입 차단" / "Cannot proceed without wallet")는 하나의 cluster 로.
+- 표현은 다르지만 같은 UI 요소·같은 실패 mode 를 지칭하면 같은 cluster.
+- 애매하면 분리 (false merge 가 false split 보다 해롭습니다).
+- 각 cluster 에 짧은 canonical 한국어 라벨(최대 40자) 부여.
+
+## 출력 (JSON object 만)
+{
+  "clusters": [
+    {"canonical": "지갑 연결 벽에 의한 진입 차단", "members": [0, 2, 5]},
+    {"canonical": "트랜잭션 내역 미제공", "members": [1, 4]},
+    ...
+  ]
+}
+모든 index 가 정확히 한 cluster 에 속해야 합니다.`;
+
+  const user = `## Pain points\n${unique.map((d, i) => `${i}: ${d}`).join('\n')}`;
+
+  try {
+    const resp = await withRoute('diagnosis.cluster_pain_points', () =>
+      client.messages.create({
+        model: SCORING_MODELS.haiku,
+        max_tokens: 2000,
+        temperature: 0.1,
+        system,
+        messages: [{ role: 'user', content: user }],
+      }),
+    );
+    const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}') + 1;
+    if (start < 0 || end <= start) throw new Error('no JSON object');
+    const parsed = JSON.parse(raw.slice(start, end)) as {
+      clusters?: Array<{ canonical?: string; members?: number[] }>;
+    };
+
+    const map = new Map<string, string>();
+    const seen = new Set<number>();
+    for (const c of parsed.clusters ?? []) {
+      const canonical = String(c.canonical ?? '').trim();
+      if (!canonical) continue;
+      for (const idx of c.members ?? []) {
+        if (typeof idx !== 'number' || idx < 0 || idx >= unique.length) continue;
+        if (seen.has(idx)) continue; // LLM assigned the same description to two clusters — keep the first
+        seen.add(idx);
+        map.set(unique[idx], canonical);
+      }
+    }
+    // Any index the LLM left out falls back to its original string as
+    // its own cluster — better to under-merge than drop a pain point.
+    for (let i = 0; i < unique.length; i += 1) {
+      if (!seen.has(i)) map.set(unique[i], unique[i]);
+    }
+    return map;
+  } catch (err) {
+    console.warn('[diagnosis] pain-point clustering failed; falling back to identity map:',
+      err instanceof Error ? err.message : err);
+    return new Map(unique.map((d) => [d, d]));
+  }
 }
 
 /**
@@ -349,6 +437,24 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
     await Promise.all(humanExtractionTasks);
   }
 
+  // Pre-pass: collect every pain-point description (persona-engine
+  // sentinel + Task-#12 human extraction) and semantic-cluster them
+  // in one Haiku call. The cluster canonical becomes the dedup key
+  // for painPointMap — the only way "both"-confirmed pain points
+  // emerge when humans and personas phrase the same issue differently.
+  const descriptionsForClustering: string[] = [];
+  for (const r of reports) {
+    const answers = (r.questionnaireAnswers as Array<{ id: string; answer: string | number }> | null) ?? [];
+    const structured = parseSentinelJson<{
+      pain_points?: Array<{ description?: string }>;
+    }>(answers.find((a) => a.id === '_structured_report')?.answer);
+    const source = structured?.pain_points ?? humanPainPointsByReport.get(r.id) ?? [];
+    for (const pp of source) {
+      if (pp.description) descriptionsForClustering.push(String(pp.description));
+    }
+  }
+  const clusterMap = await clusterPainPointDescriptions(descriptionsForClustering);
+
   for (const r of reports) {
     const cl = (r.checklistResults as Array<{ id: string; status: string; memo: string }> | null) ?? [];
     let passed = 0, failed = 0, blocked = 0;
@@ -441,7 +547,11 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
       ?? [];
     for (const pp of painSource) {
       if (!pp.description) continue;
-      const key = normalizeStr(pp.description);
+      // Semantic cluster canonical is the dedup key; falls back to
+      // the normalised string when the clusterer had nothing to say
+      // about this description (empty map / LLM failure path).
+      const canonical = clusterMap.get(String(pp.description).trim());
+      const key = canonical ? normalizeStr(canonical) : normalizeStr(pp.description);
       if (!painPointMap.has(key)) painPointMap.set(key, { count: 0, citations: [] });
       const entry = painPointMap.get(key)!;
       entry.count += 1;
@@ -505,9 +615,16 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
   const qAvg = quality.length > 0 ? quality.reduce((a, b) => a + b, 0) / quality.length : 0;
 
   // Sort pain points by frequency desc, checklist by pass rate asc (worst first)
+  // Prefer the cluster's LLM-chosen canonical label when available so the
+  // rollup title reads "지갑 연결 벽에 의한 진입 차단" rather than whichever
+  // raw persona phrasing happened to arrive first.
+  const clusterCanonicalByKey = new Map<string, string>();
+  for (const canonical of new Set(clusterMap.values())) {
+    clusterCanonicalByKey.set(normalizeStr(canonical), canonical);
+  }
   const painPointFrequency = [...painPointMap.entries()]
-    .map(([_, v]) => ({
-      description: v.citations[0].description, // first-seen variant as canonical
+    .map(([k, v]) => ({
+      description: clusterCanonicalByKey.get(k) ?? v.citations[0].description,
       count: v.count,
       citations: v.citations,
     }))
