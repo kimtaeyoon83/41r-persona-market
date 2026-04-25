@@ -471,6 +471,12 @@ export async function runStagehandHybridAndPersist(args: {
     ...((sessionLog as { quirks?: Record<string, number> }).quirks
       ? [{ id: '_quirks', answer: JSON.stringify((sessionLog as { quirks: Record<string, number> }).quirks) }]
       : []),
+    // Captured error from a session-terminating throw (or zero-turn
+    // collapse). Lets RCA queries group failures by phase / last_action
+    // / message without re-running the persona. Pattern mirrors _quirks.
+    ...((sessionLog as { session_error?: unknown }).session_error
+      ? [{ id: '_session_error', answer: JSON.stringify((sessionLog as { session_error: unknown }).session_error) }]
+      : []),
   ];
 
   const [inserted] = await db.insert(schema.testReports).values({

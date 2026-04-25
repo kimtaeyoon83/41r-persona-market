@@ -65,6 +65,46 @@ function logStagehandUsage(
 // page_text/url/title/a11y fields populate when the runner captures
 // bookend page state (2026-04-22 enrichment — without them the
 // scoring adapter falls back to keyword matching).
+/** Captured shape of a session-terminating error. Persisted as a
+ *  `_session_error` sentinel inside questionnaireAnswers so we can
+ *  RCA the persona failure rate without re-running. Same pattern as
+ *  `_quirks` / `_quality_breakdown` — string fields, no schema change. */
+export interface SessionErrorInfo {
+  /** First 2000 chars of err.message (or String(err) for non-Errors). */
+  message: string;
+  /** Where in the runner the throw originated: 'init' | 'phase_a' |
+   *  'phase_b' | 'phase_c' | 'phase_d' | 'final' | 'cleanup'. Free-form
+   *  string so adding new phases later doesn't break consumers. */
+  phase: string;
+  /** Last `stagehand.act(...)` instruction or page.goto target attempted
+   *  before the throw. Capped at 500 chars. Undefined when phase='init'
+   *  or nothing had been tried yet. */
+  last_action?: string;
+  /** Top of err.stack, capped at 2000. Undefined for non-Error throws. */
+  stack?: string;
+}
+
+/** Pure helper invoked from each catch site to produce a SessionErrorInfo
+ *  with bounded field sizes. Bounded so a single rogue 50 KB stack trace
+ *  can't bloat a row. */
+export function captureSessionError(
+  err: unknown,
+  phase: string,
+  lastAction?: string,
+): SessionErrorInfo {
+  const messageRaw = err instanceof Error ? err.message : String(err);
+  const message = messageRaw.length > 2000 ? messageRaw.slice(0, 2000) : messageRaw;
+  const stackRaw = err instanceof Error ? err.stack : undefined;
+  const stack = stackRaw && stackRaw.length > 2000 ? stackRaw.slice(0, 2000) : stackRaw;
+  const last_action =
+    typeof lastAction === 'string' && lastAction.length > 0
+      ? lastAction.length > 500
+        ? lastAction.slice(0, 500)
+        : lastAction
+      : undefined;
+  return { message, phase, last_action, stack };
+}
+
 export interface HybridSessionLog {
   session_id: string;
   persona_id: string;
@@ -82,6 +122,10 @@ export interface HybridSessionLog {
    *  contextualise a low coverage session as "browser couldn't push
    *  past X banner", not a product defect. */
   quirks?: Record<string, number>;
+  /** Populated only when outcome='error' was set due to a thrown
+   *  exception (top-level catch) or zero-turn collapse. Persisted by
+   *  the route handler as a `_session_error` sentinel. */
+  session_error?: SessionErrorInfo;
   turns: Array<{
     turn: number;
     observation: {
@@ -297,7 +341,42 @@ export async function runStagehandHybrid(
     },
   });
 
-  await stagehand.init();
+  // Phase tracker — updated at each boundary so a thrown error in catch
+  // can be attributed to a runner stage (init / phase_a / … / final).
+  // lastAttemptedAction holds the most recent stagehand.act / page.goto
+  // target, giving RCA queries something to group on without a stack.
+  let currentPhase: string = 'init';
+  let lastAttemptedAction: string | undefined;
+  let sessionError: SessionErrorInfo | undefined;
+
+  try {
+    await stagehand.init();
+  } catch (err) {
+    sessionError = captureSessionError(err, 'init', lastAttemptedAction);
+    console.warn('[stagehand_hybrid] init failed:', sessionError.message);
+    // Init failed — no browser, no turns, no quirks. Emit the minimal
+    // sessionLog the caller expects with outcome=error + session_error
+    // populated, then bail before the main loop tries to use stagehand.
+    const endIsoNow = new Date().toISOString();
+    return {
+      sessionLog: {
+        session_id: sessionId,
+        persona_id: args.personaId,
+        url: args.url,
+        task: args.task,
+        mode: 'browser',
+        outcome: 'error',
+        total_turns: 0,
+        start_time: new Date(started).toISOString(),
+        end_time: endIsoNow,
+        duration_sec: Math.max(0.001, (Date.now() - started) / 1000),
+        turns: [],
+        screenshot_paths: [],
+        session_error: sessionError,
+      },
+      screenshotPaths: [],
+    };
+  }
   const screenshotPaths: string[] = [];
   const turns: HybridSessionLog['turns'] = [];
   let outcome: string = 'task_complete';
@@ -382,6 +461,13 @@ export async function runStagehandHybrid(
     captureRich?: boolean;
     outcomeTag?: 'ok' | 'failed' | 'error' | 'blocked' | null;
   }) {
+    // Best-effort attribution for the session_error sentinel — recording
+    // what the runner was trying to do most recently, so a top-level
+    // catch can produce "phase_c · act: Connect Phantom wallet" rather
+    // than just a stack trace.
+    if (opts.instruction) {
+      lastAttemptedAction = `${opts.action}: ${opts.instruction}`;
+    }
     const turnIdx = turns.length;
     // Screenshot — wrapped in raceWithTimeout because on wedged pages
     // (observed on together.ai + vercel.com after stagehand.act timeouts)
@@ -435,6 +521,7 @@ export async function runStagehandHybrid(
   try {
     const page = stagehand.context.pages()[0];
 
+    currentPhase = 'initial_nav';
     // ── Initial navigation (turn 0, rich capture) ──
     await page.goto(args.url, { waitUntil: 'domcontentloaded', timeoutMs: 30_000 });
     await new Promise((r) => setTimeout(r, 1_500));
@@ -447,6 +534,7 @@ export async function runStagehandHybrid(
       captureRich: true,
     });
 
+    currentPhase = 'phase_a';
     // ── Phase A: Site discovery ──
     const baseOrigin = new URL(args.url).origin;
     let discoveredLinks: string[] = [];
@@ -565,6 +653,7 @@ export async function runStagehandHybrid(
       }
     }
 
+    currentPhase = 'phase_b';
     // ── Phase B: Scroll exploration ──
     try {
       const pageHeight = await page.evaluate(
@@ -601,6 +690,7 @@ export async function runStagehandHybrid(
       /* non-blocking */
     }
 
+    currentPhase = 'phase_c';
     // ── Phase C: Checklist verification ──
     // Each item gets its own stagehand.act call + dedicated screenshot.
     // If the checklist is empty the scoring adapter still gets bookend
@@ -675,6 +765,7 @@ export async function runStagehandHybrid(
       );
     }
 
+    currentPhase = 'phase_d';
     // ── Phase D: Persona-specific exploration ──
     // Deferred import so the base runner stays decoupled from the
     // persona action generator (which itself does an LLM call).
@@ -753,6 +844,7 @@ export async function runStagehandHybrid(
       }
     }
 
+    currentPhase = 'final';
     // ── Final capture (rich) ──
     await captureTurn({
       page,
@@ -773,6 +865,7 @@ export async function runStagehandHybrid(
     }
   } catch (err) {
     outcome = 'error';
+    sessionError = captureSessionError(err, currentPhase, lastAttemptedAction);
     console.warn(
       '[stagehand_hybrid] run failed:',
       err instanceof Error ? err.message : err,
@@ -791,7 +884,20 @@ export async function runStagehandHybrid(
   // If nothing captured at all the browser never booted — outcome=error
   // so the scoring adapter reflects reality rather than pretending the
   // session completed.
-  if (turns.length === 0) outcome = 'error';
+  if (turns.length === 0) {
+    outcome = 'error';
+    if (!sessionError) {
+      // No exception was thrown but the runner produced zero turns —
+      // most likely page.goto silently resolved on a redirect/blank or
+      // every act() got short-circuited by quirks. Surface it as a
+      // distinct cause so RCA can tell "crash" from "no observations".
+      sessionError = captureSessionError(
+        new Error('zero turns captured (no observations recorded)'),
+        currentPhase,
+        lastAttemptedAction,
+      );
+    }
+  }
 
   const durationSec = Math.max(0.001, (Date.now() - started) / 1000);
 
@@ -809,6 +915,7 @@ export async function runStagehandHybrid(
     turns,
     screenshot_paths: screenshotPaths,
     quirks: Object.keys(quirkHits).length > 0 ? quirkHits : undefined,
+    session_error: sessionError,
   };
 
   return { sessionLog, screenshotPaths };
