@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  accumulatePainPointsForReport,
   buildSynthesisPayload,
   clusterPainPointDescriptions,
   computeFidelityBand,
   isHarnessErrorOutcome,
   validateAuditCitations,
   type DiagnosisAggregate,
+  type HarnessErrorReport,
+  type PainPointCitation,
 } from '../services/scoring/diagnosis.js';
 
 // Stub the Anthropic client at module level so we can control what
@@ -265,5 +268,130 @@ describe('buildSynthesisPayload', () => {
     };
     const payload = buildSynthesisPayload(agg);
     expect(payload.harnessErrorReports.length).toBeLessThanOrEqual(30);
+  });
+});
+
+describe('accumulatePainPointsForReport · jup.ag regression', () => {
+  // Mirrors the 14 errored persona reports we observed on the jup.ag
+  // test: outcome='error' with fabricated pain_points like "모바일
+  // 뷰포트 테스트 단계에서 drop" + "세션 로그 데이터 손상". Those pain
+  // points leaked into rank-1 before P3. These tests lock in that the
+  // accumulator keeps painPointMap clean on the legacy fixture shape.
+
+  const emptyCluster = new Map<string, string>();
+
+  function makeAcc() {
+    return {
+      painPointMap: new Map<string, { count: number; citations: PainPointCitation[] }>(),
+      harnessErrorReports: [] as HarnessErrorReport[],
+    };
+  }
+
+  it('legacy errored report: fabricated pain_points are dropped, report added to harnessErrorReports', () => {
+    const acc = makeAcc();
+    accumulatePainPointsForReport(
+      {
+        reportId: '0faf3d33-0601-45f1-9934-5bc6306ad40e',
+        testerAddr: 'Hkx82LPxTTuwa8L4c'.padEnd(44, 'a'),
+        isPersona: true,
+        outcome: 'error',
+        painSource: [
+          {
+            severity: 'high',
+            description:
+              '세션 로그 데이터 손상으로 인해 UI 상태 관찰 불가. turn 1의 JSON이 파싱 중단되어 지갑 연결, swap UI 등 어떤 페이지의 상태도 기록되지 않음.',
+            evidence_turn: 1,
+          },
+        ],
+        clusterMap: emptyCluster,
+      },
+      acc,
+    );
+
+    expect(acc.painPointMap.size).toBe(0);
+    expect(acc.harnessErrorReports).toHaveLength(1);
+    expect(acc.harnessErrorReports[0].outcome).toBe('error');
+    expect(acc.harnessErrorReports[0].reportId).toBe('0faf3d33-0601-45f1-9934-5bc6306ad40e');
+  });
+
+  it('legit persona report with outcome=partial: pain_points do land in painPointMap', () => {
+    const acc = makeAcc();
+    accumulatePainPointsForReport(
+      {
+        reportId: 'aa111111-0000-0000-0000-000000000000',
+        testerAddr: 'p'.repeat(44),
+        isPersona: true,
+        outcome: 'partial',
+        painSource: [
+          {
+            severity: 'medium',
+            description: '슬리피지 설정 모달이 직관적이지 않음',
+            evidence_turn: 3,
+          },
+        ],
+        clusterMap: emptyCluster,
+      },
+      acc,
+    );
+
+    expect(acc.harnessErrorReports).toHaveLength(0);
+    expect(acc.painPointMap.size).toBe(1);
+    const entry = [...acc.painPointMap.values()][0];
+    expect(entry.count).toBe(1);
+    expect(entry.citations[0].reportId).toBe('aa111111-0000-0000-0000-000000000000');
+    expect(entry.citations[0].evidenceTurn).toBe(3);
+  });
+
+  it('human report with outcome=unknown (no _quality_breakdown): still aggregates', () => {
+    // Humans rarely have the qb sentinel — the outcome reconstructs to
+    // 'unknown'. P3 is conservative — don't steal their findings.
+    const acc = makeAcc();
+    accumulatePainPointsForReport(
+      {
+        reportId: 'bb222222-0000-0000-0000-000000000000',
+        testerAddr: 'h'.repeat(44),
+        isPersona: false,
+        outcome: 'unknown',
+        painSource: [
+          { severity: 'high', description: '디자인 시스템 부재', evidence_turn: null },
+        ],
+        clusterMap: emptyCluster,
+      },
+      acc,
+    );
+
+    expect(acc.harnessErrorReports).toHaveLength(0);
+    expect(acc.painPointMap.size).toBe(1);
+  });
+
+  it('simulates 14 errored persona reports: zero painPointMap entries, 14 harness errors', () => {
+    const acc = makeAcc();
+    // Replays the jup.ag failure pattern: every persona errored with
+    // a distinct fabricated narrative. Before P3 these would dedupe by
+    // phrase and end up as 2-3 rank-1 fake findings.
+    const fabrications = [
+      '세션 로그 데이터 손상으로 인해 UI 상태 관찰 불가',
+      'turn 1에서 모바일 뷰포트 테스트 중 drop되어 어떤 UI도 관찰되지 않음',
+      '데스크톱 전용 설정으로 인해 검증이 중단',
+      'JSON 파싱 중단으로 세션 데이터 불완전',
+    ];
+    for (let i = 0; i < 14; i++) {
+      accumulatePainPointsForReport(
+        {
+          reportId: i.toString(16).padStart(8, '0') + '-ffff-ffff-ffff-ffffffffffff',
+          testerAddr: `persona${i}`.padEnd(44, 'p'),
+          isPersona: true,
+          outcome: 'error',
+          painSource: [
+            { severity: 'high', description: fabrications[i % fabrications.length], evidence_turn: 1 },
+          ],
+          clusterMap: emptyCluster,
+        },
+        acc,
+      );
+    }
+
+    expect(acc.painPointMap.size).toBe(0);
+    expect(acc.harnessErrorReports).toHaveLength(14);
   });
 });

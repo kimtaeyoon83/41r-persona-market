@@ -34,7 +34,7 @@ import {
 
 // ── Aggregate shapes ────────────────────────────────────────────────
 
-interface PainPointCitation {
+export interface PainPointCitation {
   severity: 'high' | 'medium' | 'low';
   description: string;
   personaTester: string;      // tester addr prefix for attribution
@@ -95,6 +95,61 @@ export function isHarnessErrorOutcome(
   outcome: string | null | undefined,
 ): boolean {
   return outcome === 'error';
+}
+
+/** Pure accumulator extracted from the main aggregation loop so legacy-
+ *  fixture regression tests can run without DB. For a single report it
+ *  either (a) routes pain points into the frequency map with full audit-
+ *  chain attribution, or (b) when the outcome is a harness failure,
+ *  pushes the report into `harnessErrorReports` and drops its fabricated
+ *  pain points. Mutates `acc` in place. */
+export function accumulatePainPointsForReport(
+  input: {
+    reportId: string;
+    testerAddr: string;
+    isPersona: boolean;
+    outcome: string;
+    painSource: Array<{
+      severity?: string;
+      description: string;
+      evidence_turn?: number | null;
+    }>;
+    clusterMap: Map<string, string>;
+  },
+  acc: {
+    painPointMap: Map<string, { count: number; citations: PainPointCitation[] }>;
+    harnessErrorReports: HarnessErrorReport[];
+  },
+): void {
+  if (isHarnessErrorOutcome(input.outcome)) {
+    acc.harnessErrorReports.push({
+      reportId: input.reportId,
+      testerAddr: input.testerAddr,
+      outcome: input.outcome,
+    });
+    return;
+  }
+  for (const pp of input.painSource) {
+    if (!pp.description) continue;
+    const canonical = input.clusterMap.get(String(pp.description).trim());
+    const key = canonical ? normalizeStr(canonical) : normalizeStr(pp.description);
+    if (!acc.painPointMap.has(key)) {
+      acc.painPointMap.set(key, { count: 0, citations: [] });
+    }
+    const entry = acc.painPointMap.get(key)!;
+    entry.count += 1;
+    entry.citations.push({
+      severity:
+        pp.severity === 'high' || pp.severity === 'medium' || pp.severity === 'low'
+          ? pp.severity
+          : 'low',
+      description: pp.description,
+      personaTester: input.testerAddr.slice(0, 10),
+      reportId: input.reportId,
+      evidenceTurn: typeof pp.evidence_turn === 'number' ? pp.evidence_turn : null,
+      isPersona: input.isPersona,
+    });
+  }
 }
 
 export interface DiagnosisAggregate {
@@ -578,41 +633,19 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
         evidence_turn: null as number | null,
       }))
       ?? [];
-    if (isHarnessErrorOutcome(outcome)) {
-      // Harness crashed before capturing real observations. Any
-      // pain_points on this report were fabricated by Haiku grounding
-      // on checklist task text rather than evidence — keep them out
-      // of painPointMap (which feeds the top-N product rank) and
-      // record the failure separately so the synthesis prompt can
-      // acknowledge "N sessions failed" without promoting infra
-      // artifacts to rank-1 findings.
-      harnessErrorReports.push({
+    // Routing lives in accumulatePainPointsForReport so the branch is
+    // testable with synthetic inputs (see jup.ag regression suite).
+    accumulatePainPointsForReport(
+      {
         reportId: r.id,
         testerAddr: r.testerAddr,
+        isPersona: !!r.isPersonaTest,
         outcome,
-      });
-    } else {
-      for (const pp of painSource) {
-        if (!pp.description) continue;
-        // Semantic cluster canonical is the dedup key; falls back to
-        // the normalised string when the clusterer had nothing to say
-        // about this description (empty map / LLM failure path).
-        const canonical = clusterMap.get(String(pp.description).trim());
-        const key = canonical ? normalizeStr(canonical) : normalizeStr(pp.description);
-        if (!painPointMap.has(key)) painPointMap.set(key, { count: 0, citations: [] });
-        const entry = painPointMap.get(key)!;
-        entry.count += 1;
-        entry.citations.push({
-          severity: (pp.severity === 'high' || pp.severity === 'medium' || pp.severity === 'low')
-            ? pp.severity : 'low',
-          description: pp.description,
-          personaTester: r.testerAddr.slice(0, 10),
-          reportId: r.id,
-          evidenceTurn: typeof pp.evidence_turn === 'number' ? pp.evidence_turn : null,
-          isPersona: !!r.isPersonaTest,
-        });
-      }
-    }
+        painSource,
+        clusterMap,
+      },
+      { painPointMap, harnessErrorReports },
+    );
     for (const s of structured?.positive_signals ?? []) allPositiveSignals.add(s);
     for (const s of structured?.recommendations ?? []) allRecommendations.add(s);
 
