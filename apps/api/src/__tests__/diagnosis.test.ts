@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildSynthesisPayload,
   clusterPainPointDescriptions,
   computeFidelityBand,
   isHarnessErrorOutcome,
@@ -222,5 +223,47 @@ describe('isHarnessErrorOutcome', () => {
   it('tolerates null / undefined input', () => {
     expect(isHarnessErrorOutcome(null)).toBe(false);
     expect(isHarnessErrorOutcome(undefined)).toBe(false);
+  });
+});
+
+describe('buildSynthesisPayload', () => {
+  // Pure trim+shape function — what actually gets sent to Sonnet as the
+  // aggregate JSON. Exported so we can assert harnessErrorReports lands
+  // in the prompt as a separate bucket (not mixed into painPointFrequency).
+
+  it('emits an empty harnessErrorReports field when none exist', () => {
+    const agg = makeAggregate(['ab12cd34-aaaa-bbbb-cccc-000000000000']);
+    const payload = buildSynthesisPayload(agg);
+    expect(payload.harnessErrorReports).toEqual([]);
+  });
+
+  it('includes harnessErrorReports in the payload so synth can surface them', () => {
+    const agg: DiagnosisAggregate = {
+      ...makeAggregate(['aa11bb22-0000-0000-0000-000000000000']),
+      harnessErrorReports: [
+        { reportId: 'aa11bb22-0000-0000-0000-000000000000', testerAddr: 'w'.repeat(44), outcome: 'error' },
+        { reportId: 'cc33dd44-0000-0000-0000-000000000000', testerAddr: 'x'.repeat(44), outcome: 'error' },
+      ],
+    };
+    const payload = buildSynthesisPayload(agg);
+    expect(payload.harnessErrorReports).toHaveLength(2);
+    // Report IDs are shortened for the prompt the same way citations are,
+    // so the LLM can reference them with the existing audit-chain format.
+    expect(payload.harnessErrorReports[0].reportIdShort).toBe('aa11bb22');
+    expect(payload.harnessErrorReports[0].outcome).toBe('error');
+  });
+
+  it('caps the harnessErrorReports list so the prompt size stays bounded', () => {
+    const many = Array.from({ length: 50 }, (_, i) => ({
+      reportId: i.toString(16).padStart(8, '0') + '-0000-0000-0000-000000000000',
+      testerAddr: String(i).padEnd(44, 'z'),
+      outcome: 'error',
+    }));
+    const agg: DiagnosisAggregate = {
+      ...makeAggregate([]),
+      harnessErrorReports: many,
+    };
+    const payload = buildSynthesisPayload(agg);
+    expect(payload.harnessErrorReports.length).toBeLessThanOrEqual(30);
   });
 });

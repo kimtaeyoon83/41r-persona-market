@@ -751,7 +751,8 @@ const SYNTH_SYSTEM = `당신은 UX 리서치 분석가입니다. 여러 AI 페�
 3. 페르소나/테스터 표본 테이블 (누가 참여했나)
 4. 도달률 / 품질 분포 테이블
 5. **어디서 막히는가** — 1순위, 2순위, 3순위 (pain_point 빈도 기반). 각 항목마다 페르소나 인용문 1~2개
-6. **개선 권고** R1, R2, R3, ... — 현재 / 변경 / 임팩트 형식. **각 R 뒤에 \`[해결 대상: N순위 <pain point 이름>]\` 을 명시**하여 권고가 어느 pain_point 를 겨냥하는지 추적 가능하게. pain_point 랭킹에 없는 문제를 새로 만들지 마세요.
+5-1. **세션 실패 (harnessErrorReports)** — 이 필드가 비어있지 않으면 별도 섹션으로 "N개 세션이 관찰 데이터 수집 전에 종료되어 UX 평가에서 제외됨" 이라고 명시. 여기에 있는 리포트들은 **제품 pain_point 가 아닌 41R 플랫폼의 자동화 실패** 이므로 pain_point 랭킹 / R 권고 / 신뢰도 섹션 어디에도 제품 이슈로 인용하지 마세요. 단, "N회 / 전체 M회 중" 빈도만은 신뢰도 맥락으로 표시.
+6. **개선 권고** R1, R2, R3, ... — 현재 / 변경 / 임팩트 형식. **각 R 뒤에 \`[해결 대상: N순위 <pain point 이름>]\` 을 명시**하여 권고가 어느 pain_point 를 겨냥하는지 추적 가능하게. pain_point 랭킹에 없는 문제를 새로 만들지 마세요. harnessErrorReports 에 대한 R 은 내지 마세요 (제품 권고가 아님).
 7. 신뢰도 섹션 — "이 리포트에서 믿을 수 있는 것 / 믿지 말아야 할 것"
 8. 수치 감사표 (제공되는 숫자가 원본 데이터와 일치하는지)
 9. 부록 A (생성 과정) · 부록 B (원본 데이터 위치)
@@ -786,17 +787,12 @@ const SYNTH_SYSTEM = `당신은 UX 리서치 분석가입니다. 여러 AI 페�
 전체 출력은 마크다운 한 덩어리로, 코드펜스 없이 바로 출력하세요. 헤더 레벨은 \`#\` (최상위) / \`##\` (섹션) / \`###\` (서브섹션) 으로 통일.
 `;
 
-export async function synthesizeDiagnosis(
-  aggregate: DiagnosisAggregate,
-): Promise<string> {
-  if (aggregate.reportCount === 0) {
-    return '# 진단 불가\n\n아직 이 테스트에 제출된 리포트가 없습니다. 최소 3건의 리포트가 쌓인 뒤 다시 시도하세요.';
-  }
-
-  // Prepare trimmed aggregate for the prompt — the full persona list
-  // with all free-text answers is too verbose, so we send a lighter
-  // view with top 5 pain points and per-persona highlights.
-  const trimmed = {
+/** The trimmed shape actually passed to Sonnet as JSON. Exported so
+ *  tests can assert what the model "sees" without running real LLM
+ *  calls — in particular, that harnessErrorReports is surfaced as its
+ *  own bucket and not folded into painPointFrequency. */
+export function buildSynthesisPayload(aggregate: DiagnosisAggregate) {
+  return {
     testId: aggregate.testId,
     targetUrl: aggregate.targetUrl,
     requirements: aggregate.requirements,
@@ -864,7 +860,26 @@ export async function synthesizeDiagnosis(
     commonRecommendations: aggregate.allRecommendations.slice(0, 15),
     quirksEncountered: aggregate.quirksEncountered,
     fidelity: aggregate.fidelity,
+    // Harness-failure reports live in their own bucket so the model
+    // can surface them as "N sessions failed to run" — separate from
+    // product pain_points. Capped at 30 so the prompt stays bounded
+    // on a pathological 50+-failure run.
+    harnessErrorReports: aggregate.harnessErrorReports.slice(0, 30).map((h) => ({
+      reportIdShort: h.reportId.slice(0, 8),
+      tester: h.testerAddr.slice(0, 10),
+      outcome: h.outcome,
+    })),
   };
+}
+
+export async function synthesizeDiagnosis(
+  aggregate: DiagnosisAggregate,
+): Promise<string> {
+  if (aggregate.reportCount === 0) {
+    return '# 진단 불가\n\n아직 이 테스트에 제출된 리포트가 없습니다. 최소 3건의 리포트가 쌓인 뒤 다시 시도하세요.';
+  }
+
+  const trimmed = buildSynthesisPayload(aggregate);
 
   const userMsg = `다음 aggregate 데이터로 UX 진단 리포트를 작성하세요.\n\n` +
     `## Aggregate\n\`\`\`json\n${JSON.stringify(trimmed, null, 2)}\n\`\`\`\n\n` +
