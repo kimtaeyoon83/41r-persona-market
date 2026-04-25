@@ -157,6 +157,18 @@ export async function scoreChecklist(
     (args.sessionLog as { outcome?: unknown }).outcome ?? '',
   );
 
+  // Harness-failure guard — mirror of the one in report.ts. When a
+  // session errored with ≤1 turn captured, Sonnet was writing
+  // item-by-item failure narratives grounded in the checklist task text
+  // rather than in any actual observation. The rule-based fallback
+  // already emits the generic "세션 error로 시도 불가" memo, which is
+  // exactly the right shape for this case — route there immediately.
+  const turnsRaw = (args.sessionLog as { turns?: unknown }).turns;
+  const turnCount = Array.isArray(turnsRaw) ? turnsRaw.length : 0;
+  if (outcome === 'error' && turnCount <= 1) {
+    return ruleBasedFallback(items, summary, outcome);
+  }
+
   const useLlm = args.useLlm !== false;
   if (!useLlm) return ruleBasedFallback(items, summary, outcome);
 

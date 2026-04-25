@@ -1,5 +1,23 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// Stub so we can assert the harness-failure guard skips the LLM path.
+vi.mock('../services/anthropic_client.js', () => {
+  const mockCreate = vi.fn();
+  return {
+    client: { messages: { create: mockCreate } },
+    withRoute: <T>(_route: string, fn: () => Promise<T>) => fn(),
+    __mockCreate: mockCreate,
+  };
+});
+
 import { scoreChecklist } from '../services/scoring/checklist.js';
+
+async function getMockCreate() {
+  const mod = (await import('../services/anthropic_client.js')) as unknown as {
+    __mockCreate: ReturnType<typeof vi.fn>;
+  };
+  return mod.__mockCreate;
+}
 
 // Mirrors apps/persona-engine/tests/test_checklist_adapter.py for the
 // offline (useLlm=false) rule-based fallback path. The LLM path is
@@ -101,5 +119,92 @@ describe('scoreChecklist (rule-based fallback)', () => {
       useLlm: false,
     });
     expect(results[0].status).toBe('failed'); // no 3+ char keywords to match
+  });
+});
+
+describe('scoreChecklist · empty-session harness-failure guard', () => {
+  // Mirror of the report.ts guard (P1). When Stagehand crashes before
+  // capturing real observations, Sonnet was being asked to judge
+  // checklist items against an empty log. It dutifully invented
+  // item-by-item failure narratives ("모바일 뷰포트 테스트 중 drop",
+  // "선행 지갑 연결 단계 미완으로 blocked") — textually plausible but
+  // not grounded in any observation. Bypass the LLM on empty-session
+  // input so every blocked memo is the generic rule-based one instead.
+
+  it('outcome=error with zero turns bypasses LLM and marks items blocked (no fabrication)', async () => {
+    const mockCreate = await getMockCreate();
+    mockCreate.mockClear();
+
+    const results = await scoreChecklist({
+      checklist: [
+        { id: 'cl-1', task: 'Connect Phantom wallet', expected: '' },
+        { id: 'cl-2', task: 'Execute SOL→USDC swap', expected: '' },
+      ],
+      sessionLog: { outcome: 'error', mode: 'browser', turns: [] },
+      // useLlm default (true) — production default
+    });
+
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(results).toHaveLength(2);
+    for (const r of results) {
+      expect(r.status).toBe('blocked');
+      // Memo must be the generic rule-based one, not a narrative.
+      expect(r.memo).toMatch(/세션 error|시도 불가/);
+      // Explicit negative — anti-regression guard against known LLM
+      // hallucinations that leaked through to the jup.ag diagnosis.
+      expect(r.memo).not.toMatch(/모바일 뷰포트|JSON 파싱|selection viewport/i);
+    }
+  });
+
+  it('outcome=error with a single turn still bypasses LLM', async () => {
+    const mockCreate = await getMockCreate();
+    mockCreate.mockClear();
+
+    const results = await scoreChecklist({
+      checklist: [{ id: 'cl-1', task: 'any task', expected: '' }],
+      sessionLog: {
+        outcome: 'error',
+        mode: 'browser',
+        turns: [
+          { turn: 0, observation: { summary: 'initial' }, decision: {}, tool: null },
+        ],
+      },
+    });
+
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(results[0].status).toBe('blocked');
+  });
+
+  it('outcome=error with ≥2 turns still reaches the LLM (real partial run)', async () => {
+    // When the persona actually got somewhere before crashing, let the
+    // LLM read the observations it DID capture — those turns are real
+    // evidence and should drive per-item verdicts.
+    const mockCreate = await getMockCreate();
+    mockCreate.mockClear();
+    mockCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify([
+            { id: 'cl-1', status: 'passed', memo: 'wallet modal visible at turn 1', matched_turn_idx: 1 },
+          ]),
+        },
+      ],
+    });
+
+    const results = await scoreChecklist({
+      checklist: [{ id: 'cl-1', task: 'Connect wallet', expected: '' }],
+      sessionLog: {
+        outcome: 'error',
+        mode: 'browser',
+        turns: [
+          { turn: 0, observation: { summary: 'homepage' }, decision: {}, tool: { tool: 'goto' } },
+          { turn: 1, observation: { summary: 'wallet modal open' }, decision: {}, tool: { tool: 'click' } },
+        ],
+      },
+    });
+
+    expect(mockCreate).toHaveBeenCalledOnce();
+    expect(results[0].status).toBe('passed');
   });
 });
