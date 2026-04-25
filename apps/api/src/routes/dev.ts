@@ -18,6 +18,7 @@ import { randomBytes } from 'node:crypto';
 import { db, schema } from '../db/index.js';
 import { generateTestCases } from '../services/llm.js';
 import { recomputePersona } from '../services/persona.js';
+import { selectQueueableJobs } from '../services/queue_dedup.js';
 import { requireDevKey } from '../middleware/dev_auth.js';
 
 const router: RouterType = Router();
@@ -363,30 +364,28 @@ router.post('/autotest/trigger', async (req, res) => {
     const { runStagehandHybridAndPersist } = await import('./autotest.js');
     const { runTextModeAndPersist } = await import('../services/scoring/text_run.js');
 
+    // Dedup BOTH against DB-covered (existingReports) AND in-batch
+    // (matchPersonas occasionally returns 2 personas sharing a
+    // testerAddr — the second insert hits the unique constraint and
+    // throws, but only after a full $0.10 stagehand+scoring pass).
+    const { queue: queueable, skipped } = selectQueueableJobs(matches, selectedModes, covered);
+
     let chain: Promise<unknown> = Promise.resolve();
     const queued: Array<{ persona_id: string; tester_addr: string; mode: string }> = [];
-    let skipped = 0;
 
-    for (const m of matches) {
-      const personaId = m.persona.id;
-      const testerAddr = m.persona.testerAddr;
-      for (const mode of selectedModes) {
-        if (covered.has(`${testerAddr}::${mode}`)) {
-          skipped += 1;
-          continue;
-        }
-        queued.push({ persona_id: personaId, tester_addr: testerAddr, mode });
-        if (mode === 'stagehand_hybrid') {
-          chain = chain.then(() =>
-            runStagehandHybridAndPersist({ testId: test_id, personaId }).catch((e) => {
-              console.warn(`[dev autotest] stagehand_hybrid failed for ${personaId}:`, e instanceof Error ? e.message : e);
-            }),
-          );
-        } else {
-          void runTextModeAndPersist({ testId: test_id, personaId }).catch((e) => {
-            console.warn(`[dev autotest] text failed for ${personaId}:`, e instanceof Error ? e.message : e);
-          });
-        }
+    for (const job of queueable) {
+      const { personaId, testerAddr, mode } = job;
+      queued.push({ persona_id: personaId, tester_addr: testerAddr, mode });
+      if (mode === 'stagehand_hybrid') {
+        chain = chain.then(() =>
+          runStagehandHybridAndPersist({ testId: test_id, personaId }).catch((e) => {
+            console.warn(`[dev autotest] stagehand_hybrid failed for ${personaId}:`, e instanceof Error ? e.message : e);
+          }),
+        );
+      } else {
+        void runTextModeAndPersist({ testId: test_id, personaId }).catch((e) => {
+          console.warn(`[dev autotest] text failed for ${personaId}:`, e instanceof Error ? e.message : e);
+        });
       }
     }
     void chain;
