@@ -72,6 +72,31 @@ interface ChecklistItemStats {
   passRate: number; // passed / (total - blocked)
 }
 
+/** Infrastructure-failure report — stagehand crashed before capturing
+ *  any real observations, so the structured_report that Haiku produced
+ *  was grounded in checklist task text rather than actual evidence.
+ *  Surfacing these separately lets the synthesis prompt call out "N
+ *  sessions failed to run" without promoting the fabricated narratives
+ *  into the product pain-point rank. */
+export interface HarnessErrorReport {
+  reportId: string;
+  testerAddr: string;
+  outcome: string;
+}
+
+/** True iff the report's reconstructed outcome indicates the harness
+ *  crashed before collecting meaningful observation data. Used by
+ *  `buildDiagnosisAggregate` to keep fabricated pain points out of
+ *  `painPointFrequency`. Conservative: only the exact 'error' label
+ *  qualifies — 'unknown' (missing _quality_breakdown) or empty strings
+ *  do NOT, so a legitimate manual report without a qb sentinel keeps
+ *  its findings. */
+export function isHarnessErrorOutcome(
+  outcome: string | null | undefined,
+): boolean {
+  return outcome === 'error';
+}
+
 export interface DiagnosisAggregate {
   testId: string;
   targetUrl: string;
@@ -89,6 +114,12 @@ export interface DiagnosisAggregate {
   checklistStats: ChecklistItemStats[];
   perPersona: PersonaSummary[];
   painPointFrequency: Array<{ description: string; count: number; citations: PainPointCitation[] }>;
+  /** Reports whose session errored before capturing observations. Their
+   *  pain_points are intentionally excluded from `painPointFrequency`
+   *  (would contaminate product-finding rank with infra failures); they
+   *  live here so the synthesis prompt can acknowledge them as a
+   *  separate class of issue. */
+  harnessErrorReports: HarnessErrorReport[];
   allPositiveSignals: string[];
   allRecommendations: string[];
   /** Browser-quirk hits summed across every persona session that ran
@@ -350,6 +381,7 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
       checklistStats: [],
       perPersona: [],
       painPointFrequency: [],
+      harnessErrorReports: [],
       allPositiveSignals: [],
       allRecommendations: [],
       quirksEncountered: {},
@@ -394,6 +426,7 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
   const perPersona: PersonaSummary[] = [];
   const checklistAgg = new Map<string, ChecklistItemStats>();
   const painPointMap = new Map<string, { count: number; citations: PainPointCitation[] }>();
+  const harnessErrorReports: HarnessErrorReport[] = [];
   const allPositiveSignals = new Set<string>();
   const allRecommendations = new Set<string>();
   const quality: number[] = [];
@@ -545,25 +578,40 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
         evidence_turn: null as number | null,
       }))
       ?? [];
-    for (const pp of painSource) {
-      if (!pp.description) continue;
-      // Semantic cluster canonical is the dedup key; falls back to
-      // the normalised string when the clusterer had nothing to say
-      // about this description (empty map / LLM failure path).
-      const canonical = clusterMap.get(String(pp.description).trim());
-      const key = canonical ? normalizeStr(canonical) : normalizeStr(pp.description);
-      if (!painPointMap.has(key)) painPointMap.set(key, { count: 0, citations: [] });
-      const entry = painPointMap.get(key)!;
-      entry.count += 1;
-      entry.citations.push({
-        severity: (pp.severity === 'high' || pp.severity === 'medium' || pp.severity === 'low')
-          ? pp.severity : 'low',
-        description: pp.description,
-        personaTester: r.testerAddr.slice(0, 10),
+    if (isHarnessErrorOutcome(outcome)) {
+      // Harness crashed before capturing real observations. Any
+      // pain_points on this report were fabricated by Haiku grounding
+      // on checklist task text rather than evidence — keep them out
+      // of painPointMap (which feeds the top-N product rank) and
+      // record the failure separately so the synthesis prompt can
+      // acknowledge "N sessions failed" without promoting infra
+      // artifacts to rank-1 findings.
+      harnessErrorReports.push({
         reportId: r.id,
-        evidenceTurn: typeof pp.evidence_turn === 'number' ? pp.evidence_turn : null,
-        isPersona: !!r.isPersonaTest,
+        testerAddr: r.testerAddr,
+        outcome,
       });
+    } else {
+      for (const pp of painSource) {
+        if (!pp.description) continue;
+        // Semantic cluster canonical is the dedup key; falls back to
+        // the normalised string when the clusterer had nothing to say
+        // about this description (empty map / LLM failure path).
+        const canonical = clusterMap.get(String(pp.description).trim());
+        const key = canonical ? normalizeStr(canonical) : normalizeStr(pp.description);
+        if (!painPointMap.has(key)) painPointMap.set(key, { count: 0, citations: [] });
+        const entry = painPointMap.get(key)!;
+        entry.count += 1;
+        entry.citations.push({
+          severity: (pp.severity === 'high' || pp.severity === 'medium' || pp.severity === 'low')
+            ? pp.severity : 'low',
+          description: pp.description,
+          personaTester: r.testerAddr.slice(0, 10),
+          reportId: r.id,
+          evidenceTurn: typeof pp.evidence_turn === 'number' ? pp.evidence_turn : null,
+          isPersona: !!r.isPersonaTest,
+        });
+      }
     }
     for (const s of structured?.positive_signals ?? []) allPositiveSignals.add(s);
     for (const s of structured?.recommendations ?? []) allRecommendations.add(s);
@@ -679,6 +727,7 @@ export async function aggregateForDiagnosis(testId: string): Promise<DiagnosisAg
     checklistStats,
     perPersona,
     painPointFrequency,
+    harnessErrorReports,
     allPositiveSignals: [...allPositiveSignals],
     allRecommendations: [...allRecommendations],
     quirksEncountered,

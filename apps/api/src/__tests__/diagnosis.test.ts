@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   clusterPainPointDescriptions,
   computeFidelityBand,
+  isHarnessErrorOutcome,
   validateAuditCitations,
   type DiagnosisAggregate,
 } from '../services/scoring/diagnosis.js';
@@ -41,6 +42,7 @@ const makeAggregate = (reportIds: string[]): DiagnosisAggregate => ({
     source: 'manual',
   })),
   painPointFrequency: [],
+  harnessErrorReports: [],
   allPositiveSignals: [],
   allRecommendations: [],
   quirksEncountered: {},
@@ -186,5 +188,39 @@ describe('validateAuditCitations', () => {
     const { known, unknown } = validateAuditCitations(md, agg);
     expect(known).toEqual(['ab12cd34']);
     expect(unknown).toEqual([]);
+  });
+});
+
+describe('isHarnessErrorOutcome', () => {
+  // Used by buildDiagnosisAggregate to separate "stagehand never
+  // captured observations" (our infra failure) from real persona
+  // judgments. Reports in the former bucket get their pain_points
+  // moved to harnessErrorReports so the top-N rank isn't polluted
+  // with plausible-but-fabricated narratives about the product.
+
+  it('flags the reconstructed "error" label', () => {
+    expect(isHarnessErrorOutcome('error')).toBe(true);
+  });
+
+  it('does not flag legitimate session outcomes', () => {
+    expect(isHarnessErrorOutcome('task_complete')).toBe(false);
+    expect(isHarnessErrorOutcome('partial')).toBe(false);
+    expect(isHarnessErrorOutcome('abandoned')).toBe(false);
+    expect(isHarnessErrorOutcome('patience_exceeded')).toBe(false);
+    expect(isHarnessErrorOutcome('abandoned/patience_exceeded')).toBe(false);
+    expect(isHarnessErrorOutcome('max_turns_hit')).toBe(false);
+  });
+
+  it('does not flag unknown (outcome_weight missing) — conservative', () => {
+    // "unknown" means _quality_breakdown sentinel was missing, not that
+    // the run crashed. Don't steal its pain points — humans often leave
+    // qb blank when the report was filed manually.
+    expect(isHarnessErrorOutcome('unknown')).toBe(false);
+    expect(isHarnessErrorOutcome('')).toBe(false);
+  });
+
+  it('tolerates null / undefined input', () => {
+    expect(isHarnessErrorOutcome(null)).toBe(false);
+    expect(isHarnessErrorOutcome(undefined)).toBe(false);
   });
 });
