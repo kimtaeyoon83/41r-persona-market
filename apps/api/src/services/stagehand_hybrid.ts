@@ -293,14 +293,19 @@ const ACT_TIMEOUT_MS = 30_000;
  *  sequential chain's next persona still gets its turn. */
 const RUN_TIMEOUT_MS = 5 * 60 * 1000;
 
-class TimeoutError extends Error {
+export class TimeoutError extends Error {
   constructor(label: string, ms: number) {
     super(`timeout after ${ms}ms: ${label}`);
     this.name = 'TimeoutError';
   }
 }
 
-function raceWithTimeout<T>(
+/** Race a promise against a deadline. The original promise keeps
+ *  running in the background even after we reject — caller is on the
+ *  hook to handle dangling work (e.g. close the browser, abort the
+ *  request) if that matters. Reused by stagehand_hybrid for per-action
+ *  caps and by autotest.ts for the post-stagehand scoring chain. */
+export function raceWithTimeout<T>(
   promise: Promise<T>,
   ms: number,
   label: string,

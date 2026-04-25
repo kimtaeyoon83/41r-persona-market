@@ -10,7 +10,7 @@ import {
   isEngineEnabled,
   runAutoTestWithEngine,
 } from '../services/persona_engine.js';
-import { runStagehandHybrid } from '../services/stagehand_hybrid.js';
+import { raceWithTimeout, runStagehandHybrid } from '../services/stagehand_hybrid.js';
 import { uploadToR2 } from '../services/r2.js';
 import { skipPaymentVerify } from '../config/env.js';
 import { autotestRunBodySchema, validateBody } from '../schemas/index.js';
@@ -444,17 +444,37 @@ export async function runStagehandHybridAndPersist(args: {
   const soulText = buildPersonaSoul({ persona: { id: persona.id, vector: persona.vector }, tester });
 
   const typedSessionLog = sessionLog as unknown as SessionLog;
+  // Each scoring step is a single LLM call (Sonnet/Haiku). The SDK
+  // does its own retries on transient 429/503, but a hung connection
+  // or stalled stream has no upper bound — observed indirectly today
+  // when the example.com chain didn't progress past structured_report
+  // for one persona. 90s comfortably covers a 16k-token Sonnet output;
+  // anything longer is almost certainly a hang and the run should
+  // fail-fast so the next persona in the chain can proceed.
+  const SCORING_TIMEOUT_MS = 90_000;
   const checklistResults: ChecklistResult[] = checklist.length > 0
-    ? await scoreChecklist({ checklist, sessionLog: typedSessionLog })
+    ? await raceWithTimeout(
+        scoreChecklist({ checklist, sessionLog: typedSessionLog }),
+        SCORING_TIMEOUT_MS,
+        `scoreChecklist(${args.personaId.slice(0, 8)})`,
+      )
     : [];
   const questionnaireAnswers = questionnaire.length > 0
-    ? await answerQuestionnaire({ questionnaire, sessionLog: typedSessionLog, soulText })
+    ? await raceWithTimeout(
+        answerQuestionnaire({ questionnaire, sessionLog: typedSessionLog, soulText }),
+        SCORING_TIMEOUT_MS,
+        `answerQuestionnaire(${args.personaId.slice(0, 8)})`,
+      )
     : [];
-  const structuredReport = await generateStructuredReport({
-    sessionLog: typedSessionLog,
-    personaId: args.personaId,
-    checklistResults,
-  });
+  const structuredReport = await raceWithTimeout(
+    generateStructuredReport({
+      sessionLog: typedSessionLog,
+      personaId: args.personaId,
+      checklistResults,
+    }),
+    SCORING_TIMEOUT_MS,
+    `generateStructuredReport(${args.personaId.slice(0, 8)})`,
+  );
   const qualityBreakdown = computeQualityScore({
     sessionLog: typedSessionLog,
     checklistResults,
