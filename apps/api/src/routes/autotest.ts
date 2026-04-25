@@ -355,7 +355,34 @@ export async function runAutoTestAndPersist(args: {
  * produces. Net result lands in test_reports with the same shape, so
  * /compare sees hybrid runs uniformly.
  */
+/** Belt-and-suspenders ceiling on the whole persist chain. The inner
+ *  stagehand has its own 5-min hardcut; each of the 3 scoring LLM calls
+ *  is wrapped in 90s (F-B); but R2 upload + DB insert + any unforeseen
+ *  await have no individual cap. 12 min is loose enough that a
+ *  legitimately slow run (large session log, retried Anthropic 429) can
+ *  finish without us mistakenly killing it, but tight enough that a
+ *  truly wedged run releases the chain.then() before the operator gives
+ *  up and ctrl-Cs the API. */
+const PERSIST_HARDCUT_MS = 12 * 60 * 1000;
+
 export async function runStagehandHybridAndPersist(args: {
+  testId: string;
+  personaId: string;
+}): Promise<{
+  reportId: string;
+  outcome: string;
+  qualityScore: number | null;
+  screenshotUrls: string[];
+  sessionId: string | null;
+}> {
+  return raceWithTimeout(
+    runStagehandHybridAndPersistInner(args),
+    PERSIST_HARDCUT_MS,
+    `runStagehandHybridAndPersist(${args.personaId.slice(0, 8)})`,
+  );
+}
+
+async function runStagehandHybridAndPersistInner(args: {
   testId: string;
   personaId: string;
 }): Promise<{
