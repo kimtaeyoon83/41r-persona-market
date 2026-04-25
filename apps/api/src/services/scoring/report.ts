@@ -127,6 +127,28 @@ export async function generateStructuredReport(
 
   if (args.useLlm === false) return emptyReport(args.personaId, sessionId);
 
+  // Harness-failure guard: when a session errored with ≤1 turn captured,
+  // there are no observations for Haiku to ground on. The SYSTEM_PROMPT
+  // tells it not to fabricate, but in practice it invents plausible-
+  // sounding narratives ("mobile viewport drop", "JSON parse mid-session")
+  // that downstream diagnosis then promotes to top-rank product findings.
+  // Short-circuit with an explicit no-data report so zero hallucinated
+  // pain points leak into painPointFrequency.
+  const outcome = String((args.sessionLog as { outcome?: unknown }).outcome ?? '');
+  const turnsRaw = (args.sessionLog as { turns?: unknown }).turns;
+  const turnCount = Array.isArray(turnsRaw) ? turnsRaw.length : 0;
+  if (outcome === 'error' && turnCount <= 1) {
+    return {
+      summary: `세션이 turn ${turnCount}에서 error로 종료되었습니다. 관찰 데이터가 수집되지 않아 UX 평가를 수행할 수 없습니다. 재실행이 필요합니다.`,
+      ux_scores: { clarity: 0, trust: 0, efficiency: 0, overall: 0 },
+      pain_points: [],
+      positive_signals: [],
+      recommendations: ['세션 재실행 필요 — 원본 관찰 데이터가 수집되지 않았습니다.'],
+      persona_id: args.personaId,
+      session_id: sessionId,
+    };
+  }
+
   const summary = sessionSummary(args.sessionLog as Parameters<typeof sessionSummary>[0]);
   let checklistSummary = '';
   if (args.checklistResults && args.checklistResults.length > 0) {
