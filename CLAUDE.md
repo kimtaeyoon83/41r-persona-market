@@ -66,7 +66,7 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
 pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
-pnpm --filter api test      # Run vitest (204 tests)
+pnpm --filter api test      # Run vitest (238 tests)
 pnpm --filter api db:generate  # Emit a new versioned migration from schema changes → apps/api/drizzle/*.sql
 pnpm --filter api db:migrate   # Apply pending migrations to DATABASE_URL (preferred for Railway deploys)
 pnpm --filter api db:push      # Dev only: push schema directly, bypassing migration files
@@ -190,14 +190,22 @@ await signedRequest('/api/...', { method: 'POST', body }, { wallet, signMessage 
   Useful for browser E2E that can't easily mock web3.js internals.
 
 ### Testing
-- Vitest for API unit tests (`apps/api/src/__tests__/`) — **204 tests**
+- Vitest for API unit tests (`apps/api/src/__tests__/`) — **238 tests**
   (auth, cors, env, schemas, settlement-worker, scoring suites, the
   **43-test dashboard suite** covering timeAgo / spark7* / countInWindow /
-  avgInWindow / formatCountDelta / formatSumDelta / formatAvgDelta, and
-  the **14-test diagnosis suite** covering `validateAuditCitations` +
-  `computeFidelityBand` + `clusterPainPointDescriptions` — the
-  `clusterPainPointDescriptions` tests mock `services/anthropic_client`
-  via `vi.mock` so the LLM path is exercised without real API calls)
+  avgInWindow / formatCountDelta / formatSumDelta / formatAvgDelta, the
+  **diagnosis suite** covering `validateAuditCitations` +
+  `computeFidelityBand` + `clusterPainPointDescriptions` +
+  `isHarnessErrorOutcome` + `buildSynthesisPayload` +
+  `accumulatePainPointsForReport` — the LLM-touching tests mock
+  `services/anthropic_client` via `vi.mock` so the path is exercised
+  without real API calls. New suites added 2026-04-25:
+  `stagehand-error.test.ts` (captureSessionError helper, 6 tests),
+  `race-timeout.test.ts` (raceWithTimeout + TimeoutError, 4 tests),
+  `autotest-trigger-dedup.test.ts` (selectQueueableJobs, 6 tests).
+  Empty-session guard regression in `scoring-report.test.ts` +
+  `scoring-checklist.test.ts` asserts Haiku is NOT called when
+  `outcome=error && turns≤1` — anti-fabrication lock-in)
 - Pytest for persona-engine (`apps/persona-engine/tests/`) — 35 tests
 - Browser E2E harness at `/tmp/e2e-flows.py` (Phantom mock via tweetnacl +
   playwright). Covers tester register → report submit → persona generate
@@ -227,6 +235,34 @@ Route table (default is now **stagehand_hybrid** as of 2026-04-19):
 - **persona_agent native**: In-process vision+decision loop with patience
   budget. Kept for research but trips mid-flow on complex SPAs.
 - Legacy `services/autotest.ts` path still exists when `USE_PERSONA_ENGINE=0`.
+
+### Hang protection (2026-04-25 hardening)
+
+Three layered timeouts so the persona chain can never wedge indefinitely:
+
+| Layer | Cap | Scope |
+|---|---|---|
+| Inner stagehand `RUN_TIMEOUT_MS` | 5 min | browser run only (page.act, navigation) |
+| Per-LLM-call `SCORING_TIMEOUT_MS` | 90s | each of `scoreChecklist` / `answerQuestionnaire` / `generateStructuredReport` in `runStagehandHybridAndPersist` |
+| Outer `PERSIST_HARDCUT_MS` | 12 min | the whole persist chain (browser + scoring + R2 + DB) |
+
+`raceWithTimeout` + `TimeoutError` are exported from
+`services/stagehand_hybrid.ts` so all three layers use the same
+helper. On hit, `TimeoutError` carries the label
+(`scoreChecklist(abcd1234)` etc.) for RCA. `runStagehandHybridAndPersist`
+is split into a thin outer wrapper + private `…Inner` so the outer
+timeout wraps the entire body (the inner hardcut covers stagehand
+only, leaving R2 + DB previously unprotected).
+
+### Queue dedup (`selectQueueableJobs`)
+
+`/api/dev/autotest/trigger` previously could queue 2 personas with
+the same `testerAddr` (matchPersonas can return multiple personas per
+tester); the second one wasted ~$0.10 of stagehand+scoring compute
+before its insert hit the unique constraint and threw. `services/
+queue_dedup.ts::selectQueueableJobs(matches, modes, alreadyCovered)`
+folds DB-covered + in-batch dedup into one pass, exported so the
+6-test unit suite can lock the contract without spinning up Express.
 
 ## Landing Dashboard (`/` + `/api/dashboard`)
 
@@ -370,6 +406,54 @@ of the base Sonnet synthesis call:
   specific pain points. The LLM is allowed to say
   `[해결 대상: 없음 — <alternative evidence>]` when no rank fits,
   which is preferred over inventing a rank.
+
+### 5. Empty-session guard + harness-error split (2026-04-25 hardening)
+
+When stagehand crashed before capturing observations, the Haiku
+`structured_report` and Sonnet `checklist` calls were grounding on
+checklist task text rather than evidence — inventing plausible
+narratives ("mobile viewport drop", "JSON parse mid-session") that
+the diagnosis aggregator then promoted to rank-1 product findings.
+Five layered fixes lock this down:
+
+- **`scoring/report.ts`** — `outcome=error && turns.length<=1` short-
+  circuits the Haiku call and returns an explicit no-data report with
+  empty `pain_points`. Tests assert `mockCreate.not.toHaveBeenCalled()`.
+- **`scoring/checklist.ts`** — same guard, routes to
+  `ruleBasedFallback` (which produces the generic `세션 error로 시도
+  불가` memo) instead of asking Sonnet to judge nothing.
+- **`scoring/diagnosis.ts`** — `isHarnessErrorOutcome(outcome)` predicate
+  + new `DiagnosisAggregate.harnessErrorReports[]` field. The
+  `accumulatePainPointsForReport` helper (extracted, exported,
+  testable) drops `outcome=error` reports' pain_points from
+  `painPointMap` and pushes them into `harnessErrorReports` instead.
+  Conservative — only the literal `'error'` label triggers; `unknown`
+  and empty preserve their findings (manual reports without `_quality_
+  breakdown` sentinels stay in the rank).
+- **Synthesis prompt §5-1** — new "세션 실패 (harnessErrorReports)"
+  section. The prompt instructs the model to label these as `41R 플랫폼
+  자동화 실패`, NOT product issues, and to never produce R-recs for
+  them. `buildSynthesisPayload` (exported pure builder) carries the
+  list, capped at 30 entries, with shortened reportIds matching the
+  audit-chain format.
+- **jup.ag regression fixture** — 14 errored personas reproduced in
+  `diagnosis.test.ts` `accumulatePainPointsForReport · jup.ag
+  regression` block. Asserts `painPointMap.size === 0` +
+  `harnessErrorReports.length === 14` for the legacy fixture shape so
+  a future refactor of the inner loop can't silently regress.
+
+### Session-error sentinel (`_session_error`, 2026-04-25)
+
+Companion RCA infra. When stagehand crashes (init failure, top-level
+catch, or zero-turn collapse), `captureSessionError(err, phase,
+lastAction?)` (exported from `services/stagehand_hybrid.ts`) bounds
+err.message ≤ 2000, stack ≤ 2000, last_action ≤ 500 and stuffs them
+into `HybridSessionLog.session_error`. The route handler then writes
+a `_session_error` sentinel into `test_reports.questionnaireAnswers`
+— same conditional pattern as `_quirks` / `_quality_breakdown`. No
+schema change. RCA queries can now group failures by phase
+(`init` / `phase_a..d` / `final` / `cleanup`) + last_action without
+re-running the persona.
 
 ### Client-side rendering split (`components` in page.tsx files)
 - `/company/test/[id]` diagnosis tab parses the markdown into
@@ -570,6 +654,34 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   as soon as validation is done. `railway variable delete DEV_TEST_KEY
   --service api && railway redeploy -y --service api` flips the routes
   back to 404 (dev_auth.ts gate).
+- Remove the empty-session guards in `scoring/report.ts` /
+  `scoring/checklist.ts`. They short-circuit the LLM call when
+  `outcome=error && turns≤1`; reverting to the LLM path means Haiku /
+  Sonnet immediately go back to inventing plausible failure narratives
+  ("mobile viewport drop", "JSON parse mid-session") that the
+  diagnosis aggregator promotes to rank-1 product findings. The
+  regression tests in `scoring-report.test.ts` /
+  `scoring-checklist.test.ts` lock this in via
+  `mockCreate.not.toHaveBeenCalled()` — don't relax those assertions.
+- Drop `harnessErrorReports` from `DiagnosisAggregate` or fold it
+  back into `painPointFrequency`. Top-rank product findings get
+  contaminated with infra failures the second this split disappears
+  (jup.ag had 14 errored personas show up as rank-1 "테스트 환경
+  제약" before the split landed). The regression suite in
+  `diagnosis.test.ts` `accumulatePainPointsForReport · jup.ag
+  regression` is the safety net.
+- Remove the per-LLM-call 90s timeout (`SCORING_TIMEOUT_MS`) or the
+  outer 12-min hardcut (`PERSIST_HARDCUT_MS`) in
+  `runStagehandHybridAndPersist`. The inner stagehand 5-min hardcut
+  covers only the browser portion; the post-stagehand scoring chain +
+  R2 + DB had no upper bound and could wedge the chain.then() in
+  /autotest/trigger indefinitely. `raceWithTimeout` + `TimeoutError`
+  exported from `stagehand_hybrid.ts` — reuse, don't reimplement.
+- Inline the queue dedup in `dev.ts` again. Use the
+  `selectQueueableJobs` helper — `matchPersonas` can return 2
+  personas sharing one testerAddr, and inlining the loop loses the
+  in-batch dedup that prevents the wasted-compute symptom (full
+  run + scoring → unique-constraint throw on insert).
 
 ## Dev harness (`/api/dev/*`)
 
