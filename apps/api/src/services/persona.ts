@@ -16,8 +16,9 @@ import { desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { generatePersona } from './llm.js';
 import { sasService, calculateTrustTier } from './sas.js';
+import { env } from '../config/env.js';
 
-const SOURCE_REPORT_LIMIT = Number(process.env.PERSONA_SOURCE_REPORT_LIMIT ?? 5);
+const SOURCE_REPORT_LIMIT = env.PERSONA_SOURCE_REPORT_LIMIT;
 const MIN_REPORTS_FOR_PERSONA = 3;
 
 export type PersonaTrigger = 'manual' | 'report_submit' | 'admin';

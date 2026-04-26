@@ -1,14 +1,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
-import dotenv from 'dotenv';
+import { env } from '../config/env.js';
 import * as schema from './schema.js';
-
-// Ensure .env is loaded before DB connection (ESM imports run before index.ts dotenv.config)
-dotenv.config({ path: new URL('../../../../.env', import.meta.url).pathname });
-
-if (!process.env.DATABASE_URL) {
-  throw new Error('DATABASE_URL environment variable is required. Set it in .env file.');
-}
 
 // Pool sizing for 300-tester concurrent events. Each submit-report
 // request issues ~5 queries (tester lookup, test lookup, dup check,
@@ -17,11 +10,11 @@ if (!process.env.DATABASE_URL) {
 // Override via DB_POOL_MAX / DB_POOL_MIN env if Railway resource tier
 // changes.
 const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: Number(process.env.DB_POOL_MAX ?? 30),
-  min: Number(process.env.DB_POOL_MIN ?? 2),
-  idleTimeoutMillis: Number(process.env.DB_POOL_IDLE_MS ?? 30_000),
-  connectionTimeoutMillis: Number(process.env.DB_POOL_CONNECT_MS ?? 5_000),
+  connectionString: env.DATABASE_URL,
+  max: env.DB_POOL_MAX,
+  min: env.DB_POOL_MIN,
+  idleTimeoutMillis: env.DB_POOL_IDLE_MS,
+  connectionTimeoutMillis: env.DB_POOL_CONNECT_MS,
 });
 
 // Surface pool errors so Railway logs capture connection issues

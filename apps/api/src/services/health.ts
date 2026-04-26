@@ -1,8 +1,9 @@
 import { pool } from '../db/index.js';
+import { env } from '../config/env.js';
 
-const PERSONA_ENGINE_URL = process.env.PERSONA_ENGINE_URL ?? 'http://persona-engine:4200';
-const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
-const CHECK_TIMEOUT_MS = Number(process.env.HEALTH_CHECK_TIMEOUT_MS ?? 2_000);
+const PERSONA_ENGINE_URL = env.PERSONA_ENGINE_URL;
+const SOLANA_RPC_URL = env.SOLANA_RPC_URL;
+const CHECK_TIMEOUT_MS = env.HEALTH_CHECK_TIMEOUT_MS;
 
 export type CheckStatus = 'ok' | 'error';
 export interface CheckResult {

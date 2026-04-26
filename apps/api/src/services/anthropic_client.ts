@@ -13,6 +13,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { env } from '../config/env.js';
 
 interface LogContext {
   route: string;
@@ -20,7 +21,7 @@ interface LogContext {
 }
 
 const als = new AsyncLocalStorage<LogContext>();
-const USAGE_LOG_PATH = process.env.USAGE_LOG_PATH || '/tmp/llm-usage.jsonl';
+const USAGE_LOG_PATH = env.USAGE_LOG_PATH;
 
 // Ensure the directory exists once at startup.
 try {

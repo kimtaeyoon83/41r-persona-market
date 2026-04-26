@@ -22,17 +22,16 @@ import {
   type TesterProfile,
 } from '@41rpm/persona-client';
 import { uploadToR2 } from './r2.js';
-
-const ENGINE_URL = process.env.PERSONA_ENGINE_URL ?? 'http://persona-engine:4200';
+import { env } from '../config/env.js';
 
 let _client: PersonaEngineClient | null = null;
 
 function client(): PersonaEngineClient {
   if (!_client) {
     _client = new PersonaEngineClient({
-      baseUrl: ENGINE_URL,
+      baseUrl: env.PERSONA_ENGINE_URL,
       timeoutMs: 60_000,
-      authToken: process.env.PERSONA_ENGINE_AUTH_TOKEN,
+      authToken: env.PERSONA_ENGINE_AUTH_TOKEN,
     });
   }
   return _client;
@@ -167,5 +166,5 @@ export async function runAutoTestWithEngine(
  * Set `USE_PERSONA_ENGINE=1` in Railway env after engine is deployed.
  */
 export function isEngineEnabled(): boolean {
-  return process.env.USE_PERSONA_ENGINE === '1';
+  return env.USE_PERSONA_ENGINE;
 }

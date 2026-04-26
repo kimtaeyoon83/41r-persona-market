@@ -1,5 +1,6 @@
 import rateLimit, { type Options } from 'express-rate-limit';
 import type { Request } from 'express';
+import { isTest } from '../config/env.js';
 
 // Prefer a verified signed wallet, then the route's wallet param, then the
 // body's wallet field, finally the remote IP. Wallet-keyed buckets ensure
@@ -27,7 +28,7 @@ function buildLimiter(overrides: Partial<Options>) {
     // Validation in v8 enforces the ipKeyGenerator helper; we opt out
     // because keyFor always prefers a wallet over the IP.
     validate: { keyGeneratorIpFallback: false },
-    skip: () => process.env.NODE_ENV === 'test',
+    skip: () => isTest,
     message: { error: 'Too many requests — please slow down.' },
     ...overrides,
   });

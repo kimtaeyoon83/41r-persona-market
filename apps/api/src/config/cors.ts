@@ -1,4 +1,5 @@
 import type { CorsOptions } from 'cors';
+import { env } from './env.js';
 
 const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:3000',
@@ -9,7 +10,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
 ];
 
 export const allowedOrigins = (
-  process.env.CORS_ALLOWED_ORIGINS?.split(',').map((o) => o.trim()).filter(Boolean) ??
+  env.CORS_ALLOWED_ORIGINS?.split(',').map((o) => o.trim()).filter(Boolean) ??
   DEFAULT_ALLOWED_ORIGINS
 );
 
