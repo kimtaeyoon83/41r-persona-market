@@ -2,9 +2,10 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import type { GeneratedTestCases, PersonaVector } from '@41rpm/shared';
 import { client, withRoute } from './anthropic_client.js';
+import { env } from '../config/env.js';
 
-const SONNET = process.env.CLAUDE_SONNET_MODEL || 'claude-sonnet-4-6';
-const HAIKU = process.env.CLAUDE_HAIKU_MODEL || 'claude-haiku-4-5-20251001';
+const SONNET = env.CLAUDE_SONNET_MODEL;
+const HAIKU = env.CLAUDE_HAIKU_MODEL;
 
 // ─── Zod Schemas ─────────────────────────────────────
 const checklistItemSchema = z.object({
@@ -110,7 +111,15 @@ export function repairJson(text: string): string {
   return json;
 }
 
-export function parseJsonSafe(text: string): any {
+/**
+ * Parse JSON from raw LLM output. Tolerates fenced code blocks, trailing
+ * commas, and unbalanced braces via {@link repairJson}. Returns `any` by
+ * design — LLM outputs are unknown shape and callers immediately narrow.
+ * Pass a generic if you want stricter typing at the call site:
+ *   `parseJsonSafe<{score: number}>(text)`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function parseJsonSafe<T = any>(text: string): T {
   const raw = extractJson(text);
   try {
     return JSON.parse(raw);
@@ -467,7 +476,7 @@ export class QualityScoreTimeout extends Error {
   }
 }
 
-const QUALITY_SCORE_TIMEOUT_MS = Number(process.env.QUALITY_SCORE_TIMEOUT_MS ?? 30_000);
+const QUALITY_SCORE_TIMEOUT_MS = env.QUALITY_SCORE_TIMEOUT_MS;
 
 export async function calculateQualityScore(
   report: Record<string, unknown>,
@@ -522,7 +531,7 @@ Return ONLY valid JSON:
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
   try {
-    const parsed = parseJsonSafe(text);
+    const parsed = parseJsonSafe<{ score?: unknown; rejected?: unknown; reason?: unknown }>(text);
     const rawScore = Number(parsed.score);
     if (!Number.isFinite(rawScore)) {
       throw new Error('LLM returned non-numeric score');

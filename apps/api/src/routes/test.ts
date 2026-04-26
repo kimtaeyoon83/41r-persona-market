@@ -1,5 +1,6 @@
 import { Router, type Router as RouterType } from 'express';
 import { and, eq, inArray, lt } from 'drizzle-orm';
+import type { PersonaVector } from '@41rpm/shared';
 import { db, schema } from '../db/index.js';
 import { generateTestCases } from '../services/llm.js';
 import {
@@ -111,7 +112,7 @@ router.post('/register', llmGenerateLimiter, requireSignedRequest, validateBody(
             allPersonas.map(p => ({
               id: p.id,
               testerAddr: p.testerAddr,
-              vector: p.vector as any,
+              vector: p.vector as PersonaVector,
             })),
             3, // max 3 personas
           );

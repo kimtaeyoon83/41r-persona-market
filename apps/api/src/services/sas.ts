@@ -29,12 +29,16 @@ class SASService {
   private useFallback = true;
   private initialized = false;
 
-  // Lazily loaded SDK references (typed as any to avoid @solana/kit cluster type issues)
+  // Lazily loaded SDK references. @solana/kit's cluster-aware types are
+  // notoriously broken (RpcCluster<...> erases narrowing), so we hold these
+  // as `any` rather than chase ts(2589) cascades on every kit upgrade.
+  /* eslint-disable @typescript-eslint/no-explicit-any */
   private kit: any = null;
   private sasLib: any = null;
   private payer: any = null;
   private rpc: any = null;
   private rpcSubs: any = null;
+  /* eslint-enable @typescript-eslint/no-explicit-any */
   private credentialPda: string | null = null;
   private schemaPda: string | null = null;
 
@@ -163,12 +167,15 @@ class SASService {
       // Build + sign + send
       const { value: latestBlockhash } = await this.rpc.getLatestBlockhash().send();
 
+      // @solana/kit pipe-step types collapse to `any` at the boundary anyway.
+      /* eslint-disable @typescript-eslint/no-explicit-any */
       const tx = pipe(
         createTransactionMessage({ version: 0 }),
         (msg: any) => setTransactionMessageFeePayerSigner(this.payer, msg),
         (msg: any) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, msg),
         (msg: any) => appendTransactionMessageInstructions([attestIx], msg),
       );
+      /* eslint-enable @typescript-eslint/no-explicit-any */
 
       const signed = await signTransactionMessageWithSigners(tx);
       const signature = getSignatureFromTransaction(signed);

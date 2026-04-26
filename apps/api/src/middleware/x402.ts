@@ -12,6 +12,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { paymentMiddleware, x402ResourceServer } from '@x402/express';
 import { ExactSvmScheme } from '@x402/svm/exact/server';
 import { HTTPFacilitatorClient } from '@x402/core/server';
+import { env } from '../config/env.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -28,14 +29,7 @@ const FACILITATOR_URL = 'https://x402.org/facilitator';
 // ---------------------------------------------------------------------------
 
 function getPayToAddress(): string {
-  const addr = process.env.X402_RESOURCE_WALLET;
-  if (!addr) {
-    throw new Error(
-      'X402_RESOURCE_WALLET is not set in .env. ' +
-        'Set it to your Solana wallet address (base58).',
-    );
-  }
-  return addr;
+  return env.X402_RESOURCE_WALLET;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,8 +156,7 @@ interface FallbackPaymentInfo {
 export function createFallbackPaymentMiddleware() {
   const payTo = getPayToAddress();
   const recipientPubkey = new PublicKey(payTo);
-  const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
-  const connection = new Connection(rpcUrl, 'confirmed');
+  const connection = new Connection(env.SOLANA_RPC_URL, 'confirmed');
 
   // Pre-compute ATA (async, cached after first call)
   let ataPromise: Promise<PublicKey> | null = null;
@@ -265,7 +258,7 @@ export function createFallbackPaymentMiddleware() {
       await connection.confirmTransaction(signature, 'confirmed');
 
       // Attach payment proof to request for downstream handlers
-      (req as any).paymentSignature = signature;
+      (req as Request & { paymentSignature?: string }).paymentSignature = signature;
       next();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
