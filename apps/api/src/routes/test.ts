@@ -372,6 +372,82 @@ router.post('/:id/retry-autotest',
 // Unauthenticated (matches GET /api/test/:id) — the diagnosis is a
 // summary over data the owner has anyway; companies who want to share
 // a read link don't need a second signing round.
+/**
+ * Slim insights aggregate for the company test detail page.
+ * Wraps services/scoring/diagnosis.aggregateForDiagnosis() — the same
+ * deterministic preprocessor that the diagnosis Sonnet synthesis uses,
+ * but without the LLM clustering pass (kept fast: ~50ms, no token cost).
+ *
+ * Powers two new dashboard sections (P1b):
+ *   - Why Users Drop chat bubble: reads painPointFrequency
+ *   - Persona Insights cards:    reads perPersona slice
+ *
+ * Returns 404 if the test doesn't exist; empty arrays if no reports.
+ */
+router.get('/:id/insights', async (req, res) => {
+  try {
+    const id = String(req.params.id);
+    const [test] = await db.select().from(schema.tests).where(eq(schema.tests.id, id));
+    if (!test) {
+      res.status(404).json({ error: 'Test not found' });
+      return;
+    }
+    const { aggregateForDiagnosis } = await import('../services/scoring/diagnosis.js');
+    const agg = await aggregateForDiagnosis(id);
+    res.json({
+      test_id: id,
+      target_url: agg.targetUrl,
+      report_count: agg.reportCount,
+      persona_count: agg.personaCount,
+      human_count: agg.humanCount,
+      quality_stats: agg.qualityStats,
+      // Top 10 most-cited pain points; chat bubble UI shows top 6
+      pain_points: agg.painPointFrequency.slice(0, 10).map((pp) => ({
+        description: pp.description,
+        count: pp.count,
+        // Citation severity (highest of any cited pain point) for color
+        severity: pp.citations
+          .map((c) => c.severity)
+          .sort((a, b) => sevRank(b) - sevRank(a))[0] ?? 'medium',
+        sample_evidence: pp.citations[0] ? {
+          report_id: pp.citations[0].reportId,
+          turn: pp.citations[0].evidenceTurn,
+          is_persona: pp.citations[0].isPersona,
+        } : null,
+      })),
+      // Top 3 personas by report relevance (persona reports first, then by quality)
+      personas: agg.perPersona
+        .filter((p) => p.isPersona)
+        .sort((a, b) => (b.qualityScore ?? 0) - (a.qualityScore ?? 0))
+        .slice(0, 3)
+        .map((p) => ({
+          report_id: p.reportId,
+          tester_addr: p.testerAddr,
+          quality_score: p.qualityScore,
+          outcome: p.outcome,
+          voice_sample: p.voiceSample,
+          checklist: {
+            passed: p.checklistPassed,
+            failed: p.checklistFailed,
+            blocked: p.checklistBlocked,
+          },
+          ux_scores: p.uxScores,
+          top_pain_point: p.painPoints[0]?.description ?? null,
+          source: p.source,
+        })),
+      fidelity: agg.fidelity,
+    });
+  } catch (error) {
+    console.error('[GET /api/test/:id/insights]', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/** Sort helper: high → 3, medium → 2, low → 1, anything else → 0. */
+function sevRank(sev: string): number {
+  return sev === 'high' ? 3 : sev === 'medium' ? 2 : sev === 'low' ? 1 : 0;
+}
+
 router.get('/:id/diagnosis', async (req, res) => {
   try {
     const id = String(req.params.id);

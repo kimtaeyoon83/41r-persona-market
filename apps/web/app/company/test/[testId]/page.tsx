@@ -27,6 +27,36 @@ interface TestDetail {
   };
 }
 
+// Slim aggregate from GET /api/test/:id/insights — server reuses
+// services/scoring/diagnosis.aggregateForDiagnosis() (deterministic,
+// no LLM call). Powers Why Users Drop chat bubbles + Persona Insights cards.
+interface InsightsResponse {
+  test_id: string;
+  target_url: string;
+  report_count: number;
+  persona_count: number;
+  human_count: number;
+  quality_stats: { min: number; max: number; avg: number; distribution: number[] };
+  pain_points: Array<{
+    description: string;
+    count: number;
+    severity: string;
+    sample_evidence: { report_id: string; turn: number | null; is_persona: boolean } | null;
+  }>;
+  personas: Array<{
+    report_id: string;
+    tester_addr: string;
+    quality_score: number | null;
+    outcome: string;
+    voice_sample?: string;
+    checklist: { passed: number; failed: number; blocked: number };
+    ux_scores?: Record<string, number>;
+    top_pain_point: string | null;
+    source: string;
+  }>;
+  fidelity: { itemAgreementRate: number | null; pairedCount: number; band: string };
+}
+
 export default function TestDetailPage() {
   const params = useParams();
   const testId = params.testId as string;
@@ -50,6 +80,7 @@ export default function TestDetailPage() {
   } | null>(null);
   const [diagnosing, setDiagnosing] = useState(false);
   const [diagnosisMsg, setDiagnosisMsg] = useState<string | null>(null);
+  const [insights, setInsights] = useState<InsightsResponse | null>(null);
   const { publicKey, signMessage } = useWalletContext();
 
   const loadData = () => {
@@ -66,10 +97,12 @@ export default function TestDetailPage() {
         current_report_count: number;
         stale: boolean;
       } | null>,
+      testApi.getInsights(testId).catch(() => null) as Promise<InsightsResponse | null>,
     ])
-      .then(([testData, reportData, diagResp]) => {
+      .then(([testData, reportData, diagResp, insightsResp]) => {
         setData(testData);
         setReports(reportData);
+        setInsights(insightsResp);
         if (diagResp) {
           setDiagnosis({
             markdown: diagResp.markdown,
@@ -390,6 +423,128 @@ export default function TestDetailPage() {
           </div>
         );
       })()}
+
+      {/* ── Why Users Drop — chat-bubble visualization of pain_points ── */}
+      {tab === 0 && insights && insights.pain_points.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="t-display-s">Why Users Drop</h2>
+            <span className="t-caption">
+              {insights.pain_points.length} pain point{insights.pain_points.length === 1 ? "" : "s"}
+              {" · "}
+              {insights.persona_count} persona{insights.persona_count === 1 ? "" : "s"} +{" "}
+              {insights.human_count} human{insights.human_count === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="space-y-3">
+            {insights.pain_points.slice(0, 6).map((pp, i) => {
+              const sevColor = pp.severity === "high"
+                ? "var(--danger)"
+                : pp.severity === "low"
+                  ? "var(--fg-3)"
+                  : "var(--warn)";
+              const sevBg = pp.severity === "high"
+                ? "var(--danger-soft)"
+                : pp.severity === "low"
+                  ? "var(--bg-2)"
+                  : "var(--warn-soft)";
+              return (
+                <div key={i} className="flex items-start gap-3">
+                  <div
+                    className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+                    style={{ backgroundColor: sevBg, color: sevColor }}
+                  >
+                    {pp.count}
+                  </div>
+                  <div
+                    className="flex-1 hf-card p-3"
+                    style={{ borderLeft: `3px solid ${sevColor}` }}
+                  >
+                    <p className="t-body-s mb-1">{pp.description}</p>
+                    <div className="flex items-center gap-2 t-caption text-[var(--fg-3)]">
+                      <span style={{ color: sevColor }}>● {pp.severity}</span>
+                      {pp.sample_evidence && (
+                        <>
+                          <span>·</span>
+                          <a
+                            href={`/report/${pp.sample_evidence.report_id}`}
+                            className="hover:underline"
+                          >
+                            evidence: {pp.sample_evidence.is_persona ? "persona" : "human"}
+                            {pp.sample_evidence.turn != null ? ` · turn ${pp.sample_evidence.turn}` : ""}
+                          </a>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Persona Insights — top 3 persona cards (replay + voice) ── */}
+      {tab === 0 && insights && insights.personas.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="t-display-s">Persona Insights</h2>
+            <span className="t-caption">
+              top {insights.personas.length} of {insights.persona_count} persona report{insights.persona_count === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {insights.personas.map((p) => {
+              const total = p.checklist.passed + p.checklist.failed + p.checklist.blocked;
+              const passRate = total > 0 ? Math.round((p.checklist.passed / total) * 100) : null;
+              return (
+                <div key={p.report_id} className="hf-card p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-[var(--accent-soft)] flex items-center justify-center text-[var(--accent)] text-xs font-bold">
+                        {p.tester_addr.slice(0, 2).toUpperCase()}
+                      </div>
+                      <span className="addr">{p.tester_addr.slice(0, 4)}…{p.tester_addr.slice(-4)}</span>
+                    </div>
+                    {typeof p.quality_score === "number" && (
+                      <span className="chip accent sm money">{p.quality_score.toFixed(1)}</span>
+                    )}
+                  </div>
+                  {p.voice_sample && (
+                    <p className="t-body-s italic text-[var(--fg-2)] line-clamp-3">
+                      &ldquo;{p.voice_sample}&rdquo;
+                    </p>
+                  )}
+                  <div className="space-y-1 t-caption">
+                    {passRate != null && (
+                      <div className="flex justify-between">
+                        <span className="text-[var(--fg-3)]">Checklist pass</span>
+                        <span className="money">{passRate}%</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <span className="text-[var(--fg-3)]">Outcome</span>
+                      <span>{p.outcome}</span>
+                    </div>
+                    {p.top_pain_point && (
+                      <div className="pt-2 border-t border-[var(--line-1)]">
+                        <p className="text-[var(--fg-3)] mb-1">Top issue:</p>
+                        <p className="text-[var(--fg-1)] line-clamp-2">{p.top_pain_point}</p>
+                      </div>
+                    )}
+                  </div>
+                  <a
+                    href={`/report/${p.report_id}`}
+                    className="hf-btn ghost sm w-full text-center block"
+                  >
+                    View report + replay →
+                  </a>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {tab === 0 && reports.length > 0 && (
         <div className="mb-8">

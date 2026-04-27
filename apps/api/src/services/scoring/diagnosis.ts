@@ -43,7 +43,7 @@ export interface PainPointCitation {
   isPersona: boolean;          // split "human-confirmed" vs "persona-only" at render time
 }
 
-interface PersonaSummary {
+export interface PersonaSummary {
   testerAddr: string;
   isPersona: boolean;
   qualityScore: number | null;

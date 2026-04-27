@@ -70,6 +70,10 @@ export const testApi = {
 
   getDiagnosis: (id: string) => request(`/api/test/${id}/diagnosis`),
 
+  // Slim insights aggregate for dashboard cards (pain points + persona summaries).
+  // Wraps server-side aggregateForDiagnosis() — no LLM call, no token cost.
+  getInsights: (id: string) => request(`/api/test/${id}/insights`),
+
   generateDiagnosis: (
     id: string,
     data: { company_wallet: string },
