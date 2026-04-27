@@ -677,21 +677,27 @@ export function classifyDomain(targetUrl: string, requirements: string = ''): Do
   return 'generic_saas';
 }
 
-// ─── Generate Persona-Specific Browser Actions (Haiku - fast) ────
-export async function generatePersonaActions(
+/**
+ * Pure derivation: PersonaVector × domainCategory → focus area strings.
+ *
+ * The threshold gates here are the deterministic step in vector → behavior
+ * injection. Same vector + same domain → same focusAreas array, every call.
+ * generatePersonaActions() then narrativizes these into a Haiku prompt;
+ * extracting the pure step lets unit tests prove determinism without
+ * spending an LLM call.
+ *
+ * Domain × expertise crossover (e.g. expertise.defi > 0.7 && isDefi) is
+ * intentional — it prevents "DeFi persona asks for slippage on a SaaS
+ * site" noise that plagued an early iteration.
+ */
+export function computeFocusAreas(
   persona: PersonaVector,
-  targetUrl: string,
-  baseChecklist: Array<{ id: string; task: string }>,
-  discoveredLinks: string[] = [],
-  navLabels: string[] = [],
-  requirements: string = '',
-): Promise<Array<{ id: string; action: string; reason: string }>> {
-  const domainCategory = classifyDomain(targetUrl, requirements);
+  domainCategory: string,
+): string[] {
   const isDefi = domainCategory === 'defi';
   const isNft = domainCategory === 'nft';
   const isGaming = domainCategory === 'gaming';
   const isAiTools = domainCategory === 'ai_tools';
-  // Build a focus summary from the persona's top traits
   const focusAreas: string[] = [];
 
   // General focuses (domain-agnostic) — always apply when the persona
@@ -739,6 +745,24 @@ export async function generatePersonaActions(
   }
 
   if (focusAreas.length === 0) focusAreas.push('general usability and UX flow');
+  return focusAreas;
+}
+
+// ─── Generate Persona-Specific Browser Actions (Haiku - fast) ────
+export async function generatePersonaActions(
+  persona: PersonaVector,
+  targetUrl: string,
+  baseChecklist: Array<{ id: string; task: string }>,
+  discoveredLinks: string[] = [],
+  navLabels: string[] = [],
+  requirements: string = '',
+): Promise<Array<{ id: string; action: string; reason: string }>> {
+  const domainCategory = classifyDomain(targetUrl, requirements);
+  // Pure helper — focus area derivation. Extracted so behavior-injection
+  // determinism is unit-testable without burning a Haiku call.
+  const focusAreas = computeFocusAreas(persona, domainCategory);
+  const demo = persona.demographics;
+  const ux = persona.ux_preferences;
 
   // Build persona context string
   let personaContext = '';
