@@ -254,6 +254,33 @@ export default function TestDetailPage() {
           <div className="t-label">Created</div>
           <p className="t-body mt-1">{new Date(test.createdAt).toLocaleDateString()}</p>
         </div>
+        {/* Insights-driven KPIs — only render when /insights returned data */}
+        {insights && (
+          <>
+            <div className="hf-card p-4">
+              <div className="t-label">Personas Tested</div>
+              <p className="money text-lg font-semibold mt-1">
+                {insights.persona_count}
+                {insights.human_count > 0 && (
+                  <span className="text-[11px] text-[var(--fg-3)] ml-1 font-normal">
+                    + {insights.human_count} human
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="hf-card p-4">
+              <div className="t-label">Pain Points Found</div>
+              <p className="money text-lg font-semibold mt-1">
+                {insights.pain_points.length}
+                {insights.pain_points.filter((p) => p.severity === "high").length > 0 && (
+                  <span className="text-[11px] text-[var(--danger)] ml-1 font-normal">
+                    {insights.pain_points.filter((p) => p.severity === "high").length} high
+                  </span>
+                )}
+              </p>
+            </div>
+          </>
+        )}
       </div>
 
       {canRetry && (() => {
@@ -729,6 +756,21 @@ export default function TestDetailPage() {
               </div>
             )}
           </>
+        )}
+
+        {/* ── Raw Data — collapsed accordion for inspection / debug ── */}
+        {tab === 0 && insights && (
+          <details className="hf-card p-4 mt-8">
+            <summary className="cursor-pointer t-body-s font-medium text-[var(--fg-2)] hover:text-[var(--fg-1)]">
+              Raw Data
+              <span className="t-caption ml-2 text-[var(--fg-3)]">
+                (insights JSON · click to expand)
+              </span>
+            </summary>
+            <pre className="mt-3 p-3 bg-[var(--bg-2)] rounded-lg text-[11px] font-mono overflow-x-auto whitespace-pre-wrap break-all max-h-96 overflow-y-auto">
+              {JSON.stringify(insights, null, 2)}
+            </pre>
+          </details>
         )}
       </div>
     </div>
