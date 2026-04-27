@@ -270,6 +270,7 @@ export interface PersonaVector {
 - **트리거 3가지**: `manual` (사용자 명시), `report_submit` (자동, fire-and-forget), `admin` (운영)
 - **Fallback의 의미**: LLM이 죽어도 페르소나 생성은 멈추지 않음. profile만으로 결정론적 vector를 합성하기 때문에 "동일 profile → 동일 fallback vector"가 보장되어 매칭이 무너지지 않음.
 - **persona_versions 테이블**: 페르소나는 시간이 지날수록 진화한다는 **calibration flywheel** 가설을 지원하기 위한 audit trail. 어떤 리포트들이 N번째 버전을 만들었는지 추적 가능.
+- **진화 측정 (방법론, 데이터 수집 진행 중)**: 페르소나 v1 → vN cosine distance를 `persona_versions.vector` 차분으로 계산. v3, v5, v10에서 distance가 plateau에 도달하면 페르소나가 안정화됐다고 판단. **현재 상태**: v3 시점의 의미있는 변화는 코드 레벨에서 보장 (3회 누적 후 LLM 재호출), v5+ 안정화 turning point는 devnet 실측 누적 후 부록 D에 추가 예정. 가설을 가설인 채 두지 않기 위해 측정 일정을 §9 로드맵에 명시.
 
 ### 3.3 페르소나 매칭 — `matchPersonas`
 
@@ -325,14 +326,43 @@ export async function matchPersonas(
                   │  │         │                      │  │
                   │  │         ▼ raceWithTimeout(5분) │  │
                   │  │  ┌──────────────────────────┐  │  │
-                  │  │  │ Per-turn loop:           │  │  │
+                  │  │  │ Per-turn loop (4 phases) │  │  │
+                  │  │  │ — 매 turn마다 ①–⑤ 실행:  │  │  │
                   │  │  │  ① observe (page text +  │  │  │
                   │  │  │     a11y tree, 20 nodes) │  │  │
                   │  │  │  ② vision LLM decide     │  │  │
                   │  │  │  ③ page.act(action)      │  │  │
                   │  │  │  ④ screenshot → R2       │  │  │
                   │  │  │  ⑤ session log push      │  │  │
-                  │  │  │  → 종료 조건까지 반복      │  │  │
+                  │  │  │                          │  │  │
+                  │  │  │ Phase A — Site discovery │  │  │
+                  │  │  │   (vector 무관)          │  │  │
+                  │  │  │  • 최대 4개 internal    │  │  │
+                  │  │  │    link/nav 크롤        │  │  │
+                  │  │  │  • 페이지당 1 turn      │  │  │
+                  │  │  │                          │  │  │
+                  │  │  │ Phase B — Scroll explore │  │  │
+                  │  │  │   (vector 무관)          │  │  │
+                  │  │  │  • 페이지가 ~2 viewport │  │  │
+                  │  │  │    이상이면 mid+bottom  │  │  │
+                  │  │  │                          │  │  │
+                  │  │  │ Phase C — Checklist     │  │  │
+                  │  │  │   (vector 무관)          │  │  │
+                  │  │  │  • 회사 등록 N개 항목   │  │  │
+                  │  │  │    각각 1 stagehand.act │  │  │
+                  │  │  │  • 모든 페르소나 동일   │  │  │
+                  │  │  │                          │  │  │
+                  │  │  │ Phase D — Persona-    ★  │  │  │
+                  │  │  │   specific exploration   │  │  │
+                  │  │  │  • generatePersonaActions│  │  │
+                  │  │  │    (vector) → 5-8 액션  │  │  │
+                  │  │  │  ★ 페르소나 차이가 가장 │  │  │
+                  │  │  │    강하게 드러나는 구간 │  │  │
+                  │  │  │                          │  │  │
+                  │  │  │ 예상 turn 수:            │  │  │
+                  │  │  │  1(init) + ≤4(A) + 0-2(B)│  │  │
+                  │  │  │  + N(C) + 0-5(D) + 1(end)│  │  │
+                  │  │  │  ≈ 8–20 total            │  │  │
                   │  │  └──────┬───────────────────┘  │  │
                   │  │         │                      │  │
                   │  │         ▼ raceWithTimeout(90s) │  │
@@ -377,6 +407,16 @@ export async function matchPersonas(
 **근본 질문**: "페르소나 A와 페르소나 B는 같은 Sonnet에 다른 system prompt를 줬을 뿐 아닌가?" 만약 그렇다면 페르소나는 단순한 prompt engineering이고, "검증 가능한 모델"이라 부를 가치가 없습니다. 답: **PersonaVector의 명명된 차원이 코드의 threshold gate를 통해 행동을 결정**하기 때문에, 페르소나 차이는 prompt의 자연어 차이가 아니라 **연산 가능한 vector 거리의 차이**입니다.
 
 이 섹션은 vector가 어떻게 실제 브라우저 액션으로 변환되는지를 코드 단위로 보입니다.
+
+> **솔직한 framing — vector는 모든 행동을 결정하지 않음**:
+> Vector의 행동 영향력은 §3.4 다이어그램의 **Phase D에 집중**됩니다. Phase A
+> (site discovery), Phase B(scroll), Phase C(checklist)는 모든 페르소나에
+> 공통이고, vector는 Phase D의 5-8개 추가 액션에서만 결정적 역할을 합니다.
+> 즉 한 번의 stagehand 실행에서 발생하는 ~8-20 turns 중 **vector-driven
+> 액션은 5-8개**, 나머지는 같은 사이트라면 모든 페르소나가 동일한 액션을
+> 수행합니다. 이 framing 없이 "vector가 모든 행동을 결정한다"고 과장하면
+> 코드와 충돌합니다 — 우리는 "공통 baseline + persona-specific overlay"
+> 모델을 의도적으로 선택했고, 이게 cost와 비교 가능성을 동시에 잡습니다.
 
 #### (a) System Prompt 초기화 — `personaOneliner`
 
@@ -743,8 +783,13 @@ Total cost: ~$0.05 per diagnosis (페르소나 N에 무관)
 ```
 
 **비용 관점 정리** (LLM call 단가, 2026-04 기준):
-- Persona 1회 stagehand_hybrid 실행: ~24¢
-- Persona 1회 text 모드: ~5¢
+- Persona 1회 stagehand_hybrid 실행: ~24¢ (분해)
+   - Stagehand vision LLM (turns × Sonnet 4.6 vision): ~18¢
+   - persona_actions 생성 (Phase D 진입 직전 Haiku 1회): ~0.5¢
+   - In-process scoring (Sonnet × scoreChecklist + answerQuestionnaire +
+     generateStructuredReport + calculateQuality): ~5¢
+   - R2 업로드 + DB persist + R2 pre-sign 등 인프라: ~0.5¢
+- Persona 1회 text 모드: ~5¢ (vision LLM 없이 가설 채점만)
 - Diagnosis 1회: ~5¢ (Sonnet synthesis ~4¢ + Haiku clustering 0.15¢ + Haiku human extraction N×~0.5¢)
 
 100명 페르소나 + 1 진단 = ~$24 + $0.05. 동일 표본을 인간으로 모으려면 $5,000+ + 1주.
@@ -1093,6 +1138,8 @@ Haiku 한 번 호출 (~$0.0015)로 의미적 dedup. 실패 시 identity-map fall
 - [ ] `console.*` → `logger.*` 전체 전환 (114건, 코드모드)
 - [ ] `scoring/diagnosis.ts` (1,016줄) 6개 sub-module로 분할
 - [ ] Web 컴포넌트 단위 테스트 (Phantom mock + RTL)
+- [ ] 부록 D 실측 데이터 채우기 — 50쌍 페르소나 × `generatePersonaActions()` 호출, vector distance vs Jaccard overlap 산점도. 스크립트는 `scripts/measure-persona-behavior.ts`에 작성됨 (현재 methodology + 결정론 검증 완료, LLM 호출 비용 ~$0.05).
+- [ ] **focusArea 추출 declarative 리팩터링**: 현재 `services/llm.ts:computeFocusAreas()`는 hardcoded if-else (~40줄). v1.1 단계에서 trait → focus 매핑을 YAML/JSON spec으로 분리해 차원 확장(예: 청각 장애 트레이트, 한국어 외 언어) 시 코드 수정 없이 spec만 변경하도록. v1은 4-domain × 5-axis 고정이라 hardcoded 유지 OK.
 
 ### 9.2 중기 (~3개월)
 - [ ] **메인넷 promotion**:
@@ -1215,5 +1262,111 @@ usedAt
 
 ---
 
-**문서 버전**: 1.0 · 2026-04-26
+## 부록 D — Vector → Behavior 측정값
+
+§3.4.5의 핵심 주장 — "PersonaVector는 prompt engineering이 아닌 측정 가능한 행동 모델"을 **이론에서 측정값으로 격상**하기 위한 실험. 세 가지 측정 중 **(c) Focus area 결정론은 단위 테스트로 검증 완료**, **(a)/(b)는 measurement script와 방법론이 준비됐고 실측 데이터 수집 진행 중**입니다.
+
+### D.1 (c) Focus area 결정론 ✅ **검증됨**
+
+**가설**: 같은 PersonaVector + 같은 domainCategory → 같은 focusAreas 배열, 항상.
+
+**테스트**: `apps/api/src/__tests__/persona-actions-focus-areas.test.ts` (13 테스트, 평균 실행 ~10ms, LLM 호출 0회).
+
+**핵심 단언**:
+```ts
+// determinism — 100회 재호출에서 동일성
+it('same vector + same domain → identical output across 100 calls', () => {
+  const first = computeFocusAreas(defiTrader, 'defi');
+  for (let i = 0; i < 100; i++) {
+    expect(computeFocusAreas(defiTrader, 'defi')).toEqual(first);
+  }
+});
+
+// behavior differentiation — Jaccard < 0.25 lock-in
+it('Jaccard overlap between divergent personas is low', () => {
+  const a = new Set(computeFocusAreas(defiTrader, 'defi'));
+  const b = new Set(computeFocusAreas(teenStudent, 'defi'));
+  // ... computes intersection / union
+  expect(jaccard).toBeLessThan(0.25);
+});
+
+// crossover gate — DeFi 페르소나가 SaaS에서 슬리피지 묻지 않음
+it('defi expertise on a generic_saas domain does NOT inject DeFi-specific focus', () => {
+  const result = computeFocusAreas(defiTrader, 'generic_saas');
+  expect(result.some((f) => f.includes('DeFi specifics'))).toBe(false);
+  expect(result.some((f) => f.includes('security'))).toBe(true);
+});
+```
+
+**측정 결과** (CI에서 매 커밋 검증):
+| 검증 항목 | 결과 |
+|---|---|
+| 동일 vector × 100회 → 동일 array | ✅ 통과 (100/100) |
+| 두 divergent persona Jaccard | ✅ < 0.25 |
+| DeFi 전문 + SaaS 도메인 → DeFi specifics 없음 | ✅ 통과 |
+| NFT 전문 + devtools → NFT specifics 없음 | ✅ 통과 |
+| Threshold boundary (0.7 strict >) | ✅ 통과 |
+| All-zero vector → "general usability" fallback | ✅ 통과 |
+
+**의의**: vector → focusAreas 변환은 LLM이 아닌 **순수 함수**입니다. 같은 vector를 가진 두 페르소나가 다른 focusAreas를 만들어낼 수 없습니다. 이것이 "vector difference computes to behavior difference"의 가장 단단한 증거입니다.
+
+### D.2 (a) Vector 거리 vs 액션 Jaccard overlap 🟡 **방법론 준비됨, 실측 진행 중**
+
+**가설**: PersonaVector cosine distance가 멀수록 `generatePersonaActions()` 결과의 Jaccard overlap이 낮아진다 (monotonic decrease).
+
+**방법론**:
+- 50쌍의 synthetic 페르소나 (mulberry32 PRNG, seed=42, 재현 가능)
+- 각 페르소나에 대해 `generatePersonaActions(persona, jup.ag, [], [], [], task)` 호출 (Haiku 4.5)
+- 각 액션의 `action` 필드를 정규화 (소문자, 영숫자만, 첫 10 단어) → set
+- 50쌍 각각에 대해:
+  - `cosineDistance(flatten(a), flatten(b))`
+  - `jaccard(actionsA_set, actionsB_set)`
+- 거리 버킷 (< 0.3 / 0.3-0.6 / ≥ 0.6)별 평균 overlap 산출
+
+**예상 결과 형태** (가설이 맞다면):
+```
+distance < 0.3 : avg overlap 0.6-0.8 (n≈10) — 비슷한 vector → 비슷한 액션
+0.3 ≤ d < 0.6  : avg overlap 0.3-0.5 (n≈25) — 중간
+distance ≥ 0.6 : avg overlap 0.1-0.3 (n≈15) — 다른 vector → 다른 액션
+```
+
+**측정 명령**:
+```bash
+pnpm tsx scripts/measure-persona-behavior.ts \
+  --pairs 50 --self-runs 10 \
+  --out /tmp/persona-behavior-measurements.jsonl
+```
+
+**비용**: 50쌍 = 100 personas + 10 self-runs = 110 Haiku 호출 ≈ **$0.05**, 1분 wall-clock. 결정론 검증과 달리 LLM이 필요해 CI엔 들어가지 않고, 분기마다 1회 수동 실행 권장.
+
+**현재 상태**: 스크립트 작성 + 단위 테스트 통과. 실측 데이터는 다음 release window에서 수집하여 이 표를 채울 예정. **fabricated 숫자를 적지 않는 정직 원칙**을 유지합니다.
+
+### D.3 (b) 같은 페르소나 재현성 (Self-Jaccard) 🟡 **방법론 준비됨, 실측 진행 중**
+
+**가설**: 동일 vector를 N회 재실행했을 때 액션 set의 pairwise Jaccard 평균이 높음 (≥ 0.6) → axes는 안정적이고 LLM의 randomness는 phrasing에만 들어감.
+
+**방법론**:
+- 한 synthetic persona (mulberry32, seed=99) 고정
+- 10회 `generatePersonaActions()` 호출
+- 모든 (i, j) pair에 대해 Jaccard 계산 → 평균
+
+**예상 결과 해석**:
+- `avg ≥ 0.7`: vector signal 강함, LLM은 phrasing만 다양화 → 모델로서 안정
+- `0.4 ≤ avg < 0.7`: 중간 — 표현 자유도가 큰 편
+- `avg < 0.4`: vector signal 약함, LLM이 dominant → 페르소나 모델 가설 재검토 필요
+
+**현재 상태**: 위와 동일 — script + methodology 완료, 실측 진행 중. 결과는 다음 release에서 부록에 직접 표시.
+
+### D.4 측정 정직성 약속
+
+이 부록의 비어있는 표 자리에 **시연용 plausible 숫자를 넣지 않습니다**. 측정값은:
+1. 위 스크립트로 실제 LLM을 호출해 산출
+2. JSONL raw 데이터를 첨부
+3. 측정 일자, 사용 모델 버전, ANTHROPIC_API_KEY ID 마지막 4자리 명시
+
+**왜 이게 중요한가**: VC가 "이 숫자 어떻게 측정했나요?"라고 물었을 때 "산점도 한 장"이 답이 되려면, 그 숫자가 실측값이어야 합니다. 그럴듯한 숫자를 넣으면 한 번 들켰을 때 모든 trust contract가 무너집니다 — 이는 §3.5의 audit-chain citation 정신과 같은 원칙입니다.
+
+---
+
+**문서 버전**: 1.1 · 2026-04-27
 **유지보수**: 큰 아키텍처 변경 시 이 문서를 업데이트. CLAUDE.md는 "지금 작업하는 Claude를 위한 운영 룰"이고, 이 문서는 "외부 독자에게 시스템을 설명하는 레퍼런스"입니다 — 두 문서의 역할이 다릅니다.
