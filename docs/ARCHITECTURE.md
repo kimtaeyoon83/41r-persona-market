@@ -372,6 +372,285 @@ export async function matchPersonas(
 
 **Session Error Sentinel** (`_session_error`): Stagehand가 init/phase_a-d/final/cleanup 중 어디서 죽었는지 + last_action을 캡처해 `test_reports.questionnaireAnswers`에 저장. 스키마 변경 없이 RCA 가능.
 
+### 3.4.5 PersonaVector → 행동 주입 메커니즘 (이 섹션이 핵심)
+
+**근본 질문**: "페르소나 A와 페르소나 B는 같은 Sonnet에 다른 system prompt를 줬을 뿐 아닌가?" 만약 그렇다면 페르소나는 단순한 prompt engineering이고, "검증 가능한 모델"이라 부를 가치가 없습니다. 답: **PersonaVector의 명명된 차원이 코드의 threshold gate를 통해 행동을 결정**하기 때문에, 페르소나 차이는 prompt의 자연어 차이가 아니라 **연산 가능한 vector 거리의 차이**입니다.
+
+이 섹션은 vector가 어떻게 실제 브라우저 액션으로 변환되는지를 코드 단위로 보입니다.
+
+#### (a) System Prompt 초기화 — `personaOneliner`
+
+`routes/autotest.ts:418-429`에서 매 stagehand 실행마다 페르소나 정체성의 **profile 일부**가 한 줄로 압축되어 Stagehand의 systemPrompt에 주입됩니다:
+
+```ts
+// apps/api/src/routes/autotest.ts:418-429
+const profile = (tester?.profile ?? {}) as Record<string, unknown>;
+const personaOneliner = [
+  profile.age_range && `${profile.age_range} age`,
+  profile.occupation,
+  profile.region,
+  profile.crypto_experience && `${profile.crypto_experience} crypto`,
+  profile.primary_device && `on ${profile.primary_device}`,
+].filter(Boolean).join(', ') || 'a typical end-user';
+```
+
+생성 결과 예시:
+```
+페르소나 A (DeFi 트레이더): "30s age, defi-trader, KR, advanced crypto, on desktop"
+페르소나 B (학생):           "10s age, student, US, none crypto, on mobile"
+페르소나 C (디자이너):        "20s age, designer, JP, beginner crypto, on mobile"
+```
+
+**의도된 thinness**: 이 한 줄은 Stagehand의 LLM이 페이지를 보고 "이 사용자라면 무엇을 클릭할까?"를 판단할 때 사용하는 정체성 hint입니다. **풀 vector가 system prompt에 들어가지 않는 이유**: prompt를 두껍게 만들면 LLM이 vector 수치에 매달려 행동의 유연성이 떨어집니다. 자연어 한 줄 + 차후 행동 생성 단계에서 vector를 참조하는 2-tier 설계가 더 안정적입니다.
+
+#### (b) Per-turn Vector Reference — `generatePersonaActions()` (Phase D)
+
+진짜 vector → behavior 변환은 `services/llm.ts:680-832`의 `generatePersonaActions()`에서 일어납니다. 이 함수가 Phase D(persona-specific exploration)에 들어갈 5-8개의 액션을 **vector를 직접 분해해** 만들어냅니다.
+
+**Step 1 — Threshold gate로 focus area 추출**:
+
+```ts
+// apps/api/src/services/llm.ts:700-739 (요약)
+const focusAreas: string[] = [];
+
+// 1. 일반 focus (도메인 무관, vector trait가 강할 때만 발화)
+if (persona.feedback_pattern.security_aware > 0.7) {
+  focusAreas.push(isDefi || isNft
+    ? 'security (HTTPS, token approval scopes, slippage+approval safety)'
+    : 'security (HTTPS, CSP headers, OAuth scope clarity, input validation)');
+}
+if (persona.feedback_pattern.performance_sensitive > 0.7)
+  focusAreas.push('performance (loading speed, animation smoothness)');
+if (persona.feedback_pattern.ui_critical > 0.7)
+  focusAreas.push('UI quality (visual glitches, alignment, color contrast)');
+if (persona.feedback_pattern.accessibility_focus > 0.7)
+  focusAreas.push('accessibility (screen reader labels, keyboard nav, font sizes)');
+
+// 2. 도메인 × 전문성 교차 (둘 다 강해야 발화 — "DeFi 페르소나가 SaaS에서 슬리피지 묻기" 방지)
+if (persona.expertise.defi > 0.7 && isDefi)
+  focusAreas.push('DeFi specifics (slippage controls, price impact, fee breakdown, MEV protection)');
+if (persona.expertise.nft > 0.7 && isNft)
+  focusAreas.push('NFT specifics (image loading, metadata display, ownership verification)');
+
+// 3. test_style 트레이트
+if (persona.test_style.thoroughness > 0.8)
+  focusAreas.push('edge cases (empty states, error recovery, boundary values)');
+
+// 4. Demographics (vector의 옵셔널 필드)
+const demo = persona.demographics;
+if (demo) {
+  if (demo.age_group === 'teen')
+    focusAreas.push('teen UX (would a 16-year-old understand this without help?)');
+  if (demo.tech_literacy < 0.3)
+    focusAreas.push('non-technical user (confusing jargon, fear-inducing warnings)');
+  if (demo.patience_level < 0.3)
+    focusAreas.push('impatient user (how many clicks to complete core task?)');
+}
+
+// 5. UX preferences
+const ux = persona.ux_preferences;
+if (ux) {
+  if (ux.mobile_first)
+    focusAreas.push('mobile-first (test at 375px width, thumb-reachable zones, 44px+ tap targets)');
+  if (ux.color_contrast_need > 0.7)
+    focusAreas.push('contrast (text-on-bg ratios on dark themes, button distinguishability)');
+}
+```
+
+**핵심 통찰**: focus area 리스트는 vector 수치의 **결정론적 함수**입니다. 같은 vector → 같은 focus area 리스트. LLM이 자유롭게 해석하는 게 아니라 코드가 먼저 좁힌 뒤 LLM에 넘깁니다.
+
+**Step 2 — Persona context 내러티브 합성**:
+
+```ts
+// apps/api/src/services/llm.ts:744-754
+let personaContext = '';
+if (demo) {
+  const ageLabel = { teen: '10대 청소년', young_adult: '20-30대',
+                     adult: '30-50대', senior: '50대 이상' }[demo.age_group];
+  personaContext +=
+    `\nThis tester is a ${ageLabel} user with tech literacy ` +
+    `${demo.tech_literacy.toFixed(1)}/1.0 and crypto experience ` +
+    `${demo.crypto_experience.toFixed(1)}/1.0.`;
+  if (demo.design_sensitivity > 0.7)
+    personaContext += ' They care deeply about visual design quality.';
+  if (demo.patience_level < 0.4)
+    personaContext += ' They have LOW patience — will abandon if confused.';
+}
+```
+
+**Step 3 — Domain guardrail로 타입 오염 방지**:
+
+```ts
+// apps/api/src/services/llm.ts:768-786 (요약)
+const domainGuardrail = (() => {
+  switch (domainCategory) {
+    case 'defi': case 'nft':
+      return 'Blockchain/web3 site — slippage, wallet approval, gas, token metadata ARE relevant.';
+    case 'devtools':
+      return 'Devtools/deploy platform — focus on docs discoverability, API/SDK clarity. ' +
+             'Do NOT ask for slippage, token approval, NFT metadata, or DeFi-specific checks.';
+    case 'ai_tools':
+      return 'AI platform — model catalog, pricing per token, rate limits matter. ' +
+             'Do NOT ask for wallet connect, NFT mint checks.';
+    default:
+      return 'General SaaS / marketing site. Do NOT ask for slippage, token approval, NFT, ' +
+             'DeFi-specific, or other blockchain-specific checks — they do not apply.';
+  }
+})();
+```
+
+이게 **"prompt 따로, vector 따로" 함정을 막는** 핵심 layer입니다. DeFi 전문 페르소나가 일반 SaaS 사이트를 평가할 때 "왜 슬리피지 표시가 없나요?"를 묻기 시작하면 진단이 즉시 노이즈가 됩니다. Domain guardrail이 vector의 expertise.defi가 1.0이어도 SaaS 사이트에서는 비활성화되도록 강제합니다.
+
+**Step 4 — 최종 Haiku 프롬프트 조립**:
+
+```ts
+// apps/api/src/services/llm.ts:788-816 (요약)
+const prompt = `You are generating browser test actions for a QA tester
+with these focus areas:
+${focusAreas.map((f, i) => `${i + 1}. ${f}`).join('\n')}
+${personaContext}
+
+Target URL: ${targetUrl}
+Domain category: ${domainCategory}
+${domainGuardrail}
+${siteContext}    // discovered links + nav labels
+
+The tester already performed these base checklist actions:
+${baseChecklist.map(c => `- ${c.id}: ${c.task}`).join('\n')}
+
+Generate 5-8 ADDITIONAL browser actions this persona would specifically do.
+CRITICAL RULES:
+1. At least 2-3 actions MUST navigate to DIFFERENT pages
+2. Vary the interaction types: click buttons, open modals, scroll to sections,
+   try form inputs, toggle dark/light mode, resize viewport
+3. Actions must be concrete and executable by a browser automation tool
+4. Each action should result in a visually DIFFERENT screen state
+5. Do NOT repeat actions already in the checklist
+6. Stay on-domain per the "Domain category" above
+
+Return as JSON array: [{ "id": "PA01", "action": "...", "reason": "..." }]`;
+
+const response = await withRoute('persona_actions', () => client.messages.create({
+  model: HAIKU,        // Claude Haiku 4.5 — 속도 + 비용 최적화
+  max_tokens: 1000,
+  messages: [{ role: 'user', content: prompt }],
+}));
+```
+
+이 5-8개 액션이 Phase D에서 `page.act(action)`로 차례차례 실행되어 페르소나별로 **다른 스크린샷, 다른 session log, 다른 turn 시퀀스**를 만들어냅니다.
+
+#### (c) 두 페르소나의 Prompt Diff 예시
+
+같은 사이트(가정: DeFi 거래소)에 대해 두 페르소나를 돌렸을 때 `generatePersonaActions()`가 만들어내는 프롬프트 차이:
+
+**페르소나 A — 노련한 DeFi 트레이더, 모바일 사용자, 디자인 무관심**:
+```
+PersonaVector:
+  feedback_pattern: { security_aware: 0.85, performance_sensitive: 0.72,
+                      ui_critical: 0.31, accessibility_focus: 0.20,
+                      detail_oriented: 0.78 }
+  expertise: { defi: 0.92, nft: 0.45, gaming: 0.10,
+               ai_tools: 0.30, general_web: 0.55 }
+  test_style: { thoroughness: 0.82, speed: 0.65, ux_focus: 0.40,
+                bug_detection: 0.75, creativity: 0.50 }
+  demographics: { age_group: 'adult', tech_literacy: 0.85,
+                  crypto_experience: 0.90, design_sensitivity: 0.20,
+                  patience_level: 0.35 }
+  ux_preferences: { mobile_first: true, visual_style: 'minimal',
+                    color_contrast_need: 0.4, ... }
+
+→ 추출된 focusAreas:
+   1. security (HTTPS, token approval scopes, slippage+approval safety, ...)
+   2. performance (loading speed, animation smoothness)
+   3. DeFi specifics (slippage controls, price impact, fee breakdown, MEV protection)
+   4. edge cases (empty states, error recovery, boundary values)
+   5. mobile-first (test at 375px width, thumb-reachable zones)
+
+→ personaContext:
+   "This tester is a 30-50대 user with tech literacy 0.9/1.0 and
+    crypto experience 0.9/1.0.
+    They have LOW patience — will abandon if confused.
+    Prefers minimal design style. Primarily uses mobile."
+
+→ Haiku가 만들어내는 액션 (대표):
+   PA01: "Open the swap interface and inspect the slippage tolerance setting"
+   PA02: "Initiate a small swap and check if the price impact + MEV warning shows"
+   PA03: "Try to swap with insufficient balance to test error handling"
+   PA04: "Resize viewport to 375px and verify the swap UI remains usable"
+   PA05: "Inspect token approval flow — does it show the exact spending cap?"
+```
+
+**페르소나 B — 학생, 암호화폐 처음, 디자인 민감, PC 사용자**:
+```
+PersonaVector:
+  feedback_pattern: { security_aware: 0.20, performance_sensitive: 0.40,
+                      ui_critical: 0.85, accessibility_focus: 0.30,
+                      detail_oriented: 0.45 }
+  expertise: { defi: 0.10, nft: 0.20, gaming: 0.55,
+               ai_tools: 0.50, general_web: 0.70 }
+  test_style: { thoroughness: 0.45, speed: 0.55, ux_focus: 0.88,
+                bug_detection: 0.35, creativity: 0.70 }
+  demographics: { age_group: 'teen', tech_literacy: 0.45,
+                  crypto_experience: 0.10, design_sensitivity: 0.85,
+                  patience_level: 0.25 }
+  ux_preferences: { mobile_first: false, visual_style: 'playful',
+                    color_contrast_need: 0.6, ... }
+
+→ 추출된 focusAreas:
+   1. UI quality (visual glitches, alignment, color contrast, responsive layout)
+   2. teen UX (relatable language? engaging visuals? would a 16yo understand?)
+   3. non-technical user (confusing jargon, missing crypto term explanations,
+      fear-inducing warnings)
+   4. design quality (visual hierarchy, whitespace, typography, brand feeling)
+   5. impatient user (how many clicks to complete core task?)
+
+→ personaContext:
+   "This tester is a 10대 청소년 user with tech literacy 0.5/1.0 and
+    crypto experience 0.1/1.0.
+    They care deeply about visual design quality.
+    They have LOW patience — will abandon if confused.
+    Prefers playful design style."
+
+→ Haiku가 만들어내는 액션 (대표):
+   PA01: "Try to understand what the page does by reading only the headlines —
+          is it clear without crypto knowledge?"
+   PA02: "Click the 'Connect Wallet' button and see if there's any explanation
+          for what a wallet is or why it's needed"
+   PA03: "Scroll through the page and look for confusing financial jargon
+          (slippage, AMM, liquidity pool) without explanation"
+   PA04: "Inspect the visual design — is the typography hierarchy clear?
+          Are the colors harmonious or jarring?"
+   PA05: "Time how long it takes to find the 'Help' or 'How it works' section"
+```
+
+**Diff의 의미**:
+- 두 페르소나는 **완전히 다른 5개 액션**을 만들어냅니다 — 같은 페이지를 보지만 보는 곳이 다릅니다.
+- 페르소나 A는 슬리피지/MEV/approval 같은 **DeFi-native concern**을 검증.
+- 페르소나 B는 jargon 부재/온보딩 부족/디자인 일관성 같은 **신규 사용자 friction**을 검증.
+- 같은 사이트 진단에 두 페르소나가 함께 참여하면 회사는 **숙련도 양극단의 페인포인트**를 동시에 받습니다 — 인간 5명 인터뷰로는 비싸고 어려운 일.
+- **재현 가능성**: 같은 vector로 다시 돌리면 같은 focus area + 같은 personaContext가 나옵니다. LLM의 randomness는 액션 표현에만 들어가고, 행동의 *축*은 vector가 결정.
+
+#### 왜 이 메커니즘이 "vector = 검증 가능한 모델"의 증거인가
+
+대안 1 — **순수 prompt engineering** ("당신은 DeFi 트레이더입니다, ..."):
+- 페르소나 차이 = 자연어 문장의 차이 → 검증 불가
+- LLM이 대충 "DeFi 트레이더처럼 행동"하는데 어떤 차원에서 차이 나는지 측정 불가
+- 두 페르소나가 우연히 비슷한 행동을 해도 알 수 없음
+
+대안 2 — **단일 임베딩 vector** (예: text-embedding으로 페르소나 묘사 인코딩):
+- 매칭은 가능하지만 vector → behavior 변환이 black box
+- "이 페르소나는 왜 이 액션을 했나?"를 설명 못 함
+
+**41R의 선택 — Named-dimension vector + 결정론적 threshold gate**:
+- ✅ vector 차원이 모두 의미를 갖음 (`feedback_pattern.security_aware`)
+- ✅ threshold (e.g., > 0.7)가 코드에 명시 → behavior trigger가 추적 가능
+- ✅ 코호트 매칭이 의미를 가짐 (`crypto_experience: 0.2~0.4`인 페르소나끼리 묶기)
+- ✅ A/B 페르소나 비교가 vector 거리 = behavior 차이로 직접 환산
+- ✅ 회사 UI에서 20-axis radar로 시각화 가능 (`components/persona-radar-20.tsx`)
+- ✅ 페르소나가 진화해도 (`persona_versions`) vector 차분으로 변화 추적 가능
+
+이게 41R 페르소나가 "Sonnet에 다른 system prompt를 줬을 뿐"이 아닌 이유입니다.
+
 ### 3.5 3-Layer Trust Contract — 진단 신뢰성 보장
 
 페르소나가 100명 돌고 LLM이 "결제 단계에서 사용자가 혼란을 겪습니다"라는 진단을 내놓았을 때, 회사는 **"이게 진짜인지" 어떻게 검증할까**? 41R의 답이 3-layer trust contract입니다.
