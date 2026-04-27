@@ -78,6 +78,19 @@ interface QualityBreakdown {
   checklist_pass_rate?: number;
 }
 
+// Persisted under the `_session_video` sentinel by services/video.ts +
+// routes/autotest.ts. URL points to a 854×480 @ 5fps webm on R2 CDN.
+// Only present when CDP screencast captured frames AND ffmpeg encode +
+// R2 upload both succeeded — the player block below gates on truthy.
+interface SessionVideo {
+  url: string;
+  sizeBytes?: number;
+  durationSec?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+}
+
 function parseSentinel<T>(raw: string | number | undefined): T | null {
   if (typeof raw !== "string") return null;
   try { return JSON.parse(raw) as T; } catch { return null; }
@@ -205,6 +218,9 @@ export default function ReportDetailPage() {
   );
   const breakdown = parseSentinel<QualityBreakdown>(
     (report.questionnaireAnswers || []).find((a) => a.id === "_quality_breakdown")?.answer,
+  );
+  const sessionVideo = parseSentinel<SessionVideo>(
+    (report.questionnaireAnswers || []).find((a) => a.id === "_session_video")?.answer,
   );
 
   return (
@@ -382,6 +398,44 @@ export default function ReportDetailPage() {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* Session Replay — CDP-screencasted webm of the persona's actual
+          browser session. 854×480 @ 5fps from services/video.ts. Only
+          renders when the _session_video sentinel exists (i.e. the full
+          capture+ffmpeg+R2 pipeline succeeded). */}
+      {sessionVideo?.url && (
+        <div className="mb-8 space-y-3">
+          <div className="flex items-baseline justify-between">
+            <h2 className="t-display-s">Session Replay</h2>
+            <span className="t-caption">
+              {sessionVideo.width ?? 854}×{sessionVideo.height ?? 480} ·{" "}
+              {sessionVideo.fps ?? 5}fps
+              {sessionVideo.sizeBytes
+                ? ` · ${(sessionVideo.sizeBytes / 1024 / 1024).toFixed(1)}MB`
+                : ""}
+              {sessionVideo.durationSec
+                ? ` · ${Math.round(sessionVideo.durationSec)}s`
+                : ""}
+            </span>
+          </div>
+          <div className="hf-card p-2">
+            <video
+              controls
+              preload="metadata"
+              src={sessionVideo.url}
+              className="w-full rounded-lg bg-black"
+              style={{ aspectRatio: "854 / 480" }}
+            >
+              Your browser does not support the video tag.
+            </video>
+          </div>
+          <p className="t-caption text-[var(--fg-3)]">
+            페르소나가 실제로 본 화면입니다 — Phase A(discovery), B(scroll),
+            C(checklist), D(persona-specific exploration) 전체가 한 영상에
+            담겨 있습니다.
+          </p>
         </div>
       )}
 

@@ -29,10 +29,13 @@ RUN pnpm --filter @41rpm/shared build && \
 FROM node:20-slim AS runner
 RUN corepack enable && corepack prepare pnpm@10.30.2 --activate
 
-# Install Chromium and dependencies for Stagehand/Playwright
+# Install Chromium and dependencies for Stagehand/Playwright + ffmpeg
+# (ffmpeg is used by services/video.ts to encode CDP screencast JPEG
+# sequences into 854×480 @ 5fps webm replays for /report/<id>)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ \
     chromium \
+    ffmpeg \
     fonts-liberation \
     fonts-noto-cjk \
     libnss3 \

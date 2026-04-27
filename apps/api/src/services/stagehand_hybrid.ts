@@ -184,6 +184,16 @@ export interface RunHybridArgs {
 export interface RunHybridResult {
   sessionLog: HybridSessionLog;
   screenshotPaths: string[];     // absolute fs paths, in turn order
+  /** Absolute path to the directory containing CDP-screencasted JPEG
+   *  frames, named 0000001.jpg … in capture order. The route handler
+   *  is expected to invoke services/video.ts to ffmpeg-encode this
+   *  sequence into a 854×480 @ 5fps webm, upload to R2, and persist
+   *  as the `_session_video` sentinel. Undefined when CDP screencast
+   *  was unavailable (Stagehand internals changed) or stagehand init
+   *  failed before any frames could be captured. The dir itself is
+   *  always created under /tmp/stagehand-frames/<sessionId>/ — empty
+   *  dir signals "screencast started but no frames arrived". */
+  framesDir?: string;
 }
 
 /**
@@ -354,8 +364,61 @@ export async function runStagehandHybrid(
   let lastAttemptedAction: string | undefined;
   let sessionError: SessionErrorInfo | undefined;
 
+  // CDP screencast capture state. Stagehand v3 doesn't expose Playwright's
+  // recordVideo (uses chrome-launcher CDP, not playwright.launchPersistentContext)
+  // so we wire our own Page.startScreencast → frame collector. Frames go to
+  // /tmp/stagehand-frames/<sessionId>/ as zero-padded JPEGs, then services/
+  // video.ts encodes the sequence to a 854×480 @ 5fps webm in routes/autotest.ts.
+  // mainSession is private inside Stagehand's Page class — accessed via TS bypass.
+  // Guard: any failure here is non-fatal, the report ships without a replay.
+  const framesDir = `/tmp/stagehand-frames/${sessionId}`;
+  let framesCaptured = 0;
+  let screencastCdp: { send: (m: string, p?: object) => Promise<unknown>; on: (e: string, h: (p: unknown) => void) => void } | undefined;
+  let screencastFrameHandler: ((p: unknown) => void) | undefined;
+
   try {
     await stagehand.init();
+    // Set up CDP screencast (best-effort). Done after init so Page
+    // exists; failures here log + continue without a replay.
+    try {
+      fs.mkdirSync(framesDir, { recursive: true });
+      const pages = stagehand.context.pages();
+      const page = pages[0];
+      const candidate = (page as unknown as { mainSession?: unknown }).mainSession;
+      const isCdpLike = candidate
+        && typeof (candidate as { send?: unknown }).send === 'function'
+        && typeof (candidate as { on?: unknown }).on === 'function';
+      if (isCdpLike) {
+        const cdp = candidate as NonNullable<typeof screencastCdp>;
+        screencastCdp = cdp;
+        screencastFrameHandler = (raw: unknown) => {
+          try {
+            const frame = raw as { data?: string; sessionId?: number };
+            if (typeof frame.data === 'string' && typeof frame.sessionId === 'number') {
+              framesCaptured += 1;
+              const name = String(framesCaptured).padStart(7, '0') + '.jpg';
+              fs.writeFileSync(`${framesDir}/${name}`, Buffer.from(frame.data, 'base64'));
+              // Ack so the next frame is sent — required by CDP protocol.
+              cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => { /* ignore */ });
+            }
+          } catch {
+            /* per-frame errors are non-fatal */
+          }
+        };
+        cdp.on('Page.screencastFrame', screencastFrameHandler);
+        await cdp.send('Page.startScreencast', {
+          format: 'jpeg',
+          quality: 60,
+          everyNthFrame: 3,  // sample every 3rd frame at source — ~8fps from chrome's repaint rate
+        });
+      } else {
+        console.warn('[stagehand_hybrid] CDP mainSession not accessible — screencast disabled (Stagehand internals may have changed)');
+      }
+    } catch (err) {
+      console.warn('[stagehand_hybrid] screencast setup failed (non-fatal):',
+        err instanceof Error ? err.message : err);
+      screencastCdp = undefined;
+    }
   } catch (err) {
     sessionError = captureSessionError(err, 'init', lastAttemptedAction);
     console.warn('[stagehand_hybrid] init failed:', sessionError.message);
@@ -877,6 +940,19 @@ export async function runStagehandHybrid(
     );
   } finally {
     clearTimeout(hardCutTimer);
+    // Stop CDP screencast before closing the browser. Best-effort —
+    // if stop fails, frames already on disk are still usable.
+    if (screencastCdp) {
+      try {
+        await raceWithTimeout(
+          screencastCdp.send('Page.stopScreencast') as Promise<unknown>,
+          2_000,
+          'Page.stopScreencast',
+        );
+      } catch {
+        /* ignore — chrome may already be tearing down */
+      }
+    }
     try {
       await raceWithTimeout(stagehand.close(), 5_000, 'stagehand.close');
     } catch {
@@ -923,5 +999,10 @@ export async function runStagehandHybrid(
     session_error: sessionError,
   };
 
-  return { sessionLog, screenshotPaths };
+  // Surface the frames dir only if at least one frame landed on disk —
+  // empty/missing dir means the route handler shouldn't bother spawning
+  // ffmpeg.
+  const finalFramesDir = framesCaptured > 0 ? framesDir : undefined;
+
+  return { sessionLog, screenshotPaths, framesDir: finalFramesDir };
 }

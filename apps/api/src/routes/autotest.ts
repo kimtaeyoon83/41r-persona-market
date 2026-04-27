@@ -433,7 +433,7 @@ async function runStagehandHybridAndPersistInner(args: {
       || `/tmp/stagehand-shots/${args.testId.slice(0, 8)}-${args.personaId.slice(0, 8)}-${Date.now()}`,
   );
 
-  const { sessionLog, screenshotPaths } = await runStagehandHybrid({
+  const { sessionLog, screenshotPaths, framesDir } = await runStagehandHybrid({
     personaId: args.personaId,
     personaOneliner,
     url: test.targetUrl,
@@ -446,6 +446,40 @@ async function runStagehandHybridAndPersistInner(args: {
     checklist,
     personaVector: persona.vector,
   });
+
+  // ── Video replay pipeline (best-effort, non-fatal) ──
+  // CDP screencast wrote /tmp/stagehand-frames/<sid>/*.jpg. ffmpeg encodes
+  // → 854×480 @ 5fps webm → R2. Failure at any step (no ffmpeg, zero
+  // frames, R2 down) just skips the sentinel — the report still ships.
+  let videoSentinel: { id: string; answer: string } | undefined;
+  if (framesDir) {
+    try {
+      const { transcodeFramesToWebm } = await import('../services/video.js');
+      const localWebm = `/tmp/stagehand-videos/${sessionLog.session_id}.webm`;
+      const encoded = await transcodeFramesToWebm(framesDir, localWebm);
+      if (encoded) {
+        const bytes = fs.readFileSync(encoded);
+        const key = `replays/stagehand_${sessionLog.session_id}.webm`;
+        const url = await uploadToR2(key, bytes, 'video/webm');
+        videoSentinel = {
+          id: '_session_video',
+          answer: JSON.stringify({
+            url,
+            sizeBytes: bytes.length,
+            durationSec: sessionLog.duration_sec,
+            width: 854,
+            height: 480,
+            fps: 5,
+          }),
+        };
+        // Cleanup local webm — already uploaded.
+        try { fs.unlinkSync(encoded); } catch { /* non-fatal */ }
+      }
+    } catch (err) {
+      console.warn(`[hybrid] video pipeline failed for ${sessionLog.session_id}:`,
+        err instanceof Error ? err.message : err);
+    }
+  }
 
   // Best-effort screenshot upload to R2. If that fails we still
   // record the local fs paths so the report is at least inspectable
@@ -524,6 +558,10 @@ async function runStagehandHybridAndPersistInner(args: {
     ...((sessionLog as { session_error?: unknown }).session_error
       ? [{ id: '_session_error', answer: JSON.stringify((sessionLog as { session_error: unknown }).session_error) }]
       : []),
+    // CDP screencast → ffmpeg → R2 webm URL. Only present when the full
+    // video pipeline succeeded (ffmpeg installed, frames captured, R2 up).
+    // Front-end gates on `_session_video` to render the <video> player.
+    ...(videoSentinel ? [videoSentinel] : []),
   ];
 
   const [inserted] = await db.insert(schema.testReports).values({
