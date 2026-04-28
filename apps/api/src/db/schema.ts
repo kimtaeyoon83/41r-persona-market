@@ -30,6 +30,15 @@ export const tests = pgTable('tests', {
    *  Lets the UI show "out of date — N new reports since" without
    *  re-parsing the markdown to compare. */
   diagnosisReportCount: integer('diagnosis_report_count'),
+  /** Auto-extracted funnel cache. services/scoring/funnel.ts runs a
+   *  two-pass Haiku extraction (per-session "furthest step" + semantic
+   *  clustering) and stores the result here. Same staleness pattern as
+   *  diagnosisReportCount — UI compares against current persona report
+   *  count to decide if regeneration is needed.
+   *  Shape: { steps: [{label, count, percentage}, ...], totalSessions }. */
+  funnelJson: jsonb('funnel_json'),
+  funnelGeneratedAt: timestamp('funnel_generated_at'),
+  funnelReportCount: integer('funnel_report_count'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

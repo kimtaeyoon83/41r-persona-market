@@ -448,6 +448,133 @@ function sevRank(sev: string): number {
   return sev === 'high' ? 3 : sev === 'medium' ? 2 : sev === 'low' ? 1 : 0;
 }
 
+/**
+ * Funnel — auto-extracted by Haiku (services/scoring/funnel.ts) and
+ * cached on tests.funnelJson. GET returns the cache; if persona report
+ * count exceeded the cached count we auto-regenerate on the read.
+ *
+ * Why auto-regen on GET: a stale cache is worse than a slow first read
+ * (the funnel is what tells the company what to act on). Subsequent
+ * reads in the same session are fast (cache served).
+ *
+ * POST /:id/funnel/regenerate forces a fresh extraction without the
+ * stale check — used for "regenerate" button in UI when a company
+ * suspects the funnel labels need recomputing after a site change.
+ */
+router.get('/:id/funnel', async (req, res) => {
+  try {
+    const id = String(req.params.id);
+    const [test] = await db.select().from(schema.tests).where(eq(schema.tests.id, id));
+    if (!test) {
+      res.status(404).json({ error: 'Test not found' });
+      return;
+    }
+
+    const personaReports = await db
+      .select({ id: schema.testReports.id })
+      .from(schema.testReports)
+      .where(and(
+        eq(schema.testReports.testId, id),
+        eq(schema.testReports.isPersonaTest, true),
+      ));
+    const currentPersonaCount = personaReports.length;
+
+    const cached = test.funnelJson as { steps?: unknown; totalSessions?: number } | null;
+    const cachedCount = test.funnelReportCount ?? 0;
+    const stale = !cached || cachedCount < currentPersonaCount;
+
+    // No persona reports yet → return empty shape, no LLM call
+    if (currentPersonaCount === 0) {
+      res.json({
+        test_id: id,
+        funnel: { steps: [], totalSessions: 0 },
+        generated_at: null,
+        generated_for_report_count: 0,
+        current_report_count: 0,
+        stale: false,
+      });
+      return;
+    }
+
+    // Serve cache when fresh
+    if (cached && !stale) {
+      res.json({
+        test_id: id,
+        funnel: cached,
+        generated_at: test.funnelGeneratedAt,
+        generated_for_report_count: cachedCount,
+        current_report_count: currentPersonaCount,
+        stale: false,
+      });
+      return;
+    }
+
+    // Stale or missing → regenerate (this costs LLM tokens; UI shows
+    // a "computing funnel..." state via the loading spinner)
+    const { generateFunnelForTest } = await import('../services/scoring/funnel.js');
+    const fresh = await generateFunnelForTest(id);
+    await db.update(schema.tests).set({
+      funnelJson: fresh,
+      funnelGeneratedAt: new Date(),
+      funnelReportCount: currentPersonaCount,
+    }).where(eq(schema.tests.id, id));
+    res.json({
+      test_id: id,
+      funnel: fresh,
+      generated_at: fresh.generatedAt,
+      generated_for_report_count: currentPersonaCount,
+      current_report_count: currentPersonaCount,
+      stale: false,
+    });
+  } catch (error) {
+    console.error('[GET /api/test/:id/funnel]', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Force-regenerate funnel. Same path as GET but bypasses the stale
+ * check and always burns a fresh LLM extraction. Rate-limited like
+ * other LLM-billing routes (10/min/wallet).
+ */
+router.post('/:id/funnel/regenerate', llmGenerateLimiter, async (req, res) => {
+  try {
+    const id = String(req.params.id);
+    const [test] = await db.select().from(schema.tests).where(eq(schema.tests.id, id));
+    if (!test) {
+      res.status(404).json({ error: 'Test not found' });
+      return;
+    }
+    const personaReports = await db
+      .select({ id: schema.testReports.id })
+      .from(schema.testReports)
+      .where(and(
+        eq(schema.testReports.testId, id),
+        eq(schema.testReports.isPersonaTest, true),
+      ));
+    if (personaReports.length === 0) {
+      res.status(409).json({ error: 'No persona reports yet — funnel cannot be generated' });
+      return;
+    }
+    const { generateFunnelForTest } = await import('../services/scoring/funnel.js');
+    const fresh = await generateFunnelForTest(id);
+    await db.update(schema.tests).set({
+      funnelJson: fresh,
+      funnelGeneratedAt: new Date(),
+      funnelReportCount: personaReports.length,
+    }).where(eq(schema.tests.id, id));
+    res.json({
+      test_id: id,
+      funnel: fresh,
+      generated_at: fresh.generatedAt,
+      generated_for_report_count: personaReports.length,
+    });
+  } catch (error) {
+    console.error('[POST /api/test/:id/funnel/regenerate]', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/:id/diagnosis', async (req, res) => {
   try {
     const id = String(req.params.id);

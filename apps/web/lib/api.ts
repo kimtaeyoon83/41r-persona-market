@@ -74,6 +74,12 @@ export const testApi = {
   // Wraps server-side aggregateForDiagnosis() — no LLM call, no token cost.
   getInsights: (id: string) => request(`/api/test/${id}/insights`),
 
+  // Auto-extracted funnel (Haiku-driven). Cached on the server; first
+  // call after a new persona report regenerates (~5-10s wall-clock for
+  // a 100-persona test). Subsequent calls serve cache.
+  getFunnel: (id: string) => request(`/api/test/${id}/funnel`),
+  regenerateFunnel: (id: string) => request(`/api/test/${id}/funnel/regenerate`, { method: 'POST' }),
+
   generateDiagnosis: (
     id: string,
     data: { company_wallet: string },

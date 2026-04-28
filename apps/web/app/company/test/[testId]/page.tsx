@@ -57,6 +57,21 @@ interface InsightsResponse {
   fidelity: { itemAgreementRate: number | null; pairedCount: number; band: string };
 }
 
+// Auto-extracted funnel from GET /api/test/:id/funnel. Server-cached on
+// tests.funnelJson; first read after a new persona report regenerates
+// (~5-10s wall-clock for a 100-persona test).
+interface FunnelResponse {
+  test_id: string;
+  funnel: {
+    steps: Array<{ label: string; count: number; percentage: number }>;
+    totalSessions: number;
+  };
+  generated_at: string | null;
+  generated_for_report_count: number;
+  current_report_count: number;
+  stale: boolean;
+}
+
 export default function TestDetailPage() {
   const params = useParams();
   const testId = params.testId as string;
@@ -81,6 +96,8 @@ export default function TestDetailPage() {
   const [diagnosing, setDiagnosing] = useState(false);
   const [diagnosisMsg, setDiagnosisMsg] = useState<string | null>(null);
   const [insights, setInsights] = useState<InsightsResponse | null>(null);
+  const [funnel, setFunnel] = useState<FunnelResponse | null>(null);
+  const [funnelRegenerating, setFunnelRegenerating] = useState(false);
   const { publicKey, signMessage } = useWalletContext();
 
   const loadData = () => {
@@ -98,11 +115,13 @@ export default function TestDetailPage() {
         stale: boolean;
       } | null>,
       testApi.getInsights(testId).catch(() => null) as Promise<InsightsResponse | null>,
+      testApi.getFunnel(testId).catch(() => null) as Promise<FunnelResponse | null>,
     ])
-      .then(([testData, reportData, diagResp, insightsResp]) => {
+      .then(([testData, reportData, diagResp, insightsResp, funnelResp]) => {
         setData(testData);
         setReports(reportData);
         setInsights(insightsResp);
+        setFunnel(funnelResp);
         if (diagResp) {
           setDiagnosis({
             markdown: diagResp.markdown,
@@ -194,6 +213,18 @@ export default function TestDetailPage() {
       setDiagnosisMsg(`Generation failed: ${err instanceof Error ? err.message : 'unknown error'}`);
     } finally {
       setDiagnosing(false);
+    }
+  }
+
+  async function handleRegenerateFunnel() {
+    setFunnelRegenerating(true);
+    try {
+      const fresh = await testApi.regenerateFunnel(testId) as FunnelResponse;
+      setFunnel(fresh);
+    } catch (err) {
+      console.error('[funnel regenerate]', err);
+    } finally {
+      setFunnelRegenerating(false);
     }
   }
 
@@ -450,6 +481,73 @@ export default function TestDetailPage() {
           </div>
         );
       })()}
+
+      {/* ── Funnel — auto-extracted user journey + dropoff per step ── */}
+      {tab === 0 && funnel && funnel.funnel.steps.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="t-display-s">User Journey Funnel</h2>
+            <div className="flex items-center gap-2 t-caption">
+              <span>{funnel.funnel.totalSessions} persona sessions</span>
+              {funnel.stale && (
+                <span className="chip warn sm">stale</span>
+              )}
+              <button
+                onClick={handleRegenerateFunnel}
+                disabled={funnelRegenerating}
+                className="hf-btn ghost sm"
+                title="Re-extract funnel from latest sessions (Haiku call, ~10s)"
+              >
+                {funnelRegenerating ? "regenerating…" : "regenerate"}
+              </button>
+            </div>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {funnel.funnel.steps.map((step, i) => {
+              // Dropoff intensity: bar fill mirrors percentage; severity tint
+              // for steps below 30% reach (visual cue for "few personas got here").
+              const tint = step.percentage < 30
+                ? "var(--danger-soft)"
+                : step.percentage < 60
+                  ? "var(--warn-soft)"
+                  : "var(--accent-soft)";
+              const accent = step.percentage < 30
+                ? "var(--danger)"
+                : step.percentage < 60
+                  ? "var(--warn)"
+                  : "var(--accent)";
+              return (
+                <div
+                  key={i}
+                  className="hf-card p-3 flex-shrink-0"
+                  style={{ minWidth: "180px", backgroundColor: tint, borderColor: accent }}
+                >
+                  <div className="t-caption text-[var(--fg-3)] mb-1">Step {i + 1}</div>
+                  <p className="t-body-s font-medium mb-2 line-clamp-2">{step.label}</p>
+                  <div className="flex items-baseline justify-between mb-1">
+                    <span className="money text-lg font-semibold" style={{ color: accent }}>
+                      {step.percentage}%
+                    </span>
+                    <span className="t-caption text-[var(--fg-3)]">
+                      {step.count} / {funnel.funnel.totalSessions}
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-[var(--bg-2)] rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{ width: `${step.percentage}%`, backgroundColor: accent }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="t-caption text-[var(--fg-3)] mt-2">
+            Auto-extracted by Haiku from each persona&apos;s session report. Bars
+            sorted by reach order — highest = most personas reached.
+          </p>
+        </div>
+      )}
 
       {/* ── Why Users Drop — chat-bubble visualization of pain_points ── */}
       {tab === 0 && insights && insights.pain_points.length > 0 && (
