@@ -7,6 +7,7 @@ import {
   registerTestBodySchema,
   retryAutotestBodySchema,
   generateDiagnosisBodySchema,
+  updateTestSettingsBodySchema,
   validateBody,
 } from '../schemas/index.js';
 import { requireSignedRequest } from '../middleware/auth.js';
@@ -649,6 +650,72 @@ router.post(
     } catch (error) {
       console.error('[POST /api/test/:id/diagnosis]', error);
       res.status(500).json({ error: error instanceof Error ? error.message : 'Internal server error' });
+    }
+  },
+);
+
+/**
+ * PATCH /api/test/:id/settings — update advanced settings.
+ * Devnet beta: any signed wallet may edit (consistent with diagnosis/
+ * retry policy). Selectively writes only fields present in the body
+ * (omit field = leave unchanged; explicit null = clear).
+ *
+ * Powers the dashboard's Advanced Settings panel which gates the A/B
+ * Comparison + Revenue Impact sections.
+ */
+router.patch(
+  '/:id/settings',
+  requireSignedRequest,
+  validateBody(updateTestSettingsBodySchema),
+  async (req, res) => {
+    try {
+      const id = String(req.params.id);
+      const body = req.body as {
+        company_wallet: string;
+        compare_with_test_id?: string | null;
+        monthly_visitors?: number | null;
+        conversion_value?: number | null;
+        current_conversion_rate?: number | null;
+      };
+
+      const [test] = await db.select().from(schema.tests).where(eq(schema.tests.id, id));
+      if (!test) {
+        res.status(404).json({ error: 'Test not found' });
+        return;
+      }
+
+      // Validate compare target exists when set (avoid dangling FK).
+      const compareId = body.compare_with_test_id;
+      if (compareId) {
+        if (compareId === id) {
+          res.status(400).json({ error: 'Cannot compare a test with itself' });
+          return;
+        }
+        const [target] = await db.select({ id: schema.tests.id })
+          .from(schema.tests).where(eq(schema.tests.id, compareId));
+        if (!target) {
+          res.status(400).json({ error: 'compare_with_test_id does not reference an existing test' });
+          return;
+        }
+      }
+
+      const updates: Partial<typeof schema.tests.$inferInsert> = {};
+      if ('compare_with_test_id' in body) updates.compareWithTestId = body.compare_with_test_id ?? null;
+      if ('monthly_visitors' in body) updates.monthlyVisitors = body.monthly_visitors ?? null;
+      if ('conversion_value' in body) updates.conversionValue = body.conversion_value ?? null;
+      if ('current_conversion_rate' in body) updates.currentConversionRate = body.current_conversion_rate ?? null;
+
+      if (Object.keys(updates).length === 0) {
+        res.status(400).json({ error: 'No settings fields supplied' });
+        return;
+      }
+
+      const [updated] = await db.update(schema.tests).set(updates)
+        .where(eq(schema.tests.id, id)).returning();
+      res.json({ test: updated });
+    } catch (error) {
+      console.error('[PATCH /api/test/:id/settings]', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
   },
 );

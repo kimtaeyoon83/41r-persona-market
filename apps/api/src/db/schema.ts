@@ -39,6 +39,16 @@ export const tests = pgTable('tests', {
   funnelJson: jsonb('funnel_json'),
   funnelGeneratedAt: timestamp('funnel_generated_at'),
   funnelReportCount: integer('funnel_report_count'),
+  /** Optional A/B comparison target — points to another test in the
+   *  same project. UI renders side-by-side when set. Self-reference
+   *  not enforced as FK to avoid migration ordering pain; route
+   *  validates existence at write time. */
+  compareWithTestId: uuid('compare_with_test_id'),
+  /** Optional revenue baseline inputs — all three needed for the
+   *  Revenue Impact card to render. Without them the card is hidden. */
+  monthlyVisitors: integer('monthly_visitors'),
+  conversionValue: real('conversion_value'),       // $ per conversion
+  currentConversionRate: real('current_conversion_rate'),  // 0–1
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

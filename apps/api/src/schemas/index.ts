@@ -62,6 +62,19 @@ export const generateDiagnosisBodySchema = z.object({
   company_wallet: walletAddressSchema,
 });
 
+/**
+ * Advanced settings — A/B comparison + Revenue baseline inputs.
+ * All fields optional. Sending null explicitly clears a previously-set
+ * value; omitting a field leaves it unchanged.
+ */
+export const updateTestSettingsBodySchema = z.object({
+  company_wallet: walletAddressSchema,
+  compare_with_test_id: uuidSchema.nullable().optional(),
+  monthly_visitors: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
+  conversion_value: z.number().min(0).max(1_000_000).nullable().optional(),  // $/conversion
+  current_conversion_rate: z.number().min(0).max(1).nullable().optional(),   // 0-1 fraction
+});
+
 export const retryAutotestBodySchema = z.object({
   company_wallet: walletAddressSchema,
   /** Optional cap on how many personas to (re)queue. Defaults to 3 —

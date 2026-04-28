@@ -19,6 +19,11 @@ interface TestDetail {
     status: string;
     createdAt: string;
     companyAddr?: string;
+    // Advanced settings (P2-AR) — optional inputs that gate A/B + Revenue cards.
+    compareWithTestId?: string | null;
+    monthlyVisitors?: number | null;
+    conversionValue?: number | null;
+    currentConversionRate?: number | null;
   };
   test_cases: {
     checklist: Array<{ id: string; task: string; expected: string }>;
@@ -98,6 +103,15 @@ export default function TestDetailPage() {
   const [insights, setInsights] = useState<InsightsResponse | null>(null);
   const [funnel, setFunnel] = useState<FunnelResponse | null>(null);
   const [funnelRegenerating, setFunnelRegenerating] = useState(false);
+  // Advanced Settings panel (P2-AR) — collapsed by default, edits in-place.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
+  const [compareWithDraft, setCompareWithDraft] = useState("");
+  const [visitorsDraft, setVisitorsDraft] = useState("");
+  const [valueDraft, setValueDraft] = useState("");
+  const [rateDraft, setRateDraft] = useState("");
+  const [compareInsights, setCompareInsights] = useState<InsightsResponse | null>(null);
   const { publicKey, signMessage } = useWalletContext();
 
   const loadData = () => {
@@ -122,6 +136,20 @@ export default function TestDetailPage() {
         setReports(reportData);
         setInsights(insightsResp);
         setFunnel(funnelResp);
+        // Hydrate Advanced Settings draft inputs from server state.
+        setCompareWithDraft(testData.test.compareWithTestId ?? "");
+        setVisitorsDraft(testData.test.monthlyVisitors != null ? String(testData.test.monthlyVisitors) : "");
+        setValueDraft(testData.test.conversionValue != null ? String(testData.test.conversionValue) : "");
+        setRateDraft(testData.test.currentConversionRate != null ? String(testData.test.currentConversionRate) : "");
+        // If A/B compare target set, fetch the other side's insights for the
+        // side-by-side card. Best-effort — failure leaves card hidden.
+        if (testData.test.compareWithTestId) {
+          testApi.getInsights(testData.test.compareWithTestId)
+            .then((r) => setCompareInsights(r as InsightsResponse))
+            .catch(() => setCompareInsights(null));
+        } else {
+          setCompareInsights(null);
+        }
         if (diagResp) {
           setDiagnosis({
             markdown: diagResp.markdown,
@@ -227,6 +255,46 @@ export default function TestDetailPage() {
       setFunnelRegenerating(false);
     }
   }
+
+  async function handleSaveSettings() {
+    if (!publicKey || !signMessage) {
+      setSettingsMsg("Connect a wallet first.");
+      return;
+    }
+    setSettingsSaving(true);
+    setSettingsMsg(null);
+    try {
+      // Empty string → null (clear). Otherwise parse number / pass uuid.
+      const payload = {
+        company_wallet: publicKey,
+        compare_with_test_id: compareWithDraft.trim() || null,
+        monthly_visitors: visitorsDraft.trim() ? Number(visitorsDraft) : null,
+        conversion_value: valueDraft.trim() ? Number(valueDraft) : null,
+        current_conversion_rate: rateDraft.trim() ? Number(rateDraft) : null,
+      };
+      await testApi.updateSettings(testId, payload, signMessage);
+      setSettingsMsg("Settings saved.");
+      // Reload everything so the new settings flow into the conditional cards.
+      loadData();
+    } catch (err) {
+      setSettingsMsg(`Save failed: ${err instanceof Error ? err.message : 'unknown'}`);
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
+
+  // Revenue baseline calculation — only when all 3 inputs present.
+  // Reads draft state when not editing so card stays in sync with the form;
+  // falls back to server data after save.
+  const revenueData = (() => {
+    const v = data?.test.monthlyVisitors;
+    const cv = data?.test.conversionValue;
+    const cr = data?.test.currentConversionRate;
+    if (typeof v !== 'number' || typeof cv !== 'number' || typeof cr !== 'number') return null;
+    const monthlyConversions = Math.round(v * cr);
+    const monthlyRevenue = monthlyConversions * cv;
+    return { visitors: v, value: cv, rate: cr, monthlyConversions, monthlyRevenue };
+  })();
 
   if (loading) return <LoadingSpinner text="Loading test details..." />;
   if (error) return <ErrorDisplay message={error} onRetry={loadData} />;
@@ -481,6 +549,179 @@ export default function TestDetailPage() {
           </div>
         );
       })()}
+
+      {/* ── Advanced Settings — A/B compare target + Revenue inputs ── */}
+      {tab === 0 && (
+        <details
+          open={settingsOpen}
+          onToggle={(e) => setSettingsOpen((e.target as HTMLDetailsElement).open)}
+          className="hf-card p-4 mb-6"
+        >
+          <summary className="cursor-pointer t-body-s font-medium text-[var(--fg-2)] hover:text-[var(--fg-1)]">
+            Advanced Settings
+            <span className="t-caption ml-2 text-[var(--fg-3)]">
+              (A/B compare + Revenue baseline — optional)
+            </span>
+          </summary>
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="t-label block mb-1">Compare with test ID</label>
+              <input
+                type="text"
+                value={compareWithDraft}
+                onChange={(e) => setCompareWithDraft(e.target.value)}
+                placeholder="uuid of another test"
+                className="hf-input w-full text-sm"
+              />
+              <p className="t-caption mt-1 text-[var(--fg-3)]">
+                When set, A/B Comparison card shows side-by-side stats.
+              </p>
+            </div>
+            <div>
+              <label className="t-label block mb-1">Monthly visitors</label>
+              <input
+                type="number"
+                value={visitorsDraft}
+                onChange={(e) => setVisitorsDraft(e.target.value)}
+                placeholder="e.g. 50000"
+                className="hf-input w-full text-sm money"
+              />
+            </div>
+            <div>
+              <label className="t-label block mb-1">Conversion value ($)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={valueDraft}
+                onChange={(e) => setValueDraft(e.target.value)}
+                placeholder="e.g. 19.99"
+                className="hf-input w-full text-sm money"
+              />
+            </div>
+            <div>
+              <label className="t-label block mb-1">Current conversion rate (0-1)</label>
+              <input
+                type="number"
+                step="0.001"
+                min="0"
+                max="1"
+                value={rateDraft}
+                onChange={(e) => setRateDraft(e.target.value)}
+                placeholder="e.g. 0.034 = 3.4%"
+                className="hf-input w-full text-sm money"
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              onClick={handleSaveSettings}
+              disabled={settingsSaving || !publicKey}
+              className="hf-btn primary sm"
+            >
+              {settingsSaving ? "saving…" : "Save settings"}
+            </button>
+            {!publicKey && (
+              <span className="t-caption text-[var(--fg-3)]">Connect wallet to save</span>
+            )}
+            {settingsMsg && (
+              <span className={`t-caption ${settingsMsg.startsWith("Save failed") ? "text-[var(--danger)]" : "text-[var(--success)]"}`}>
+                {settingsMsg}
+              </span>
+            )}
+          </div>
+        </details>
+      )}
+
+      {/* ── Revenue Impact — only when all 3 inputs present ── */}
+      {tab === 0 && revenueData && (
+        <div className="mb-8">
+          <h2 className="t-display-s mb-3">Revenue Impact</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="hf-card p-4">
+              <div className="t-label">Monthly visitors</div>
+              <p className="money text-2xl font-semibold mt-1">
+                {revenueData.visitors.toLocaleString()}
+              </p>
+            </div>
+            <div className="hf-card p-4">
+              <div className="t-label">Monthly conversions</div>
+              <p className="money text-2xl font-semibold mt-1">
+                {revenueData.monthlyConversions.toLocaleString()}
+                <span className="text-[11px] text-[var(--fg-3)] ml-2 font-normal">
+                  @ {(revenueData.rate * 100).toFixed(2)}%
+                </span>
+              </p>
+            </div>
+            <div className="hf-card p-4">
+              <div className="t-label">Monthly revenue baseline</div>
+              <p className="money text-2xl font-semibold mt-1 text-sol-green">
+                ${revenueData.monthlyRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                <span className="text-[11px] text-[var(--fg-3)] ml-2 font-normal">
+                  @ ${revenueData.value}/conv
+                </span>
+              </p>
+            </div>
+          </div>
+          <p className="t-caption text-[var(--fg-3)] mt-2">
+            Baseline only — fix→%lift simulation is a v2 follow-up. Pain
+            points found above represent the addressable conversion gap.
+          </p>
+        </div>
+      )}
+
+      {/* ── A/B Comparison — only when compare target set + insights loaded ── */}
+      {tab === 0 && data?.test.compareWithTestId && compareInsights && insights && (
+        <div className="mb-8">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="t-display-s">A/B Comparison</h2>
+            <a
+              href={`/company/test/${data.test.compareWithTestId}`}
+              className="t-caption hover:underline"
+            >
+              compare → {data.test.compareWithTestId.slice(0, 8)}…
+            </a>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: "This test (A)", d: insights, badge: "A" },
+              { label: "Compare (B)", d: compareInsights, badge: "B" },
+            ].map((side) => (
+              <div key={side.badge} className="hf-card p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-[var(--accent-soft)] flex items-center justify-center text-[var(--accent)] text-xs font-bold">
+                    {side.badge}
+                  </div>
+                  <span className="t-body-s font-medium">{side.label}</span>
+                </div>
+                <div className="space-y-1 t-caption">
+                  <div className="flex justify-between">
+                    <span className="text-[var(--fg-3)]">Persona reports</span>
+                    <span className="money">{side.d.persona_count}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--fg-3)]">Human reports</span>
+                    <span className="money">{side.d.human_count}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--fg-3)]">Avg quality</span>
+                    <span className="money">{side.d.quality_stats.avg.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--fg-3)]">Pain points</span>
+                    <span className="money">{side.d.pain_points.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--fg-3)]">High severity</span>
+                    <span className="money text-[var(--danger)]">
+                      {side.d.pain_points.filter((p) => p.severity === "high").length}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Funnel — auto-extracted user journey + dropoff per step ── */}
       {tab === 0 && funnel && funnel.funnel.steps.length > 0 && (

@@ -80,6 +80,24 @@ export const testApi = {
   getFunnel: (id: string) => request(`/api/test/${id}/funnel`),
   regenerateFunnel: (id: string) => request(`/api/test/${id}/funnel/regenerate`, { method: 'POST' }),
 
+  // Advanced settings — A/B comparison + Revenue baseline. Signed PATCH.
+  // Omit a field to leave it unchanged; explicit null clears.
+  updateSettings: (
+    id: string,
+    data: {
+      company_wallet: string;
+      compare_with_test_id?: string | null;
+      monthly_visitors?: number | null;
+      conversion_value?: number | null;
+      current_conversion_rate?: number | null;
+    },
+    signMessage: SignMessage,
+  ) => signedRequest(
+    `/api/test/${id}/settings`,
+    { method: 'PATCH', body: data },
+    { wallet: data.company_wallet, signMessage },
+  ),
+
   generateDiagnosis: (
     id: string,
     data: { company_wallet: string },
