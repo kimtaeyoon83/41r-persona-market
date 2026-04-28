@@ -459,7 +459,11 @@ async function runStagehandHybridAndPersistInner(args: {
       const encoded = await transcodeFramesToWebm(framesDir, localWebm);
       if (encoded) {
         const bytes = fs.readFileSync(encoded);
-        const key = `replays/stagehand_${sessionLog.session_id}.webm`;
+        // Key matches the local filename so the dev /replays static
+        // handler resolves it without prefix mangling. Stagehand is
+        // currently the only producer of session videos so the dir
+        // alone (`replays/`) provides enough namespacing.
+        const key = `replays/${sessionLog.session_id}.webm`;
         const url = await uploadToR2(key, bytes, 'video/webm');
         videoSentinel = {
           id: '_session_video',
@@ -472,8 +476,15 @@ async function runStagehandHybridAndPersistInner(args: {
             fps: 5,
           }),
         };
-        // Cleanup local webm — already uploaded.
-        try { fs.unlinkSync(encoded); } catch { /* non-fatal */ }
+        // Cleanup local webm only when R2 actually accepted it (URL
+        // starts with http). When R2 is missing, uploadToR2 returns
+        // the bucket key as a fallback ("replays/<sid>.webm") and dev
+        // needs the local file alive so /replays static handler can
+        // serve it. Keep the file in that case; it's <10MB.
+        const r2Accepted = url.startsWith('http');
+        if (r2Accepted) {
+          try { fs.unlinkSync(encoded); } catch { /* non-fatal */ }
+        }
       }
     } catch (err) {
       console.warn(`[hybrid] video pipeline failed for ${sessionLog.session_id}:`,

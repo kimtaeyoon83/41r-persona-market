@@ -96,6 +96,13 @@ if (devHarnessEnabled) {
 // Static file serving for screenshots (local dev fallback, production uses R2 CDN)
 if (process.env.NODE_ENV !== 'production') {
   app.use('/screenshots', express.static(path.resolve('../../screenshots')));
+  // Dev replay serving — when R2 isn't configured, services/video.ts
+  // returns the bucket key as the URL ("replays/<sid>.webm"). The web
+  // UI prefixes with API_BASE; this static handler resolves it from
+  // local /tmp where ffmpeg wrote the file. routes/autotest.ts skips
+  // the post-upload unlinkSync in the R2-fallback case so the file
+  // stays around for serving.
+  app.use('/replays', express.static('/tmp/stagehand-videos'));
 }
 
 app.listen(PORT, () => {

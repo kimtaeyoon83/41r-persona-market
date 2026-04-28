@@ -405,7 +405,15 @@ export default function ReportDetailPage() {
           browser session. 854×480 @ 5fps from services/video.ts. Only
           renders when the _session_video sentinel exists (i.e. the full
           capture+ffmpeg+R2 pipeline succeeded). */}
-      {sessionVideo?.url && (
+      {sessionVideo?.url && (() => {
+        // URL resolution: production R2 returns full https://; dev fallback
+        // (R2 not configured) returns the bucket key only. Prefix the
+        // latter with API_BASE so Express can serve it from /replays/.
+        // Same pattern as screenshots in CLAUDE.md.
+        const videoSrc = sessionVideo.url.startsWith("http")
+          ? sessionVideo.url
+          : `${API_BASE}/${sessionVideo.url}`;
+        return (
         <div className="mb-8 space-y-3">
           <div className="flex items-baseline justify-between">
             <h2 className="t-display-s">Session Replay</h2>
@@ -424,7 +432,7 @@ export default function ReportDetailPage() {
             <video
               controls
               preload="metadata"
-              src={sessionVideo.url}
+              src={videoSrc}
               className="w-full rounded-lg bg-black"
               style={{ aspectRatio: "854 / 480" }}
             >
@@ -437,7 +445,8 @@ export default function ReportDetailPage() {
             담겨 있습니다.
           </p>
         </div>
-      )}
+        );
+      })()}
 
       {/* Structured Report — persona-engine's synthesized view over the
           session (summary + ux_scores + pain_points + signals + recs).
