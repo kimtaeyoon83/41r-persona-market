@@ -42,6 +42,7 @@ import {
   extractVoiceQuotes,
 } from './dimensions/llm.js';
 import { clusterFrictions } from './dimensions/frictions.js';
+import { captureSite } from './site_capture.js';
 
 const log = logger.child({ service: 'scan_pipeline' });
 
@@ -83,6 +84,17 @@ const SCAN_CONCURRENCY = Math.max(
   1,
   Number(process.env.SCAN_CONCURRENCY ?? 5)
 );
+
+// Vision mode — when true, capture the site once and pass screenshot
+// URLs to runPersonaResponseLLM (Sonnet vision, ~$0.05/persona).
+// When false, persona LLM stays on Haiku text (~$0.001/persona).
+// Capture itself always runs when not in simulator mode (cheap, ~5¢)
+// so the URLs are available for opt-in vision later.
+const USE_VISION = (() => {
+  const explicit = process.env.USE_VISION;
+  if (explicit !== undefined && explicit !== '') return explicit !== '0';
+  return false; // default off — vision is the expensive opt-in
+})();
 
 // Promise pool — runs `fn(item)` for each item with at most
 // `concurrency` in flight. Maintains insertion order for results
@@ -145,6 +157,34 @@ async function runScan(scanId: string): Promise<void> {
   const targetUrl = scan.targetUrl;
   const hypothesis = scan.hypothesis ?? undefined;
 
+  // Step 0 — capturing. Only runs on real-LLM path (simulator
+  // doesn't need screenshots). Failure is non-fatal; pipeline
+  // continues without screenshots and falls back to text-only.
+  let screenshotUrls: string[] = [];
+  if (!USE_SIMULATOR) {
+    await setStatus(scanId, 'capturing');
+    try {
+      const cap = await captureSite(targetUrl);
+      screenshotUrls = cap.urls;
+      await db
+        .update(schema.audienceFitScans)
+        .set({
+          captureScreenshotUrls: screenshotUrls,
+          captureCompletedAt: cap.capturedAt,
+        })
+        .where(eq(schema.audienceFitScans.id, scanId));
+      log.info(
+        { scanId, urls: screenshotUrls.length, fromCache: cap.fromCache },
+        'site capture complete'
+      );
+    } catch (err) {
+      log.warn(
+        { scanId, err: err instanceof Error ? err.message : 'unknown' },
+        'site capture failed — falling back to text-only',
+      );
+    }
+  }
+
   // Step 1 — sampling.
   await setStatus(scanId, 'sampling');
   const personas = await db
@@ -190,7 +230,16 @@ async function runScan(scanId: string): Promise<void> {
   let totalCostUsd = 0;
 
   log.info(
-    { scanId, engine: USE_SIMULATOR ? 'simulator' : 'haiku', concurrency: SCAN_CONCURRENCY },
+    {
+      scanId,
+      engine: USE_SIMULATOR
+        ? 'simulator'
+        : USE_VISION && screenshotUrls.length > 0
+          ? 'sonnet-vision'
+          : 'haiku-text',
+      concurrency: SCAN_CONCURRENCY,
+      screenshots: screenshotUrls.length,
+    },
     'starting persona responses'
   );
 
@@ -224,7 +273,14 @@ async function runScan(scanId: string): Promise<void> {
         sim = simulatePersonaResponse(persona, targetUrl, hypothesis);
         await sleep(SIM_PERSONA_DELAY_MS);
       } else {
-        const result = await runPersonaResponseLLM(persona, targetUrl, hypothesis);
+        // Pass screenshots only when vision is enabled — otherwise
+        // stay on cheap Haiku text path even if capture succeeded.
+        const result = await runPersonaResponseLLM(
+          persona,
+          targetUrl,
+          hypothesis,
+          USE_VISION ? screenshotUrls : undefined,
+        );
         sim = result.sim;
         voice = extractVoiceQuotes(result.parsed);
         costUsd = result.llmCostUsd;

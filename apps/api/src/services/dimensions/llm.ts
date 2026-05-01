@@ -26,6 +26,7 @@ import {
 } from '../audience_fit.js';
 import type { PersonaRow } from '../cohort_selection.js';
 import type { SimulatedResponse } from '../dimension_simulator.js';
+import { readCaptureAsBase64 } from '../site_capture.js';
 
 // ─── Zod schema for §11.1 response ───────────────────────────────
 // Strict — any LLM deviation throws. Caller treats parse failure as
@@ -244,22 +245,63 @@ export type PersonaResponseResult = {
   llmLatencyMs: number;
 };
 
+// Build image content blocks for Sonnet vision. http(s) URLs use
+// the URL source; local /site-captures/ paths get base64-encoded
+// from /tmp via readCaptureAsBase64.
+function buildImageBlocks(screenshotUrls: readonly string[]): Anthropic.ImageBlockParam[] {
+  const blocks: Anthropic.ImageBlockParam[] = [];
+  for (const u of screenshotUrls) {
+    if (u.startsWith('http://') || u.startsWith('https://')) {
+      blocks.push({ type: 'image', source: { type: 'url', url: u } });
+      continue;
+    }
+    const local = readCaptureAsBase64(u);
+    if (local) {
+      blocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: local.mediaType,
+          data: local.data,
+        },
+      });
+    }
+  }
+  return blocks;
+}
+
 export async function runPersonaResponseLLM(
   persona: PersonaRow,
   targetUrl: string,
   hypothesis?: string,
+  screenshotUrls?: readonly string[],
 ): Promise<PersonaResponseResult> {
   const t0 = Date.now();
   const system = buildSystemPrompt();
-  const user = buildUserPrompt(persona, targetUrl, hypothesis);
+  const userText = buildUserPrompt(persona, targetUrl, hypothesis);
+
+  const useVision = !!screenshotUrls && screenshotUrls.length > 0;
+  const imageBlocks = useVision ? buildImageBlocks(screenshotUrls) : [];
+  const reallyVision = imageBlocks.length > 0;
+
+  // When vision blocks are attached: Sonnet (handles images well).
+  // When text-only: Haiku (cheaper, fast).
+  const model = reallyVision ? SCORING_MODELS.sonnet : SCORING_MODELS.haiku;
+
+  const userContent: Anthropic.ContentBlockParam[] = reallyVision
+    ? [
+        ...imageBlocks,
+        { type: 'text', text: userText },
+      ]
+    : [{ type: 'text', text: userText }];
 
   const msg = await withRoute('audience_fit.persona_response', () =>
     client.messages.create({
-      model: SCORING_MODELS.haiku,
+      model,
       max_tokens: 1400,
       temperature: 0.7,
       system,
-      messages: [{ role: 'user', content: user }],
+      messages: [{ role: 'user', content: userContent }],
     }),
   );
 
@@ -272,13 +314,15 @@ export async function runPersonaResponseLLM(
   const parsed = personaResponseSchema.parse(rawJson);
   const sim = mapLLMResponseToSimulated(parsed);
 
-  // Haiku pricing (Apr 2026): input $0.80/MTok, output $4.00/MTok.
-  // Tracked in /tmp/llm-usage.jsonl by the wrapper; this is an
-  // estimate for the per-row llm_cost_usd column.
+  // Pricing (Apr 2026):
+  //   Haiku: input $0.80/MTok, output $4.00/MTok
+  //   Sonnet: input $3.00/MTok, output $15.00/MTok
   const inputTok = msg.usage?.input_tokens ?? 0;
   const outputTok = msg.usage?.output_tokens ?? 0;
+  const inPrice = reallyVision ? 3.0 : 0.8;
+  const outPrice = reallyVision ? 15.0 : 4.0;
   const llmCostUsd =
-    (inputTok / 1_000_000) * 0.8 + (outputTok / 1_000_000) * 4.0;
+    (inputTok / 1_000_000) * inPrice + (outputTok / 1_000_000) * outPrice;
 
   return {
     sim,

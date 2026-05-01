@@ -16,27 +16,51 @@
   },
   "eslintConfig": {
     "root": true,
-    "env": { "node": true, "es2022": true },
+    "env": {
+      "node": true,
+      "es2022": true
+    },
     "parser": "@typescript-eslint/parser",
-    "parserOptions": { "ecmaVersion": 2022, "sourceType": "module" },
-    "plugins": ["@typescript-eslint"],
+    "parserOptions": {
+      "ecmaVersion": 2022,
+      "sourceType": "module"
+    },
+    "plugins": [
+      "@typescript-eslint"
+    ],
     "extends": [
       "eslint:recommended",
       "plugin:@typescript-eslint/recommended"
     ],
-    "ignorePatterns": ["dist/**", "drizzle/**", "node_modules/**", "*.cjs"],
+    "ignorePatterns": [
+      "dist/**",
+      "drizzle/**",
+      "node_modules/**",
+      "*.cjs"
+    ],
     "rules": {
       "@typescript-eslint/no-unused-vars": [
         "error",
-        { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }
+        {
+          "argsIgnorePattern": "^_",
+          "varsIgnorePattern": "^_",
+          "caughtErrorsIgnorePattern": "^_"
+        }
       ],
       "@typescript-eslint/no-explicit-any": "warn",
-      "no-empty": ["error", { "allowEmptyCatch": true }],
+      "no-empty": [
+        "error",
+        {
+          "allowEmptyCatch": true
+        }
+      ],
       "@typescript-eslint/no-var-requires": "off"
     },
     "overrides": [
       {
-        "files": ["src/__tests__/**/*.ts"],
+        "files": [
+          "src/__tests__/**/*.ts"
+        ],
         "rules": {
           "@typescript-eslint/no-explicit-any": "off",
           "@typescript-eslint/no-non-null-assertion": "off"
@@ -65,6 +89,7 @@
     "express-rate-limit": "^8.3.2",
     "pg": "^8.13.0",
     "pino": "^10.3.1",
+    "playwright-core": "^1.59.1",
     "sas-lib": "^1.0.10",
     "tweetnacl": "^1.0.3",
     "viem": "^2.48.1",

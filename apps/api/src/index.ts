@@ -105,6 +105,10 @@ if (process.env.NODE_ENV !== 'production') {
   // the post-upload unlinkSync in the R2-fallback case so the file
   // stays around for serving.
   app.use('/replays', express.static('/tmp/stagehand-videos'));
+  // Dev capture serving — services/site_capture.ts writes PNGs to
+  // /tmp/site-captures/<hash>.png and returns "/site-captures/..."
+  // URLs when R2 isn't configured.
+  app.use('/site-captures', express.static('/tmp/site-captures'));
 }
 
 app.listen(PORT, () => {
