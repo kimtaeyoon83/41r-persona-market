@@ -306,6 +306,17 @@ export type ScanReport = {
     | null;
   formula_rows: { d: string; s: number; w: number; c: number }[] | null;
   kpis: { l: string; v: string; sub: string; tone: string }[] | null;
+  aarrr: {
+    total_personas: number;
+    stages: {
+      key: 'acquisition' | 'activation' | 'retention' | 'referral' | 'revenue';
+      label: string;
+      score: number;
+      n_passing: number;
+      total: number;
+      threshold: string;
+    }[];
+  } | null;
 };
 
 export const scanApi = {

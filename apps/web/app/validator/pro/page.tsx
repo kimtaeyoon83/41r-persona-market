@@ -2,9 +2,12 @@
 
 import { Btn, C, FM, FS, Frame, Pill } from "../_components/ui";
 
-// Screen 6: Pro mode placeholder. Maps to ScreenProMode in
-// screens-v2.jsx. Spec §1.5 reserves the AARRR funnel + daily
-// monitoring + custom cohorts for Pro tier.
+// Screen 6: Pro mode. Maps to ScreenProMode in screens-v2.jsx.
+// Spec §1.5: AARRR funnel + daily monitoring + custom cohorts.
+//
+// Phase 2-E: AARRR funnel now ships in every Mode A report's Pro
+// section (see /validator/report/[scanId]). Daily monitoring +
+// custom cohorts deferred to Phase 3.
 
 const STAGES = [
   { t: "Acquisition", sub: "How they reached you" },
@@ -30,7 +33,7 @@ export default function ValidatorProModePage() {
         <div style={{ maxWidth: 560, textAlign: "center", fontFamily: FS }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>⚗</div>
           <Pill tone="exp" style={{ marginBottom: 16 }}>
-            Pro mode · coming soon
+            Pro mode · AARRR live
           </Pill>
           <h1
             style={{
@@ -40,8 +43,8 @@ export default function ValidatorProModePage() {
               margin: "0 0 12px",
             }}
           >
-            Deep validation for a<br />
-            specific audience
+            AARRR funnel<br />
+            shipped in every Mode A report
           </h1>
           <p
             style={{
@@ -51,9 +54,9 @@ export default function ValidatorProModePage() {
               marginBottom: 24,
             }}
           >
-            URL + audience definition + hypothesis → deep verification by 50–100
-            personas. AARRR 5-stage funnel · pass/fail thresholds ·
-            failure-cause clustering.
+            Acquisition → Activation → Retention → Referral → Revenue —
+            derived from per-persona dimension scores, no extra LLM cost.
+            Daily monitoring + custom cohorts + Slack alerts arrive next.
           </p>
           <div
             style={{
@@ -109,8 +112,8 @@ export default function ValidatorProModePage() {
               </div>
             ))}
           </div>
-          <Btn primary style={{ marginTop: 20 }}>
-            Notify when ready
+          <Btn primary href="/validator/report/demo" style={{ marginTop: 20 }}>
+            See AARRR in demo report →
           </Btn>
         </div>
       </div>

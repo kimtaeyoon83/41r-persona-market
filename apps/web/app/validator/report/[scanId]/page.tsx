@@ -530,6 +530,11 @@ export default function ValidatorReportPage() {
           <PersonaBoard tone="bad" label="Non-fit personas" personas={nonFitPersonas} />
         </div>
 
+        {/* ⓟ AARRR funnel — Pro tier (Phase 2-E). Mode A only;
+            Mode B reports skip this since the audience is already
+            narrow and "funnel" semantics don't apply. */}
+        {r.aarrr && <AarrrFunnelBlock funnel={r.aarrr} />}
+
         <div
           style={{
             marginTop: 8,
@@ -576,6 +581,129 @@ function verdictBorder(score: number): string {
   if (score < 40) return C.bad;
   if (score < 60) return C.warn;
   return C.ok;
+}
+
+// ─── AARRR funnel block (Pro tier — Phase 2-E) ───────────────────
+// Visualises the 5-stage AARRR funnel as horizontal bars whose
+// width is proportional to the % of personas passing each stage.
+// The bars narrow from Acquisition (always 100%) downward — the
+// classic AARRR drop-off shape.
+const AARRR_COLORS = [C.ok, C.accent, C.warn, C.exp, C.bad];
+
+function AarrrFunnelBlock({
+  funnel,
+}: {
+  funnel: NonNullable<ScanReport['aarrr']>;
+}) {
+  return (
+    <>
+      <SectionLabel
+        n="P"
+        label="AARRR Funnel"
+        sub={`Pro tier · Acquisition → Activation → Retention → Referral → Revenue · n=${funnel.total_personas}`}
+      />
+      <Card padding={20} style={{ marginBottom: 24 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {funnel.stages.map((s, i) => {
+            const color = AARRR_COLORS[i] ?? C.accent;
+            const widthPct = Math.max(2, s.score);
+            return (
+              <div
+                key={s.key}
+                style={{ display: "flex", alignItems: "center", gap: 12 }}
+              >
+                <div
+                  style={{
+                    width: 100,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: C.text,
+                  }}
+                >
+                  {s.label}
+                </div>
+                <div
+                  style={{
+                    flex: 1,
+                    position: "relative",
+                    height: 28,
+                    background: "#f3f0e8",
+                    borderRadius: 6,
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: 0,
+                      height: "100%",
+                      width: `${widthPct}%`,
+                      background: color,
+                      opacity: 0.85,
+                      transition: "width .6s",
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 10,
+                      top: 0,
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      fontSize: 12,
+                      fontFamily: FM,
+                      color: "#fff",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {s.score.toFixed(0)}%
+                  </div>
+                </div>
+                <div
+                  style={{
+                    width: 70,
+                    fontSize: 11,
+                    fontFamily: FM,
+                    color: C.textDim,
+                    textAlign: "right",
+                  }}
+                >
+                  {s.n_passing}/{s.total}
+                </div>
+                <div
+                  style={{
+                    width: 180,
+                    fontSize: 10,
+                    color: C.textFaint,
+                    fontFamily: FM,
+                  }}
+                  title={s.threshold}
+                >
+                  {s.threshold}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div
+          style={{
+            marginTop: 14,
+            padding: 10,
+            background: C.expSoft,
+            borderRadius: 6,
+            fontSize: 11,
+            color: C.exp,
+            lineHeight: 1.5,
+          }}
+        >
+          ⓟ Pro tier — derived from per-persona dimension scores.
+          Custom thresholds + daily-monitoring deltas land in Phase 3.
+        </div>
+      </Card>
+    </>
+  );
 }
 
 function PlaceholderState({

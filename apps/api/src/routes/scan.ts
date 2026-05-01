@@ -21,6 +21,7 @@ import {
 } from '../services/audience_fit.js';
 import { startScanWorker } from '../services/scan_pipeline.js';
 import { getCategoryBenchmark } from '../services/benchmark.js';
+import { computeAarrr } from '../services/aarrr.js';
 
 const router: RouterType = Router();
 
@@ -218,6 +219,8 @@ router.get('/:id/report', async (req, res) => {
     formula_rows: completed ? buildFormulaRows(scan, cohortRows) : [],
     dimension_breakdown: completed ? buildDimensionBreakdown(cohortRows) : [],
     kpis: completed ? await buildKpis(scan, cohortRows) : [],
+    // Pro tier: AARRR funnel — Mode A only (Mode B is single-audience).
+    aarrr: completed && scan.mode === 'A' ? await computeAarrr(id) : null,
   });
 });
 
@@ -633,6 +636,16 @@ function buildDemoReport() {
       { d: 'Retention', s: 46, w: 0.15, c: 0.18 },
     ],
     cohorts: null,
+    aarrr: {
+      total_personas: 113,
+      stages: [
+        { key: 'acquisition', label: 'Acquisition', score: 100, n_passing: 113, total: 113, threshold: 'Reached the URL (baseline)' },
+        { key: 'activation', label: 'Activation', score: 42, n_passing: 47, total: 113, threshold: 'task_success ≥ 50' },
+        { key: 'retention', label: 'Retention', score: 28, n_passing: 32, total: 113, threshold: 'retention_d7 ≥ 30' },
+        { key: 'referral', label: 'Referral', score: 21, n_passing: 24, total: 113, threshold: 'happiness ≥ 70' },
+        { key: 'revenue', label: 'Revenue', score: 38, n_passing: 43, total: 113, threshold: 'adoption ≥ 50' },
+      ],
+    },
   };
 }
 

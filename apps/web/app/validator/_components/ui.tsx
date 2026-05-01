@@ -186,7 +186,7 @@ export function TopBar({ active = "discovery" }: { active?: TopBarActive }) {
   const items: { id: TopBarActive; label: string; href: string; dim?: boolean }[] =
     [
       { id: "discovery", label: "Discovery", href: "/validator" },
-      { id: "pro", label: "Pro mode", href: "/validator/pro", dim: true },
+      { id: "pro", label: "Pro mode", href: "/validator/pro" },
       { id: "report", label: "Report", href: "/validator/report/demo" },
       { id: "calibration", label: "Calibration", href: "/validator/calibration" },
     ];
