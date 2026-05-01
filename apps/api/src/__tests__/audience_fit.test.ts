@@ -21,6 +21,7 @@ import {
   DIMENSION_WEIGHTS_V1,
   ENGAGEMENT_BAND_TO_SCORE,
   RETENTION_BAND_TO_DCURVE,
+  bootstrapCohortFitCI,
   computeAudienceFit,
   computeCohortFitScore,
   computeSusScore,
@@ -271,5 +272,56 @@ describe('band mappings are monotonic', () => {
     expect(RETENTION_BAND_TO_DCURVE.moderate.d7).toBeLessThan(
       RETENTION_BAND_TO_DCURVE.strong.d7
     );
+  });
+});
+
+describe('bootstrapCohortFitCI', () => {
+  function score(v: number): PersonaDimensionScores {
+    return {
+      happiness: v,
+      engagement: v,
+      adoption: v,
+      retention_d7: v,
+      task_success: v,
+    };
+  }
+
+  it('throws on empty cohort', () => {
+    expect(() => bootstrapCohortFitCI([])).toThrow();
+  });
+
+  it('returns point estimate as both bounds when n<3', () => {
+    const ci = bootstrapCohortFitCI([score(70), score(70)]);
+    expect(ci.low).toBeCloseTo(70, 6);
+    expect(ci.high).toBeCloseTo(70, 6);
+  });
+
+  it('CI brackets the point estimate', () => {
+    // n=14 cohort with values around 60. CI should bracket ~60 with
+    // some spread.
+    const xs = Array.from({ length: 14 }, (_, i) => score(50 + i * 1.5));
+    const ci = bootstrapCohortFitCI(xs, { iterations: 500 });
+    const point = 50 + 6.5 * 1.5; // mean of 50..69.5 = 59.75
+    expect(ci.low).toBeLessThanOrEqual(point);
+    expect(ci.high).toBeGreaterThanOrEqual(point);
+  });
+
+  it('CI shrinks as n grows', () => {
+    const small = bootstrapCohortFitCI(
+      Array.from({ length: 5 }, () => score(50 + (Math.random() * 30 - 15))),
+      { iterations: 500 },
+    );
+    const large = bootstrapCohortFitCI(
+      Array.from({ length: 100 }, () => score(50 + (Math.random() * 30 - 15))),
+      { iterations: 500 },
+    );
+    expect(large.high - large.low).toBeLessThan(small.high - small.low);
+  });
+
+  it('uniform sample → tight CI', () => {
+    const xs = Array.from({ length: 14 }, () => score(50));
+    const ci = bootstrapCohortFitCI(xs);
+    expect(ci.low).toBeCloseTo(50, 4);
+    expect(ci.high).toBeCloseTo(50, 4);
   });
 });

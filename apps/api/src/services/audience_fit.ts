@@ -159,6 +159,58 @@ export function computeCohortFitScore(d: PersonaDimensionScores): number {
   );
 }
 
+// ─── Bootstrap CI on cohort_fit_score ────────────────────────────
+// Resample the per-persona scores within a cohort with replacement
+// `iterations` times, recompute cohort_fit_score on each sample,
+// take the [alpha/2, 1-alpha/2] percentiles. Default n=1000,
+// alpha=0.05 → 95% CI.
+//
+// Skips when n<3 (CI is meaningless on tiny samples) — returns the
+// point estimate as both bounds in that case so the report can still
+// render without conditional logic.
+export function bootstrapCohortFitCI(
+  personaScores: readonly PersonaDimensionScores[],
+  opts: { iterations?: number; alpha?: number } = {},
+): { low: number; high: number } {
+  const n = personaScores.length;
+  if (n === 0) {
+    throw new Error('bootstrapCohortFitCI: empty cohort');
+  }
+  const point = computeCohortFitScore(meanDimensions(personaScores));
+  if (n < 3) {
+    return { low: point, high: point };
+  }
+  const iterations = opts.iterations ?? 1000;
+  const alpha = opts.alpha ?? 0.05;
+  const samples: number[] = [];
+  for (let it = 0; it < iterations; it++) {
+    const resample: PersonaDimensionScores[] = [];
+    for (let i = 0; i < n; i++) {
+      // Math.random is fine — bootstrap noise dominates RNG quality.
+      resample.push(personaScores[Math.floor(Math.random() * n)]!);
+    }
+    samples.push(computeCohortFitScore(meanDimensions(resample)));
+  }
+  samples.sort((a, b) => a - b);
+  const lo = Math.floor((alpha / 2) * iterations);
+  const hi = Math.floor((1 - alpha / 2) * iterations) - 1;
+  return {
+    low: samples[lo]!,
+    high: samples[Math.min(hi, samples.length - 1)]!,
+  };
+}
+
+function meanDimensions(xs: readonly PersonaDimensionScores[]): PersonaDimensionScores {
+  const n = xs.length;
+  return {
+    happiness: xs.reduce((s, x) => s + x.happiness, 0) / n,
+    engagement: xs.reduce((s, x) => s + x.engagement, 0) / n,
+    adoption: xs.reduce((s, x) => s + x.adoption, 0) / n,
+    retention_d7: xs.reduce((s, x) => s + x.retention_d7, 0) / n,
+    task_success: xs.reduce((s, x) => s + x.task_success, 0) / n,
+  };
+}
+
 // ─── Top-level synthesis (Option A) ───────────────────────────────
 // Takes the per-cohort aggregates and returns the headline score plus
 // the diagnostic context (best / worst / median / global cross-checks)

@@ -212,7 +212,7 @@ router.get('/:id/report', async (req, res) => {
     // These three are computed at synthesis time; show them only when
     // the scan completes so partial state never displays misleading
     // pseudo-frictions or formula rows.
-    frictions: completed ? buildFrictionsFromCohorts(cohortRows) : [],
+    frictions: completed ? buildFrictionsForReport(scan, cohortRows) : [],
     retention_curve: completed ? buildRetentionCurve(cohortRows) : [],
     formula_rows: completed ? buildFormulaRows(scan, cohortRows) : [],
     dimension_breakdown: completed ? buildDimensionBreakdown(cohortRows) : [],
@@ -265,12 +265,28 @@ function shapePersonaCard(r: {
 }
 
 // ─── Synthesis-tied builders (only meaningful when status='completed') ──
-function buildFrictionsFromCohorts(
+function buildFrictionsForReport(
+  scan: typeof schema.audienceFitScans.$inferSelect,
   rows: Array<typeof schema.scanCohortResults.$inferSelect>
 ) {
-  // Phase 1C will mine voice_friction columns + cluster via Haiku.
-  // Phase 1B placeholder: surface the worst cohorts as friction rows
-  // so the report is non-empty when the synthesis lands.
+  // Prefer the LLM-clustered frictions persisted by
+  // services/dimensions/frictions.ts at end of pipeline. Falls back
+  // to a cohort-derived placeholder when null (simulator path or
+  // clustering failed).
+  const clusters = scan.frictionsJson;
+  if (clusters && clusters.length > 0) {
+    return clusters.map((c) => ({
+      rank: c.rank,
+      title: c.title,
+      detail: c.summary,
+      n: c.n,
+      where: c.where,
+      impact: c.impact,
+      quote: c.quote,
+    }));
+  }
+
+  // Placeholder fallback — surface worst cohorts as friction rows.
   const ranked = [...rows]
     .filter((c) => c.cohortFitScore != null)
     .sort((a, b) => (a.cohortFitScore ?? 0) - (b.cohortFitScore ?? 0))
@@ -282,7 +298,7 @@ function buildFrictionsFromCohorts(
     n: c.nCompleted,
     where: c.cohortLabel,
     impact: `+${Math.round((50 - (c.cohortFitScore ?? 0)) * 0.3)} fit est.`,
-    quote: 'Voice clustering arrives in Phase 1C with the real LLM call.',
+    quote: 'Voice clustering not run yet — using cohort placeholder.',
   }));
 }
 

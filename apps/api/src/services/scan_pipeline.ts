@@ -28,6 +28,7 @@ import { logger } from '../logger.js';
 import {
   type CohortFit,
   type PersonaDimensionScores,
+  bootstrapCohortFitCI,
   computeAudienceFit,
   computeCohortFitScore,
 } from './audience_fit.js';
@@ -40,6 +41,7 @@ import {
   runPersonaResponseLLM,
   extractVoiceQuotes,
 } from './dimensions/llm.js';
+import { clusterFrictions } from './dimensions/frictions.js';
 
 const log = logger.child({ service: 'scan_pipeline' });
 
@@ -364,6 +366,10 @@ async function runScan(scanId: string): Promise<void> {
       d30: avg(dCurves.map((d) => d.d30)),
     };
 
+    // Bootstrap 95% CI on the cohort's fit score (n=14 samples).
+    // Returns { low, high } — both equal to point estimate when n<3.
+    const bootstrapCi = bootstrapCohortFitCI(validScores);
+
     cohortFits.push({
       cohort_id: cohortDef.id,
       cohort_label: cohortDef.label,
@@ -385,8 +391,8 @@ async function runScan(scanId: string): Promise<void> {
       retentionMean: dimMeans.retention_d7,
       taskSuccessMean: dimMeans.task_success,
       cohortFitScore,
-      cohortFitCiLow: null, // Phase 1C: bootstrap CI
-      cohortFitCiHigh: null,
+      cohortFitCiLow: bootstrapCi.low,
+      cohortFitCiHigh: bootstrapCi.high,
       retentionDCurve: dMean,
     });
   }
@@ -398,6 +404,22 @@ async function runScan(scanId: string): Promise<void> {
   }
 
   const result = computeAudienceFit(cohortFits);
+
+  // Step 3.5 — friction clustering (real-LLM path only). Simulator
+  // doesn't write voice columns, so there's nothing to cluster.
+  // Failure is non-fatal: clusterFrictions returns null on error and
+  // the report falls back to the placeholder cohort-derived
+  // frictions in routes/scan.ts.
+  if (!USE_SIMULATOR) {
+    try {
+      await clusterFrictions(scanId);
+    } catch (err) {
+      log.warn(
+        { scanId, err: err instanceof Error ? err.message : 'unknown' },
+        'friction clustering threw — continuing',
+      );
+    }
+  }
 
   // Step 4 — completed.
   await db

@@ -239,6 +239,20 @@ export const audienceFitScans = pgTable('audience_fit_scans', {
    *  update. */
   weightsVersion: varchar('weights_version', { length: 8 }),
 
+  /** Friction clustering cache (Phase 1C-B). Populated by
+   *  services/dimensions/frictions.ts::clusterFrictions(scanId)
+   *  after the persona response loop completes. Null until clustered. */
+  frictionsJson: jsonb('frictions_json').$type<Array<{
+    rank: number;
+    title: string;
+    summary: string;
+    n: number;
+    where: string;
+    impact: string;
+    quote: string;
+    affected_cohorts: string[];
+  }>>(),
+
   createdAt: timestamp('created_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),
 });
