@@ -21,6 +21,7 @@ import {
   createFallbackPaymentMiddleware,
 } from './middleware/x402.js';
 import { startSettlementWorker } from './services/settlement-worker.js';
+import { startCalibrationCron } from './services/calibration/cron.js';
 import { allowedOrigins, corsOptions } from './config/cors.js';
 import { useX402Fallback, logEnvSummary } from './config/env.js';
 import { logger } from './logger.js';
@@ -123,6 +124,10 @@ app.listen(PORT, () => {
   if (process.env.SETTLEMENT_WORKER_DISABLED !== '1') {
     startSettlementWorker();
   }
+
+  // Calibration Track A weekly cron — gated by
+  // CALIBRATION_CRON_ENABLED env. No-op when env is unset.
+  startCalibrationCron();
 });
 
 export default app;

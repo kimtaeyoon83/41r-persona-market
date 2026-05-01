@@ -9,11 +9,14 @@
 
 import { Router, type Router as RouterType } from 'express';
 import { and, gte, lt } from 'drizzle-orm';
+import { z } from 'zod';
 import { db, schema } from '../db/index.js';
 import {
   aggregateCalibration,
   type CalibrationRecord,
 } from '../services/calibration/aggregator.js';
+import { runTrackA } from '../services/calibration/track_a.js';
+import { logger } from '../logger.js';
 
 const router: RouterType = Router();
 
@@ -70,6 +73,37 @@ router.get('/current', async (_req, res) => {
     period_end: isoDate(now),
     ...aggregate,
   });
+});
+
+// ─── POST /api/calibration/run-track-a ────────────────────────────
+// Manual trigger for the weekly Track A automation. Accepts
+// {limit?: number} (default 5 sites). Synchronous — waits for the
+// browser runs to complete before responding (typical run is
+// ~5 sites × 5s = 25s with chromium boot overhead).
+//
+// Phase 2-D will add admin auth gate. For now any caller can trigger
+// (the endpoint only writes calibration_records — no PII or
+// destructive ops).
+const runTrackABody = z.object({
+  limit: z.number().int().min(1).max(50).optional(),
+});
+
+const trackLog = logger.child({ service: 'calibration_route' });
+
+router.post('/run-track-a', async (req, res) => {
+  const parsed = runTrackABody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
+    return;
+  }
+  try {
+    const result = await runTrackA(parsed.data);
+    res.json(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'unknown';
+    trackLog.error({ err: msg }, 'Track A run threw');
+    res.status(500).json({ error: 'track_a_failed', message: msg });
+  }
 });
 
 export default router;
