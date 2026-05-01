@@ -126,6 +126,8 @@ router.get('/:id/report', async (req, res) => {
       happiness: schema.scanPersonaResponses.happinessScore,
       engagement: schema.scanPersonaResponses.engagementScore,
       taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
+      voiceFirstImpression: schema.scanPersonaResponses.voiceFirstImpression,
+      voiceBiggestFriction: schema.scanPersonaResponses.voiceBiggestFriction,
       voiceSample: schema.personas.vector,
       displayName: schema.testers.displayName,
       ageGroup: schema.personas.vector,
@@ -150,6 +152,8 @@ router.get('/:id/report', async (req, res) => {
       happiness: schema.scanPersonaResponses.happinessScore,
       engagement: schema.scanPersonaResponses.engagementScore,
       taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
+      voiceFirstImpression: schema.scanPersonaResponses.voiceFirstImpression,
+      voiceBiggestFriction: schema.scanPersonaResponses.voiceBiggestFriction,
       voiceSample: schema.personas.vector,
       displayName: schema.testers.displayName,
       ageGroup: schema.personas.vector,
@@ -223,6 +227,8 @@ function shapePersonaCard(r: {
   happiness: number | null;
   engagement: number | null;
   taskSuccess: number | null;
+  voiceFirstImpression?: string | null;
+  voiceBiggestFriction?: string | null;
   voiceSample: typeof schema.personas.$inferSelect.vector;
   displayName: string;
 }) {
@@ -239,13 +245,21 @@ function shapePersonaCard(r: {
       : ageGroup === 'senior'
       ? 58
       : 35;
+  // Prefer the LLM-generated quote when available (real Phase 1C
+  // scans). Falls back to the persona's seed voice_sample for
+  // simulator runs or rows from before the LLM pipeline shipped.
+  const quote =
+    r.voiceFirstImpression ||
+    r.voiceBiggestFriction ||
+    r.voiceSample.voice_sample ||
+    '';
   return {
     id: r.personaId,
     name: r.displayName ?? 'Synthetic',
     age,
     role: cohort?.label ?? r.cohortId,
     score,
-    quote: r.voiceSample.voice_sample ?? '',
+    quote,
     tags: [r.cohortId, ageGroup ?? 'unknown'],
   };
 }

@@ -35,7 +35,11 @@ import {
   selectPersonasForCohorts,
   type PersonaRow,
 } from './cohort_selection.js';
-import { simulatePersonaResponse } from './dimension_simulator.js';
+import { simulatePersonaResponse, type SimulatedResponse } from './dimension_simulator.js';
+import {
+  runPersonaResponseLLM,
+  extractVoiceQuotes,
+} from './dimensions/llm.js';
 
 const log = logger.child({ service: 'scan_pipeline' });
 
@@ -57,6 +61,51 @@ const SIM_PERSONA_DELAY_MS = (() => {
 
 const sleep = (ms: number) =>
   ms > 0 ? new Promise<void>((r) => setTimeout(r, ms)) : Promise.resolve();
+
+// ─── Dispatch: simulator vs real LLM ──────────────────────────────
+// USE_SIMULATOR=1 → deterministic stub (no LLM cost, ~6s end-to-end)
+// USE_SIMULATOR=0 → real Haiku call (~$0.001/persona, ~$0.11/scan)
+//
+// Defaults: dev → simulator (cheap iteration); prod → real LLM.
+// Override per-process via env. Per-scan override is a Phase 1C-B
+// concern (ScanRequest.engine field).
+const USE_SIMULATOR = (() => {
+  const explicit = process.env.USE_SIMULATOR;
+  if (explicit !== undefined && explicit !== '') return explicit !== '0';
+  return process.env.NODE_ENV !== 'production';
+})();
+
+// Concurrent persona requests for the LLM path. Sequential simulator
+// stays single-threaded (it's faster than connection setup overhead).
+const SCAN_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.SCAN_CONCURRENCY ?? 5)
+);
+
+// Promise pool — runs `fn(item)` for each item with at most
+// `concurrency` in flight. Maintains insertion order for results
+// when present, but here we don't need the return values (each
+// callback writes to DB and updates running counters by closure).
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  const queue = [...items];
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(concurrency, queue.length); i++) {
+    workers.push(
+      (async () => {
+        while (queue.length > 0) {
+          const next = queue.shift();
+          if (next === undefined) break;
+          await fn(next);
+        }
+      })()
+    );
+  }
+  await Promise.all(workers);
+}
 
 // ─── Public entry: fire-and-forget ────────────────────────────────
 export function startScanWorker(scanId: string): void {
@@ -135,51 +184,135 @@ async function runScan(scanId: string): Promise<void> {
   let totalAttempted = 0;
   let totalCompleted = 0;
   let totalFlagged = 0;
+  let totalErrored = 0;
+  let totalCostUsd = 0;
 
+  log.info(
+    { scanId, engine: USE_SIMULATOR ? 'simulator' : 'haiku', concurrency: SCAN_CONCURRENCY },
+    'starting persona responses'
+  );
+
+  // Build the flat work list with cohort tags + initialise buckets.
+  type WorkItem = { persona: PersonaRow; cohortId: string };
+  const work: WorkItem[] = [];
   for (const [cohortId, cohortPersonas] of assignments) {
     if (cohortPersonas.length === 0) continue;
-    const bucket: Array<{
-      persona: PersonaRow;
-      scores: PersonaDimensionScores;
-      flagged: boolean;
-    }> = [];
-    for (const persona of cohortPersonas) {
-      totalAttempted += 1;
-      const sim = simulatePersonaResponse(persona, targetUrl, hypothesis);
-      bucket.push({
-        persona,
-        scores: sim.scores,
-        flagged: sim.is_flagged,
-      });
-      totalCompleted += 1;
-      if (sim.is_flagged) totalFlagged += 1;
+    cohortBuckets.set(cohortId, []);
+    for (const persona of cohortPersonas) work.push({ persona, cohortId });
+  }
+  totalAttempted = work.length;
 
+  // Per-persona handler. Catches errors so one bad persona doesn't
+  // sink the entire scan — failed personas land in scan_persona_
+  // responses with isFlagged=true so the cohort aggregator skips them.
+  const handle = async ({ persona, cohortId }: WorkItem): Promise<void> => {
+    let sim: SimulatedResponse | null = null;
+    let voice = {
+      voiceFirstImpression: null as string | null,
+      voiceFriction: null as string | null,
+      voiceBiggestFriction: null as string | null,
+      voiceWouldReturnBecause: null as string | null,
+    };
+    let costUsd = 0;
+    let latencyMs = 0;
+    let llmErr: string | null = null;
+
+    try {
+      if (USE_SIMULATOR) {
+        sim = simulatePersonaResponse(persona, targetUrl, hypothesis);
+        await sleep(SIM_PERSONA_DELAY_MS);
+      } else {
+        const result = await runPersonaResponseLLM(persona, targetUrl, hypothesis);
+        sim = result.sim;
+        voice = extractVoiceQuotes(result.parsed);
+        costUsd = result.llmCostUsd;
+        latencyMs = result.llmLatencyMs;
+      }
+    } catch (e) {
+      llmErr = e instanceof Error ? e.message.slice(0, 400) : 'unknown';
+      log.warn({ scanId, personaId: persona.id, err: llmErr }, 'persona response failed');
+    }
+
+    if (!sim) {
+      // LLM error or schema rejection — record a flagged row so we
+      // don't silently lose the persona. cohort aggregator skips
+      // flagged rows.
+      totalErrored += 1;
+      totalFlagged += 1;
       await db.insert(schema.scanPersonaResponses).values({
         scanId,
         personaId: persona.id,
         cohortId,
-        rawResponse: sim.raw,
-        happinessScore: sim.scores.happiness,
-        engagementScore: sim.scores.engagement,
-        adoptionScore: sim.scores.adoption,
-        retentionD7: sim.scores.retention_d7,
-        taskSuccessScore: sim.scores.task_success,
-        retentionDCurve: sim.retention_d_curve,
+        rawResponse: { error: llmErr },
+        happinessScore: null,
+        engagementScore: null,
+        adoptionScore: null,
+        retentionD7: null,
+        taskSuccessScore: null,
+        retentionDCurve: null,
         voiceFirstImpression: null,
         voiceFriction: null,
         voiceBiggestFriction: null,
         voiceWouldReturnBecause: null,
-        isFlagged: sim.is_flagged,
-        flagReason: sim.flag_reason,
+        isFlagged: true,
+        flagReason: llmErr ?? 'no response',
         llmCostUsd: 0,
-        llmLatencyMs: 0,
+        llmLatencyMs: latencyMs,
       });
-
-      // Streamed-progress simulation — see SIM_PERSONA_DELAY_MS at top.
-      await sleep(SIM_PERSONA_DELAY_MS);
+      return;
     }
-    cohortBuckets.set(cohortId, bucket);
+
+    cohortBuckets.get(cohortId)!.push({
+      persona,
+      scores: sim.scores,
+      flagged: sim.is_flagged,
+    });
+    totalCompleted += 1;
+    if (sim.is_flagged) totalFlagged += 1;
+    totalCostUsd += costUsd;
+
+    await db.insert(schema.scanPersonaResponses).values({
+      scanId,
+      personaId: persona.id,
+      cohortId,
+      rawResponse: sim.raw,
+      happinessScore: sim.scores.happiness,
+      engagementScore: sim.scores.engagement,
+      adoptionScore: sim.scores.adoption,
+      retentionD7: sim.scores.retention_d7,
+      taskSuccessScore: sim.scores.task_success,
+      retentionDCurve: sim.retention_d_curve,
+      voiceFirstImpression: voice.voiceFirstImpression,
+      voiceFriction: voice.voiceFriction,
+      voiceBiggestFriction: voice.voiceBiggestFriction,
+      voiceWouldReturnBecause: voice.voiceWouldReturnBecause,
+      isFlagged: sim.is_flagged,
+      flagReason: sim.flag_reason,
+      llmCostUsd: costUsd,
+      llmLatencyMs: latencyMs,
+    });
+  };
+
+  if (USE_SIMULATOR) {
+    // Sequential — simulator is faster than connection setup overhead
+    // and we want the artificial delay to space writes evenly.
+    for (const item of work) await handle(item);
+  } else {
+    // Real LLM — parallel batched.
+    await runWithConcurrency(work, SCAN_CONCURRENCY, handle);
   }
+
+  log.info(
+    {
+      scanId,
+      attempted: totalAttempted,
+      completed: totalCompleted,
+      flagged: totalFlagged,
+      errored: totalErrored,
+      costUsd: totalCostUsd.toFixed(4),
+    },
+    'persona responses done'
+  );
 
   // Step 3 — aggregating.
   await setStatus(scanId, 'aggregating');
@@ -282,6 +415,7 @@ async function runScan(scanId: string): Promise<void> {
       personasAttempted: totalAttempted,
       personasCompleted: totalCompleted,
       personasFlagged: totalFlagged,
+      totalCostUsd: totalCostUsd,
       // Auto-detect category not implemented in Phase 1B — Phase 1C
       // adds a Haiku call during the 'capturing' step.
       category: 'DeFi',
