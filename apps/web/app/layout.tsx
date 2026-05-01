@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Inter_Tight, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import { Sidebar } from "@/components/sidebar";
+import { AppShell } from "@/components/app-shell";
 import { SolanaWalletProvider } from "@/components/wallet-provider";
 import { EvmWalletProvider } from "@/components/evm-wallet-provider";
 
@@ -43,14 +43,7 @@ export default function RootLayout({
       >
         <SolanaWalletProvider>
           <EvmWalletProvider>
-            <div className="flex min-h-screen">
-              <Sidebar />
-              <main className="flex-1 ml-[232px] min-h-screen">
-                <div className="max-w-[1240px] mx-auto px-7 py-7">
-                  {children}
-                </div>
-              </main>
-            </div>
+            <AppShell>{children}</AppShell>
           </EvmWalletProvider>
         </SolanaWalletProvider>
       </body>

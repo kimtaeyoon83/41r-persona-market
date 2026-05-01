@@ -236,3 +236,86 @@ export const autoTestBscApi = {
 
   status: (jobId: string) => request(`/api/autotest-bsc/status/${jobId}`),
 };
+
+// ─── Scan API (Audience-Fit Validator) ─────────────────────────
+// POST /api/scan creates a pending scan and returns scanId.
+// GET  /api/scan/:id/report returns shape used by /validator/report/[id].
+// `result` is null while the scan is still running; the report page
+// renders an "in progress" state in that case.
+export type ScanPersonaCard = {
+  id: string;
+  name: string;
+  age: number;
+  role: string;
+  score: number;
+  quote: string;
+  tags: string[];
+};
+
+export type ScanFriction = {
+  rank: number;
+  title: string;
+  detail: string;
+  n: number;
+  where: string;
+  impact: string;
+  quote: string;
+};
+
+export type ScanReport = {
+  scan: {
+    id: string;
+    target_url: string;
+    category: string | null;
+    category_confidence: number | null;
+    one_line_pitch: string | null;
+    mode: 'A' | 'B';
+    status:
+      | 'pending'
+      | 'capturing'
+      | 'sampling'
+      | 'responding'
+      | 'aggregating'
+      | 'completed'
+      | 'failed';
+    personas_attempted: number;
+    personas_completed: number;
+    personas_flagged: number;
+    weights_version: string | null;
+    created_at: string;
+    completed_at: string | null;
+  };
+  result: {
+    audience_fit_score: number;
+    best: { cohort_id: string; cohort_label: string; cohort_fit_score: number };
+    worst: { cohort_id: string; cohort_label: string; cohort_fit_score: number };
+    median_score: number;
+    global_task_success_avg: number;
+    global_sentiment_avg: number;
+  } | null;
+  cohorts: unknown[] | null;
+  fit_personas: ScanPersonaCard[] | null;
+  non_fit_personas: ScanPersonaCard[] | null;
+  frictions: ScanFriction[] | null;
+  retention_curve: { d: string; v: number }[] | null;
+  dimension_breakdown:
+    | { l: string; v: number; sub: string; tone: string; suffix?: string; invert?: boolean }[]
+    | null;
+  formula_rows: { d: string; s: number; w: number; c: number }[] | null;
+  kpis: { l: string; v: string; sub: string; tone: string }[] | null;
+};
+
+export const scanApi = {
+  createScan: (body: {
+    target_url: string;
+    mode?: 'A' | 'B';
+    target_audience_text?: string;
+    hypothesis?: string;
+  }) =>
+    request<{ scanId: string; status: string }>('/api/scan', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getReport: (id: string) => request<ScanReport>(`/api/scan/${id}/report`),
+};

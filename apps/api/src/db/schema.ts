@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, integer, real, boolean, jsonb, uuid, varchar, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, date, integer, real, boolean, jsonb, uuid, varchar, uniqueIndex } from 'drizzle-orm/pg-core';
 
 // ─── Companies ───────────────────────────────────────
 export const companies = pgTable('companies', {
@@ -188,6 +188,171 @@ export const personaVersions = pgTable('persona_versions', {
   // read pattern; a composite index is cheaper than two separate ones.
   personaVersionIdx: uniqueIndex('persona_versions_persona_version_uniq').on(t.personaId, t.versionNum),
 }));
+
+// ─── Audience-Fit Scans ─────────────────────────────
+// Mode A (URL-only Discovery) + Mode B (URL + target audience).
+// One row per scan. Synthesis fields are filled at completion by the
+// computeAudienceFit() pipeline; stay null until then.
+export const audienceFitScans = pgTable('audience_fit_scans', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  targetUrl: text('target_url').notNull(),
+  category: text('category'),                      // 'DeFi' | 'SaaS' | …
+  categoryConfidence: real('category_confidence'), // 0-1
+  oneLinePitch: text('one_line_pitch'),
+  mode: varchar('mode', { length: 8 }).notNull().default('A'), // 'A' | 'B'
+  targetAudienceText: text('target_audience_text'),  // Mode B only
+  hypothesis: text('hypothesis'),                    // Optional probe (§1.2)
+  /** pending | capturing | sampling | responding | aggregating |
+   *  completed | failed. The Phase 0 frontend Processing screen
+   *  polls/streams against transitions of this column. */
+  status: varchar('status', { length: 20 }).notNull().default('pending'),
+
+  // Site capture (Stagehand-driven, Phase 1B)
+  captureScreenshotUrls: jsonb('capture_screenshot_urls').$type<string[]>(),
+  captureCompletedAt: timestamp('capture_completed_at'),
+
+  // Synthesis output — filled at completion. All 0-100 unless noted.
+  audienceFitScore: real('audience_fit_score'),
+  bestCohortId: text('best_cohort_id'),
+  bestCohortScore: real('best_cohort_score'),
+  medianCohortScore: real('median_cohort_score'),
+  worstCohortId: text('worst_cohort_id'),
+  worstCohortScore: real('worst_cohort_score'),
+  globalTaskSuccessAvg: real('global_task_success_avg'),
+  globalSentimentAvg: real('global_sentiment_avg'),
+
+  // Aggregate metadata
+  personasAttempted: integer('personas_attempted').notNull().default(0),
+  personasCompleted: integer('personas_completed').notNull().default(0),
+  /** Personas whose self_consistency_check.happiness_retention_aligned
+   *  came back FALSE (per spec §11.1 prompt schema). Excluded from
+   *  cohort means but voice_quotes still surface for review. */
+  personasFlagged: integer('personas_flagged').notNull().default(0),
+
+  /** Total LLM spend for this scan in USD. Sum of llm_cost_usd across
+   *  all scan_persona_responses + capture cost + synthesis cost. */
+  totalCostUsd: real('total_cost_usd'),
+
+  /** Audience-Fit weight version applied at synthesis time
+   *  (e.g. 'v1.0', 'v1.3'). Locks reproducibility — re-running with
+   *  newer calibration weights produces a NEW row, not an in-place
+   *  update. */
+  weightsVersion: varchar('weights_version', { length: 8 }),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+// ─── Scan Persona Responses ─────────────────────────
+// One row per (scan, persona). Stores the raw single-vision-call JSON
+// AND the post-processed dimension scores so we can re-aggregate
+// without re-running the LLM.
+export const scanPersonaResponses = pgTable('scan_persona_responses', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  scanId: uuid('scan_id').notNull().references(() => audienceFitScans.id, { onDelete: 'cascade' }),
+  personaId: uuid('persona_id').notNull().references(() => personas.id),
+  /** Cohort assignment. References STANDARD_COHORTS[].id in
+   *  packages/shared/src/cohorts.ts — not a FK because cohort defs
+   *  live in code, not in the DB. Renaming a cohort id requires a
+   *  data migration on this column. */
+  cohortId: text('cohort_id').notNull(),
+
+  // Raw LLM output (full §11.1 schema)
+  rawResponse: jsonb('raw_response'),
+
+  // Post-processed dimension scores (0-100)
+  happinessScore: real('happiness_score'),
+  engagementScore: real('engagement_score'),
+  adoptionScore: real('adoption_score'),
+  retentionD7: real('retention_d7'),
+  taskSuccessScore: real('task_success_score'),
+
+  // Full D-curve (per-persona retention category mapped to 4 numbers
+  // via RETENTION_BAND_TO_DCURVE in services/audience_fit.ts)
+  retentionDCurve: jsonb('retention_d_curve').$type<{
+    d1: number; d3: number; d7: number; d30: number;
+  }>(),
+
+  // Voice quotes (extracted to columns for fast cohort-card rendering)
+  voiceFirstImpression: text('voice_first_impression'),
+  voiceFriction: text('voice_friction'),
+  voiceBiggestFriction: text('voice_biggest_friction'),
+  voiceWouldReturnBecause: text('voice_would_return_because'),
+
+  // Self-consistency check (§11.1 prompt schema)
+  isFlagged: boolean('is_flagged').notNull().default(false),
+  flagReason: text('flag_reason'),
+
+  // Cost / timing
+  llmCostUsd: real('llm_cost_usd'),
+  llmLatencyMs: integer('llm_latency_ms'),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  uniqScanPersona: uniqueIndex('scan_persona_responses_scan_persona_uniq')
+    .on(t.scanId, t.personaId),
+}));
+
+// ─── Scan Cohort Results ────────────────────────────
+// One row per (scan, cohort). Pre-computed at synthesis time so report
+// reads are a single SELECT instead of re-aggregating on every fetch.
+export const scanCohortResults = pgTable('scan_cohort_results', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  scanId: uuid('scan_id').notNull().references(() => audienceFitScans.id, { onDelete: 'cascade' }),
+  cohortId: text('cohort_id').notNull(),
+  cohortLabel: text('cohort_label').notNull(),
+
+  nTarget: integer('n_target').notNull(),
+  nCompleted: integer('n_completed').notNull(),
+  nFlagged: integer('n_flagged').notNull().default(0),
+
+  // Cohort-level dimension means (mean across the cohort's personas,
+  // excluding flagged ones). All 0-100.
+  happinessMean: real('happiness_mean'),
+  engagementMean: real('engagement_mean'),
+  adoptionMean: real('adoption_mean'),
+  retentionMean: real('retention_mean'),
+  taskSuccessMean: real('task_success_mean'),
+
+  /** Weighted §4.2 aggregate of dimension means. Equal to
+   *  computeCohortFitScore(dimension_means) at the time of synthesis. */
+  cohortFitScore: real('cohort_fit_score'),
+
+  // Bootstrap 95% CI on cohort_fit_score (Phase 1B fills these)
+  cohortFitCiLow: real('cohort_fit_ci_low'),
+  cohortFitCiHigh: real('cohort_fit_ci_high'),
+
+  // Cohort-level D-curve aggregate (mean across personas)
+  retentionDCurve: jsonb('retention_d_curve').$type<{
+    d1: number; d3: number; d7: number; d30: number;
+  }>(),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  uniqScanCohort: uniqueIndex('scan_cohort_results_scan_cohort_uniq')
+    .on(t.scanId, t.cohortId),
+}));
+
+// ─── Calibration Records (spec §5) ──────────────────
+// One row per (LLM inference, ground truth) pair. Track A is auto-
+// populated by the weekly Stagehand cron. Tracks B and C are manual
+// inserts. Used quarterly to recompute DIMENSION_WEIGHTS_V1.
+export const calibrationRecords = pgTable('calibration_records', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  /** Calibration date (YYYY-MM-DD). Separate from `created_at` so a
+   *  back-filled record can be tagged with its true measurement date. */
+  date: date('date').notNull(),
+  siteUrl: text('site_url').notNull(),
+  personaId: uuid('persona_id').references(() => personas.id),
+  /** 'happiness' | 'engagement' | 'adoption' | 'retention' | 'task_success'. */
+  dimension: varchar('dimension', { length: 20 }).notNull(),
+  llmInference: real('llm_inference').notNull(),
+  groundTruth: real('ground_truth').notNull(),
+  delta: real('delta').notNull(),
+  /** 'stagehand' | 'human_baseline' | 'analytics'. */
+  source: varchar('source', { length: 20 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
 
 // ─── Settlements ─────────────────────────────────────
 export const settlements = pgTable('settlements', {
