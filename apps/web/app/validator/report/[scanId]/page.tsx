@@ -143,13 +143,28 @@ export default function ValidatorReportPage() {
           </div>
         </div>
 
-        {/* ① Audience-Fit Score (renamed from "PMF Survival Score" — Option A) */}
-        <SectionLabel
-          n={1}
-          label="Audience-Fit Score"
-          sub="Composite of best · median · task-success · sentiment"
-        />
-        {!result && (
+        {/* Mode B verdict block — replaces the Audience-Fit gauge for
+            Mode B scans (single audience, pass/conditional/fail). */}
+        {r.scan.mode === "B" && (
+          <ModeBVerdictBlock
+            verdict={r.scan.mode_b_verdict}
+            score={result?.audience_fit_score ?? null}
+            audience={r.scan.target_audience_text ?? ""}
+            parsedSelector={r.scan.mode_b_parsed_selector}
+            personasCompleted={r.scan.personas_completed}
+          />
+        )}
+
+        {/* ① Audience-Fit Score — Mode A only. Mode B uses the verdict
+            block above instead. */}
+        {r.scan.mode === "A" && (
+          <SectionLabel
+            n={1}
+            label="Audience-Fit Score"
+            sub="Composite of best · median · task-success · sentiment"
+          />
+        )}
+        {!result && r.scan.mode === "A" && (
           <div
             style={{
               background: C.warnSoft,
@@ -181,7 +196,7 @@ export default function ValidatorReportPage() {
             <style>{`@keyframes validatorPulse{0%,100%{opacity:1}50%{opacity:.3}}`}</style>
           </div>
         )}
-        {result && <div
+        {result && r.scan.mode === "A" && <div
           style={{
             background: C.warnSoft,
             border: "1px solid #ecdcb4",
@@ -583,5 +598,158 @@ function PlaceholderState({
     >
       {message}
     </div>
+  );
+}
+
+// ─── Mode B verdict block ─────────────────────────────────────────
+// Replaces the Audience-Fit gauge for Mode B scans. Shows Pass /
+// Conditional / Fail badge + score + parsed selector chips.
+const VERDICT_CONFIG: Record<
+  "pass" | "conditional" | "fail",
+  { label: string; color: string; soft: string; border: string }
+> = {
+  pass: {
+    label: "PASS",
+    color: C.ok,
+    soft: C.okSoft,
+    border: "#cfe3d6",
+  },
+  conditional: {
+    label: "CONDITIONAL",
+    color: C.warn,
+    soft: C.warnSoft,
+    border: "#ecdcb4",
+  },
+  fail: {
+    label: "FAIL",
+    color: C.bad,
+    soft: C.badSoft,
+    border: "#eccac4",
+  },
+};
+
+function formatSelectorChip(key: string, value: unknown): string | null {
+  if (Array.isArray(value)) {
+    if (value.length === 2 && value.every((v) => typeof v === "number")) {
+      return `${key} ∈ [${(value[0] as number).toFixed(1)}, ${(value[1] as number).toFixed(1)}]`;
+    }
+    return `${key}: ${value.join(", ")}`;
+  }
+  return `${key}: ${String(value)}`;
+}
+
+function ModeBVerdictBlock({
+  verdict,
+  score,
+  audience,
+  parsedSelector,
+  personasCompleted,
+}: {
+  verdict: "pass" | "conditional" | "fail" | null;
+  score: number | null;
+  audience: string;
+  parsedSelector: unknown;
+  personasCompleted: number;
+}) {
+  const cfg = verdict ? VERDICT_CONFIG[verdict] : null;
+  const selectorEntries =
+    parsedSelector && typeof parsedSelector === "object"
+      ? Object.entries(parsedSelector as Record<string, unknown>).filter(
+          ([, v]) => v !== undefined && v !== null,
+        )
+      : [];
+
+  return (
+    <>
+      <SectionLabel
+        n={1}
+        label="Verification Verdict"
+        sub="Pass · Conditional · Fail thresholds: ≥60 / 40-60 / <40"
+      />
+      <div
+        style={{
+          background: cfg?.soft ?? C.warnSoft,
+          border: `1px solid ${cfg?.border ?? "#ecdcb4"}`,
+          borderRadius: 12,
+          padding: 24,
+          marginBottom: 24,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 11, color: C.textFaint, fontFamily: FM, letterSpacing: "0.06em", marginBottom: 4 }}>
+              TARGET AUDIENCE
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 600, color: C.text, marginBottom: 14 }}>
+              &ldquo;{audience}&rdquo;
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {selectorEntries.map(([k, v]) => {
+                const txt = formatSelectorChip(k, v);
+                return txt ? (
+                  <span
+                    key={k}
+                    style={{
+                      fontSize: 11,
+                      padding: "3px 9px",
+                      borderRadius: 999,
+                      background: "#fff",
+                      border: `1px solid ${C.border}`,
+                      color: C.textDim,
+                      fontFamily: FM,
+                    }}
+                  >
+                    {txt}
+                  </span>
+                ) : null;
+              })}
+            </div>
+          </div>
+          <div style={{ textAlign: "right", minWidth: 220 }}>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 16px",
+                background: "#fff",
+                border: `2px solid ${cfg?.color ?? C.warn}`,
+                borderRadius: 999,
+                fontSize: 14,
+                fontWeight: 700,
+                color: cfg?.color ?? C.warn,
+                letterSpacing: "0.06em",
+                marginBottom: 12,
+              }}
+            >
+              {cfg?.label ?? "PENDING"}
+            </div>
+            <div
+              style={{
+                fontSize: 56,
+                fontWeight: 600,
+                color: cfg?.color ?? C.warn,
+                fontFamily: FM,
+                letterSpacing: "-0.03em",
+                lineHeight: 1,
+              }}
+            >
+              {score != null ? Math.round(score) : "—"}
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                color: C.textFaint,
+                fontFamily: FM,
+                letterSpacing: "0.1em",
+                marginTop: 4,
+              }}
+            >
+              / 100 · {personasCompleted} personas
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
