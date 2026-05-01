@@ -20,6 +20,7 @@ import {
   DIMENSION_WEIGHTS_V1,
 } from '../services/audience_fit.js';
 import { startScanWorker } from '../services/scan_pipeline.js';
+import { getCategoryBenchmark } from '../services/benchmark.js';
 
 const router: RouterType = Router();
 
@@ -216,7 +217,7 @@ router.get('/:id/report', async (req, res) => {
     retention_curve: completed ? buildRetentionCurve(cohortRows) : [],
     formula_rows: completed ? buildFormulaRows(scan, cohortRows) : [],
     dimension_breakdown: completed ? buildDimensionBreakdown(cohortRows) : [],
-    kpis: completed ? buildKpis(scan, cohortRows) : [],
+    kpis: completed ? await buildKpis(scan, cohortRows) : [],
   });
 });
 
@@ -369,12 +370,19 @@ function buildDimensionBreakdown(
   ];
 }
 
-function buildKpis(
+async function buildKpis(
   scan: typeof schema.audienceFitScans.$inferSelect,
   rows: Array<typeof schema.scanCohortResults.$inferSelect>
 ) {
   const best = rows.find((c) => c.cohortId === scan.bestCohortId);
   const worst = rows.find((c) => c.cohortId === scan.worstCohortId);
+
+  // Industry benchmark — null when n<3 same-category scans (Phase 2-D
+  // dev threshold; will move to 50 per spec §6.6 in production).
+  const benchmark = scan.category
+    ? await getCategoryBenchmark(scan.category)
+    : null;
+
   return [
     {
       l: 'Best cohort fit',
@@ -394,12 +402,20 @@ function buildKpis(
       sub: `${scan.personasFlagged ?? 0} flagged`,
       tone: 'faint',
     },
-    {
-      l: 'Industry benchmark',
-      v: '—',
-      sub: 'coming soon',
-      tone: 'faint',
-    },
+    benchmark
+      ? {
+          l: 'Industry benchmark',
+          v: String(Math.round(benchmark.avg)),
+          sub: `${benchmark.category} · n=${benchmark.n}`,
+          tone:
+            benchmark.avg >= 60 ? 'ok' : benchmark.avg >= 40 ? 'warn' : 'bad',
+        }
+      : {
+          l: 'Industry benchmark',
+          v: '—',
+          sub: 'coming soon',
+          tone: 'faint',
+        },
   ];
 }
 

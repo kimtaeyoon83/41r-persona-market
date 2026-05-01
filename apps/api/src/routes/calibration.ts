@@ -16,6 +16,7 @@ import {
   type CalibrationRecord,
 } from '../services/calibration/aggregator.js';
 import { runTrackA } from '../services/calibration/track_a.js';
+import { requireAdminKey } from '../middleware/admin.js';
 import { logger } from '../logger.js';
 
 const router: RouterType = Router();
@@ -90,7 +91,7 @@ const runTrackABody = z.object({
 
 const trackLog = logger.child({ service: 'calibration_route' });
 
-router.post('/run-track-a', async (req, res) => {
+router.post('/run-track-a', requireAdminKey, async (req, res) => {
   const parsed = runTrackABody.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });

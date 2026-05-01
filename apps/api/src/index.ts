@@ -15,6 +15,7 @@ import devRouter from './routes/dev.js';
 import dashboardRouter from './routes/dashboard.js';
 import scanRouter from './routes/scan.js';
 import calibrationRouter from './routes/calibration.js';
+import benchmarkRouter from './routes/benchmark.js';
 import { devHarnessEnabled } from './middleware/dev_auth.js';
 import {
   createX402Middleware,
@@ -87,6 +88,7 @@ app.use('/api/personas', personaRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/scan', scanRouter);
 app.use('/api/calibration', calibrationRouter);
+app.use('/api/benchmark', benchmarkRouter);
 app.use('/api/autotest', autotestRouter);
 app.use('/api/autotest-bsc', autotestBscRouter);
 app.use('/api/x402-demo', x402DemoRouter);
