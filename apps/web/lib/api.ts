@@ -282,6 +282,9 @@ export type ScanReport = {
     personas_completed: number;
     personas_flagged: number;
     weights_version: string | null;
+    target_audience_text: string | null;
+    mode_b_verdict: 'pass' | 'conditional' | 'fail' | null;
+    mode_b_parsed_selector: unknown;
     created_at: string;
     completed_at: string | null;
   };

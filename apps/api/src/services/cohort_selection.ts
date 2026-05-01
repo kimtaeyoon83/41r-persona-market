@@ -129,3 +129,67 @@ export function selectPersonasForCohorts(
 
   return { assignments, unassigned };
 }
+
+// ─── Mode B: single-audience persona pick ────────────────────────
+// Mode B asks "does this product fit one specific audience?". Skip
+// the 8-cohort distribution; pick the top `targetN` personas whose
+// vectors fall inside the parsed selector, ranked by L2 distance to
+// the selector midpoint (closest fit first), with quality_score as
+// a tiebreaker.
+//
+// Progressive relaxation: if the strict selector yields fewer than
+// `minN` matches, drop numeric range constraints one at a time
+// (narrowest first) until the match count crosses minN. age_group
+// and mobile_first stay locked — those are categorical and the user
+// explicitly named them.
+const NUMERIC_AXES: Array<keyof CohortSelector> = [
+  'tech_literacy',
+  'crypto_experience',
+  'design_sensitivity',
+  'patience_level',
+  'english_fluency',
+  'expertise_defi',
+  'expertise_nft',
+  'expertise_general_web',
+  'ui_critical',
+  'security_aware',
+  'detail_oriented',
+];
+
+export function selectPersonasForAudience(
+  personas: readonly PersonaRow[],
+  selector: CohortSelector,
+  targetN: number = 50,
+  minN: number = 10,
+): PersonaRow[] {
+  let working: CohortSelector = { ...selector };
+  let matches = personas.filter((p) => matchesSelector(p.vector, working));
+
+  // Drop the narrowest numeric range first if we're under quota.
+  // "Narrowness" = (1 - (hi - lo)) so [0.8, 1.0] (width 0.2) is
+  // narrower than [0.4, 0.8] (width 0.4) and gets dropped first.
+  while (matches.length < minN) {
+    const present = NUMERIC_AXES.filter((k) => working[k] !== undefined);
+    if (present.length === 0) break;
+    present.sort((a, b) => {
+      const ra = working[a] as [number, number];
+      const rb = working[b] as [number, number];
+      return ra[1] - ra[0] - (rb[1] - rb[0]);
+    });
+    const drop = present[0]!;
+    working = { ...working };
+    delete (working as Record<string, unknown>)[drop];
+    matches = personas.filter((p) => matchesSelector(p.vector, working));
+  }
+
+  matches.sort((a, b) => {
+    const da = distanceToSelector(a.vector, selector);
+    const db = distanceToSelector(b.vector, selector);
+    if (da !== db) return da - db;
+    return (
+      (b.vector.reliability?.quality_score ?? 0) -
+      (a.vector.reliability?.quality_score ?? 0)
+    );
+  });
+  return matches.slice(0, targetN);
+}

@@ -33,9 +33,11 @@ import {
   computeCohortFitScore,
 } from './audience_fit.js';
 import {
+  selectPersonasForAudience,
   selectPersonasForCohorts,
   type PersonaRow,
 } from './cohort_selection.js';
+import { parseAudience } from './dimensions/audience_parser.js';
 import { simulatePersonaResponse, type SimulatedResponse } from './dimension_simulator.js';
 import {
   runPersonaResponseLLM,
@@ -191,6 +193,18 @@ async function runScan(scanId: string): Promise<void> {
     .select()
     .from(schema.personas)
     .where(eq(schema.personas.isActive, true));
+
+  // Mode B branch — single audience, no cohort distribution.
+  if (scan.mode === 'B') {
+    return runModeBPipeline({
+      scanId,
+      scan,
+      personas,
+      targetUrl,
+      hypothesis,
+      screenshotUrls,
+    });
+  }
 
   const { assignments, unassigned } = selectPersonasForCohorts(personas);
   const assignedCount = Array.from(assignments.values()).reduce(
@@ -512,6 +526,279 @@ async function runScan(scanId: string): Promise<void> {
       worst: result.worst.cohort_label,
     },
     'scan completed'
+  );
+}
+
+// ─── Mode B: single-audience pipeline ────────────────────────────
+// Skips the 8-cohort distribution. Parses the audience text into a
+// CohortSelector, picks up to MODE_B_TARGET_N personas matching it,
+// runs the same per-persona LLM, persists ONE scan_cohort_results
+// row tagged "custom_audience", computes pass/fail verdict from the
+// resulting cohort_fit_score.
+const MODE_B_TARGET_N = 50;
+
+async function runModeBPipeline(args: {
+  scanId: string;
+  scan: typeof schema.audienceFitScans.$inferSelect;
+  personas: PersonaRow[];
+  targetUrl: string;
+  hypothesis: string | undefined;
+  screenshotUrls: string[];
+}): Promise<void> {
+  const { scanId, scan, personas, targetUrl, hypothesis, screenshotUrls } = args;
+  const audienceText = scan.targetAudienceText ?? '';
+
+  // Parse natural-language audience → selector.
+  const parsed = await parseAudience(audienceText);
+  log.info(
+    { scanId, audience: parsed.label, isFallback: parsed.isFallback },
+    'audience parsed'
+  );
+
+  const picked = selectPersonasForAudience(personas, parsed.selector, MODE_B_TARGET_N);
+  log.info(
+    { scanId, pool: personas.length, picked: picked.length, target: MODE_B_TARGET_N },
+    'mode B persona pick complete'
+  );
+
+  if (picked.length === 0) {
+    await db
+      .update(schema.audienceFitScans)
+      .set({
+        status: 'failed',
+        modeBParsedSelector: parsed.selector,
+      })
+      .where(eq(schema.audienceFitScans.id, scanId));
+    log.warn({ scanId }, 'mode B: no personas matched parsed selector');
+    return;
+  }
+
+  // Step 2 — responding (single bucket).
+  await setStatus(scanId, 'responding');
+  const bucket: Array<{
+    persona: PersonaRow;
+    scores: PersonaDimensionScores;
+    flagged: boolean;
+  }> = [];
+  let attempted = 0;
+  let completed = 0;
+  let flagged = 0;
+  let errored = 0;
+  let totalCostUsd = 0;
+  const cohortId = 'custom_audience';
+
+  log.info(
+    {
+      scanId,
+      engine: USE_SIMULATOR
+        ? 'simulator'
+        : USE_VISION && screenshotUrls.length > 0
+          ? 'sonnet-vision'
+          : 'haiku-text',
+      concurrency: SCAN_CONCURRENCY,
+    },
+    'mode B starting persona responses'
+  );
+
+  const handle = async (persona: PersonaRow): Promise<void> => {
+    attempted += 1;
+    let sim: SimulatedResponse | null = null;
+    let voice = {
+      voiceFirstImpression: null as string | null,
+      voiceFriction: null as string | null,
+      voiceBiggestFriction: null as string | null,
+      voiceWouldReturnBecause: null as string | null,
+    };
+    let costUsd = 0;
+    let latencyMs = 0;
+    let llmErr: string | null = null;
+
+    try {
+      if (USE_SIMULATOR) {
+        sim = simulatePersonaResponse(persona, targetUrl, hypothesis);
+        await sleep(SIM_PERSONA_DELAY_MS);
+      } else {
+        const result = await runPersonaResponseLLM(
+          persona,
+          targetUrl,
+          hypothesis,
+          USE_VISION ? screenshotUrls : undefined,
+        );
+        sim = result.sim;
+        voice = extractVoiceQuotes(result.parsed);
+        costUsd = result.llmCostUsd;
+        latencyMs = result.llmLatencyMs;
+      }
+    } catch (e) {
+      llmErr = e instanceof Error ? e.message.slice(0, 400) : 'unknown';
+      log.warn({ scanId, personaId: persona.id, err: llmErr }, 'persona response failed');
+    }
+
+    if (!sim) {
+      errored += 1;
+      flagged += 1;
+      await db.insert(schema.scanPersonaResponses).values({
+        scanId,
+        personaId: persona.id,
+        cohortId,
+        rawResponse: { error: llmErr },
+        happinessScore: null,
+        engagementScore: null,
+        adoptionScore: null,
+        retentionD7: null,
+        taskSuccessScore: null,
+        retentionDCurve: null,
+        voiceFirstImpression: null,
+        voiceFriction: null,
+        voiceBiggestFriction: null,
+        voiceWouldReturnBecause: null,
+        isFlagged: true,
+        flagReason: llmErr ?? 'no response',
+        llmCostUsd: 0,
+        llmLatencyMs: latencyMs,
+      });
+      return;
+    }
+
+    bucket.push({ persona, scores: sim.scores, flagged: sim.is_flagged });
+    completed += 1;
+    if (sim.is_flagged) flagged += 1;
+    totalCostUsd += costUsd;
+
+    await db.insert(schema.scanPersonaResponses).values({
+      scanId,
+      personaId: persona.id,
+      cohortId,
+      rawResponse: sim.raw,
+      happinessScore: sim.scores.happiness,
+      engagementScore: sim.scores.engagement,
+      adoptionScore: sim.scores.adoption,
+      retentionD7: sim.scores.retention_d7,
+      taskSuccessScore: sim.scores.task_success,
+      retentionDCurve: sim.retention_d_curve,
+      voiceFirstImpression: voice.voiceFirstImpression,
+      voiceFriction: voice.voiceFriction,
+      voiceBiggestFriction: voice.voiceBiggestFriction,
+      voiceWouldReturnBecause: voice.voiceWouldReturnBecause,
+      isFlagged: sim.is_flagged,
+      flagReason: sim.flag_reason,
+      llmCostUsd: costUsd,
+      llmLatencyMs: latencyMs,
+    });
+  };
+
+  if (USE_SIMULATOR) {
+    for (const p of picked) await handle(p);
+  } else {
+    await runWithConcurrency(picked, SCAN_CONCURRENCY, handle);
+  }
+
+  log.info(
+    { scanId, attempted, completed, flagged, errored, costUsd: totalCostUsd.toFixed(4) },
+    'mode B persona responses done'
+  );
+
+  // Step 3 — aggregating (single bucket).
+  await setStatus(scanId, 'aggregating');
+  const validScores = bucket.filter((b) => !b.flagged).map((b) => b.scores);
+
+  if (validScores.length === 0) {
+    await db
+      .update(schema.audienceFitScans)
+      .set({
+        status: 'failed',
+        modeBParsedSelector: parsed.selector,
+      })
+      .where(eq(schema.audienceFitScans.id, scanId));
+    log.warn({ scanId }, 'mode B: no valid scores');
+    return;
+  }
+
+  const dimMeans: PersonaDimensionScores = {
+    happiness: avg(validScores.map((s) => s.happiness)),
+    engagement: avg(validScores.map((s) => s.engagement)),
+    adoption: avg(validScores.map((s) => s.adoption)),
+    retention_d7: avg(validScores.map((s) => s.retention_d7)),
+    task_success: avg(validScores.map((s) => s.task_success)),
+  };
+  const cohortFitScore = computeCohortFitScore(dimMeans);
+  const bootstrapCi = bootstrapCohortFitCI(validScores);
+
+  const dCurves = bucket
+    .filter((b) => !b.flagged)
+    .map((b) => simulateRetentionDCurveFromD7(b.scores.retention_d7));
+  const dMean = {
+    d1: avg(dCurves.map((d) => d.d1)),
+    d3: avg(dCurves.map((d) => d.d3)),
+    d7: avg(dCurves.map((d) => d.d7)),
+    d30: avg(dCurves.map((d) => d.d30)),
+  };
+
+  await db.insert(schema.scanCohortResults).values({
+    scanId,
+    cohortId,
+    cohortLabel: parsed.label,
+    nTarget: MODE_B_TARGET_N,
+    nCompleted: validScores.length,
+    nFlagged: bucket.length - validScores.length,
+    happinessMean: dimMeans.happiness,
+    engagementMean: dimMeans.engagement,
+    adoptionMean: dimMeans.adoption,
+    retentionMean: dimMeans.retention_d7,
+    taskSuccessMean: dimMeans.task_success,
+    cohortFitScore,
+    cohortFitCiLow: bootstrapCi.low,
+    cohortFitCiHigh: bootstrapCi.high,
+    retentionDCurve: dMean,
+  });
+
+  // Step 3.5 — friction clustering (LLM path only).
+  if (!USE_SIMULATOR) {
+    try {
+      await clusterFrictions(scanId);
+    } catch (err) {
+      log.warn(
+        { scanId, err: err instanceof Error ? err.message : 'unknown' },
+        'mode B friction clustering threw',
+      );
+    }
+  }
+
+  // Pass/Fail verdict per spec §1.3:
+  //   ≥60 = pass | 40-60 = conditional | <40 = fail
+  const verdict =
+    cohortFitScore >= 60 ? 'pass' : cohortFitScore >= 40 ? 'conditional' : 'fail';
+
+  // Step 4 — completed.
+  await db
+    .update(schema.audienceFitScans)
+    .set({
+      status: 'completed',
+      // Mode B: audience_fit_score = cohort_fit_score (single bucket).
+      audienceFitScore: cohortFitScore,
+      bestCohortId: cohortId,
+      bestCohortScore: cohortFitScore,
+      medianCohortScore: cohortFitScore,
+      worstCohortId: cohortId,
+      worstCohortScore: cohortFitScore,
+      globalTaskSuccessAvg: dimMeans.task_success,
+      globalSentimentAvg: dimMeans.happiness,
+      personasAttempted: attempted,
+      personasCompleted: completed,
+      personasFlagged: flagged,
+      totalCostUsd,
+      category: scan.category,
+      categoryConfidence: scan.categoryConfidence,
+      weightsVersion: 'v1.0',
+      modeBVerdict: verdict,
+      modeBParsedSelector: parsed.selector,
+      completedAt: new Date(),
+    })
+    .where(eq(schema.audienceFitScans.id, scanId));
+
+  log.info(
+    { scanId, cohortFitScore: cohortFitScore.toFixed(2), verdict, audience: parsed.label },
+    'mode B scan completed'
   );
 }
 

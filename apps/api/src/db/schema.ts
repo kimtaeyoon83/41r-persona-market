@@ -253,6 +253,17 @@ export const audienceFitScans = pgTable('audience_fit_scans', {
     affected_cohorts: string[];
   }>>(),
 
+  /** Mode B pass/fail verdict (Phase 2-A). 'pass' if cohort_fit_score
+   *  ≥60, 'conditional' if 40-60, 'fail' if <40. Null for Mode A
+   *  scans (no single audience to verdict against). */
+  modeBVerdict: varchar('mode_b_verdict', { length: 20 }),
+
+  /** Mode B parsed selector (Phase 2-A). Result of
+   *  audience_parser.ts on `targetAudienceText`. Surfaced in the
+   *  GET response so the operator can see what selector axes the
+   *  scan actually used. Null for Mode A. */
+  modeBParsedSelector: jsonb('mode_b_parsed_selector'),
+
   createdAt: timestamp('created_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),
 });

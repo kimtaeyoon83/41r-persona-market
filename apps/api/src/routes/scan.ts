@@ -416,6 +416,14 @@ function shapeScanMeta(s: typeof schema.audienceFitScans.$inferSelect) {
     personas_completed: s.personasCompleted,
     personas_flagged: s.personasFlagged,
     weights_version: s.weightsVersion,
+    target_audience_text: s.targetAudienceText,
+    // Mode B fields — null on Mode A scans.
+    mode_b_verdict: s.modeBVerdict as
+      | 'pass'
+      | 'conditional'
+      | 'fail'
+      | null,
+    mode_b_parsed_selector: s.modeBParsedSelector,
     created_at: s.createdAt.toISOString(),
     completed_at: s.completedAt ? s.completedAt.toISOString() : null,
   };
