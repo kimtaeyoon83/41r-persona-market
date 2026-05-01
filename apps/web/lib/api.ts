@@ -322,3 +322,32 @@ export const scanApi = {
 
   getReport: (id: string) => request<ScanReport>(`/api/scan/${id}/report`),
 };
+
+// ─── Calibration API (Phase 2-C-1) ─────────────────────────────
+export type CalibrationReport = {
+  period_start: string;
+  period_end: string;
+  totalRecords: number;
+  correlations: {
+    dimension: string;
+    correlation: number | null;
+    n: number;
+    confidence: 'High' | 'Medium-High' | 'Medium' | 'Low-Medium' | 'Low' | 'n/a';
+    change: string;
+  }[];
+  tracks: { key: string; source: string; n: number }[];
+  versions: {
+    v: string;
+    d: string;
+    hap: number;
+    eng: number;
+    tsk: number;
+    ado: number;
+    ret: number;
+    current?: boolean;
+  }[];
+};
+
+export const calibrationApi = {
+  getCurrent: () => request<CalibrationReport>('/api/calibration/current'),
+};
