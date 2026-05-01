@@ -44,23 +44,41 @@ export default function ValidatorReportPage() {
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const IN_FLIGHT_STATUSES = new Set([
+      "pending",
+      "sampling",
+      "responding",
+      "aggregating",
+    ]);
+
+    const fetchOnce = async () => {
+      try {
+        const r = await scanApi.getReport(scanId);
+        if (cancelled) return;
+        setReport(r);
+        setLoading(false);
+        // While the scan is still running, poll every 800ms so the UI
+        // refreshes as scan_persona_responses + scan_cohort_results
+        // rows accumulate. Stop once status flips to completed/failed.
+        if (IN_FLIGHT_STATUSES.has(r.scan.status)) {
+          timer = setTimeout(fetchOnce, 800);
+        }
+      } catch (e: unknown) {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Failed to load report");
+        setLoading(false);
+      }
+    };
+
     setLoading(true);
     setError(null);
-    scanApi
-      .getReport(scanId)
-      .then((r) => {
-        if (!cancelled) setReport(r);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Failed to load report");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    fetchOnce();
+
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [scanId]);
 
@@ -80,22 +98,12 @@ export default function ValidatorReportPage() {
     );
   }
 
-  if (report.result === null) {
-    return (
-      <Frame active="report">
-        <PlaceholderState
-          message="Analysis in progress — return when the scan completes."
-          tone="warn"
-        />
-      </Frame>
-    );
-  }
-
-  // The null branch returned above; narrow via local copy + non-null
-  // assertion. TS doesn't carry the narrowing across the `r = report`
-  // alias, so the assertion is the cleanest fix.
+  // Progressive render: even when result is null (scan still running)
+  // we render whatever cohort + persona rows have already landed in
+  // the DB. Synthesis-only blocks (gauge / KPIs / formula) hide until
+  // completion; the rest fill in as data flows.
   const r = report;
-  const result = r.result!;
+  const result = r.result; // null while in-flight, populated when completed
   const fitPersonas = r.fit_personas ?? [];
   const nonFitPersonas = r.non_fit_personas ?? [];
   const frictions = r.frictions ?? [];
@@ -141,7 +149,39 @@ export default function ValidatorReportPage() {
           label="Audience-Fit Score"
           sub="Composite of best · median · task-success · sentiment"
         />
-        <div
+        {!result && (
+          <div
+            style={{
+              background: C.warnSoft,
+              border: "1px solid #ecdcb4",
+              borderRadius: 12,
+              padding: 16,
+              marginBottom: 24,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              fontSize: 13,
+              color: C.warn,
+            }}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 999,
+                background: C.warn,
+                animation: "validatorPulse 1s infinite",
+              }}
+            />
+            <span>
+              <b>Analysis in progress</b> — {r.scan.personas_completed} of{" "}
+              {r.scan.personas_attempted || 112} personas analyzed · status{" "}
+              <code style={{ fontFamily: FM, fontSize: 12 }}>{r.scan.status}</code>
+            </span>
+            <style>{`@keyframes validatorPulse{0%,100%{opacity:1}50%{opacity:.3}}`}</style>
+          </div>
+        )}
+        {result && <div
           style={{
             background: C.warnSoft,
             border: "1px solid #ecdcb4",
@@ -286,7 +326,7 @@ export default function ValidatorReportPage() {
               </details>
             )}
           </div>
-        </div>
+        </div>}
 
         {/* ② Engagement */}
         <SectionLabel n={2} label="Engagement" sub="First-session flow in plain terms" />

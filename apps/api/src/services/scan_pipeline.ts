@@ -39,6 +39,25 @@ import { simulatePersonaResponse } from './dimension_simulator.js';
 
 const log = logger.child({ service: 'scan_pipeline' });
 
+// Per-persona artificial delay so the simulator pipeline streams
+// visibly to the polling client. Phase 1C (real Sonnet vision call)
+// will replace this with the natural ~3-5s LLM latency per persona.
+//
+// In dev: defaults to 50ms (~5-6s for a 100+ persona scan) so the
+// /validator/report polling client visibly fills in cohort cards as
+// rows land. In production: defaults to 0 — Phase 1C's LLM latency
+// is the real source of streaming once that ships.
+//
+// Override with SIM_PERSONA_DELAY_MS=<n> in the env if needed.
+const SIM_PERSONA_DELAY_MS = (() => {
+  const explicit = process.env.SIM_PERSONA_DELAY_MS;
+  if (explicit !== undefined && explicit !== '') return Number(explicit);
+  return process.env.NODE_ENV === 'production' ? 0 : 50;
+})();
+
+const sleep = (ms: number) =>
+  ms > 0 ? new Promise<void>((r) => setTimeout(r, ms)) : Promise.resolve();
+
 // ─── Public entry: fire-and-forget ────────────────────────────────
 export function startScanWorker(scanId: string): void {
   setImmediate(() => {
@@ -155,6 +174,9 @@ async function runScan(scanId: string): Promise<void> {
         llmCostUsd: 0,
         llmLatencyMs: 0,
       });
+
+      // Streamed-progress simulation — see SIM_PERSONA_DELAY_MS at top.
+      await sleep(SIM_PERSONA_DELAY_MS);
     }
     cohortBuckets.set(cohortId, bucket);
   }

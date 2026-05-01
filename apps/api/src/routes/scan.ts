@@ -11,8 +11,9 @@
 // pending rows.
 
 import { Router, type Router as RouterType } from 'express';
-import { eq } from 'drizzle-orm';
+import { eq, asc, desc, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { COHORT_BY_ID } from '@41rpm/shared';
 import { db, schema } from '../db/index.js';
 import {
   AUDIENCE_FIT_WEIGHTS,
@@ -90,65 +91,287 @@ router.get('/:id/report', async (req, res) => {
     return;
   }
 
-  if (scan.status !== 'completed') {
-    // Pending / running / failed — return scan metadata only so the
-    // frontend can render an "in progress" state. Phase 1B will swap
-    // the Processing screen to subscribe to /api/scan/:id/stream.
-    res.json({
-      scan: shapeScanMeta(scan),
-      result: null,
-      cohorts: null,
-      fit_personas: null,
-      non_fit_personas: null,
-      frictions: null,
-      retention_curve: null,
-      formula_rows: null,
-      dimension_breakdown: null,
-      kpis: null,
-    });
-    return;
-  }
-
-  // Real synthesis path (Phase 1B). The no-LLM build cannot reach
-  // this branch yet, but we wire the read so the contract is set.
+  // Read whatever rows exist right now — progressive data flows in
+  // as the worker writes scan_persona_responses + scan_cohort_results
+  // mid-pipeline. The polling client picks up partial state and
+  // re-renders.
   const cohortRows = await db
     .select()
     .from(schema.scanCohortResults)
     .where(eq(schema.scanCohortResults.scanId, id));
 
+  // Live persona completion count — the scan row's
+  // personas_completed only gets set at synthesis time, but we want
+  // the polling client to see "X of Y personas analyzed" while the
+  // responding step is still inserting rows.
+  const [liveCount] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.scanPersonaResponses)
+    .where(eq(schema.scanPersonaResponses.scanId, id));
+  const livePersonasCompleted = liveCount?.n ?? 0;
+
+  // Composite per-persona score for fit/non-fit ranking. Cheap proxy
+  // for the §4.2 weighted aggregate; using the same dimensions keeps
+  // partial-state ordering consistent with the final cohort_fit_score.
+  const sumExpr = sql<number>`(
+    coalesce(${schema.scanPersonaResponses.happinessScore}, 0)
+    + coalesce(${schema.scanPersonaResponses.engagementScore}, 0)
+    + coalesce(${schema.scanPersonaResponses.taskSuccessScore}, 0)
+  )`;
+
+  const fitRows = await db
+    .select({
+      personaId: schema.scanPersonaResponses.personaId,
+      cohortId: schema.scanPersonaResponses.cohortId,
+      happiness: schema.scanPersonaResponses.happinessScore,
+      engagement: schema.scanPersonaResponses.engagementScore,
+      taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
+      voiceSample: schema.personas.vector,
+      displayName: schema.testers.displayName,
+      ageGroup: schema.personas.vector,
+    })
+    .from(schema.scanPersonaResponses)
+    .innerJoin(
+      schema.personas,
+      eq(schema.personas.id, schema.scanPersonaResponses.personaId)
+    )
+    .innerJoin(
+      schema.testers,
+      eq(schema.testers.walletAddress, schema.personas.testerAddr)
+    )
+    .where(eq(schema.scanPersonaResponses.scanId, id))
+    .orderBy(desc(sumExpr))
+    .limit(3);
+
+  const nonFitRows = await db
+    .select({
+      personaId: schema.scanPersonaResponses.personaId,
+      cohortId: schema.scanPersonaResponses.cohortId,
+      happiness: schema.scanPersonaResponses.happinessScore,
+      engagement: schema.scanPersonaResponses.engagementScore,
+      taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
+      voiceSample: schema.personas.vector,
+      displayName: schema.testers.displayName,
+      ageGroup: schema.personas.vector,
+    })
+    .from(schema.scanPersonaResponses)
+    .innerJoin(
+      schema.personas,
+      eq(schema.personas.id, schema.scanPersonaResponses.personaId)
+    )
+    .innerJoin(
+      schema.testers,
+      eq(schema.testers.walletAddress, schema.personas.testerAddr)
+    )
+    .where(eq(schema.scanPersonaResponses.scanId, id))
+    .orderBy(asc(sumExpr))
+    .limit(3);
+
+  const completed = scan.status === 'completed';
+
+  // Override personas_completed with the live row count for the
+  // polling client. Once the scan completes, scan.personasCompleted
+  // matches livePersonasCompleted exactly, so the override is a no-op.
+  const scanShape = shapeScanMeta(scan);
+  scanShape.personas_completed = livePersonasCompleted;
+  if (!completed && scanShape.personas_attempted === 0) {
+    scanShape.personas_attempted = livePersonasCompleted;
+  }
+
   res.json({
-    scan: shapeScanMeta(scan),
-    result: {
-      audience_fit_score: scan.audienceFitScore ?? 0,
-      best: {
-        cohort_id: scan.bestCohortId ?? '',
-        cohort_label:
-          cohortRows.find((c) => c.cohortId === scan.bestCohortId)?.cohortLabel ?? '',
-        cohort_fit_score: scan.bestCohortScore ?? 0,
-      },
-      worst: {
-        cohort_id: scan.worstCohortId ?? '',
-        cohort_label:
-          cohortRows.find((c) => c.cohortId === scan.worstCohortId)?.cohortLabel ?? '',
-        cohort_fit_score: scan.worstCohortScore ?? 0,
-      },
-      median_score: scan.medianCohortScore ?? 0,
-      global_task_success_avg: scan.globalTaskSuccessAvg ?? 0,
-      global_sentiment_avg: scan.globalSentimentAvg ?? 0,
-      weights_used: AUDIENCE_FIT_WEIGHTS,
-      dimension_weights: DIMENSION_WEIGHTS_V1,
-    },
+    scan: scanShape,
+    result: completed
+      ? {
+          audience_fit_score: scan.audienceFitScore ?? 0,
+          best: {
+            cohort_id: scan.bestCohortId ?? '',
+            cohort_label:
+              cohortRows.find((c) => c.cohortId === scan.bestCohortId)?.cohortLabel ?? '',
+            cohort_fit_score: scan.bestCohortScore ?? 0,
+          },
+          worst: {
+            cohort_id: scan.worstCohortId ?? '',
+            cohort_label:
+              cohortRows.find((c) => c.cohortId === scan.worstCohortId)?.cohortLabel ?? '',
+            cohort_fit_score: scan.worstCohortScore ?? 0,
+          },
+          median_score: scan.medianCohortScore ?? 0,
+          global_task_success_avg: scan.globalTaskSuccessAvg ?? 0,
+          global_sentiment_avg: scan.globalSentimentAvg ?? 0,
+          weights_used: AUDIENCE_FIT_WEIGHTS,
+          dimension_weights: DIMENSION_WEIGHTS_V1,
+        }
+      : null,
     cohorts: cohortRows.map(shapeCohort),
-    // Phase 1B: derive these from scan_persona_responses
-    fit_personas: [],
-    non_fit_personas: [],
-    frictions: [],
-    retention_curve: [],
-    formula_rows: [],
-    dimension_breakdown: [],
-    kpis: [],
+    fit_personas: fitRows.map(shapePersonaCard),
+    non_fit_personas: nonFitRows.map(shapePersonaCard),
+    // These three are computed at synthesis time; show them only when
+    // the scan completes so partial state never displays misleading
+    // pseudo-frictions or formula rows.
+    frictions: completed ? buildFrictionsFromCohorts(cohortRows) : [],
+    retention_curve: completed ? buildRetentionCurve(cohortRows) : [],
+    formula_rows: completed ? buildFormulaRows(scan, cohortRows) : [],
+    dimension_breakdown: completed ? buildDimensionBreakdown(cohortRows) : [],
+    kpis: completed ? buildKpis(scan, cohortRows) : [],
   });
 });
+
+// ─── Per-persona card shaping ─────────────────────────────────────
+function shapePersonaCard(r: {
+  personaId: string;
+  cohortId: string;
+  happiness: number | null;
+  engagement: number | null;
+  taskSuccess: number | null;
+  voiceSample: typeof schema.personas.$inferSelect.vector;
+  displayName: string;
+}) {
+  const score = Math.round(
+    ((r.happiness ?? 0) + (r.engagement ?? 0) + (r.taskSuccess ?? 0)) / 3
+  );
+  const cohort = COHORT_BY_ID[r.cohortId];
+  const ageGroup = r.voiceSample.demographics?.age_group;
+  const age =
+    ageGroup === 'teen'
+      ? 16
+      : ageGroup === 'young_adult'
+      ? 25
+      : ageGroup === 'senior'
+      ? 58
+      : 35;
+  return {
+    id: r.personaId,
+    name: r.displayName ?? 'Synthetic',
+    age,
+    role: cohort?.label ?? r.cohortId,
+    score,
+    quote: r.voiceSample.voice_sample ?? '',
+    tags: [r.cohortId, ageGroup ?? 'unknown'],
+  };
+}
+
+// ─── Synthesis-tied builders (only meaningful when status='completed') ──
+function buildFrictionsFromCohorts(
+  rows: Array<typeof schema.scanCohortResults.$inferSelect>
+) {
+  // Phase 1C will mine voice_friction columns + cluster via Haiku.
+  // Phase 1B placeholder: surface the worst cohorts as friction rows
+  // so the report is non-empty when the synthesis lands.
+  const ranked = [...rows]
+    .filter((c) => c.cohortFitScore != null)
+    .sort((a, b) => (a.cohortFitScore ?? 0) - (b.cohortFitScore ?? 0))
+    .slice(0, 3);
+  return ranked.map((c, i) => ({
+    rank: i + 1,
+    title: `Low resonance: ${c.cohortLabel}`,
+    detail: `${c.cohortLabel} cohort scored ${(c.cohortFitScore ?? 0).toFixed(0)}/100 — well below average.`,
+    n: c.nCompleted,
+    where: c.cohortLabel,
+    impact: `+${Math.round((50 - (c.cohortFitScore ?? 0)) * 0.3)} fit est.`,
+    quote: 'Voice clustering arrives in Phase 1C with the real LLM call.',
+  }));
+}
+
+function buildRetentionCurve(
+  rows: Array<typeof schema.scanCohortResults.$inferSelect>
+) {
+  const valid = rows.filter((r) => r.retentionDCurve != null);
+  if (valid.length === 0) return [];
+  const sum = { d1: 0, d3: 0, d7: 0, d30: 0 };
+  for (const r of valid) {
+    const c = r.retentionDCurve!;
+    sum.d1 += c.d1;
+    sum.d3 += c.d3;
+    sum.d7 += c.d7;
+    sum.d30 += c.d30;
+  }
+  const n = valid.length;
+  return [
+    { d: 'D-1', v: Math.round(sum.d1 / n) },
+    { d: 'D-3', v: Math.round(sum.d3 / n) },
+    { d: 'D-7', v: Math.round(sum.d7 / n) },
+    { d: 'D-30', v: Math.round(sum.d30 / n) },
+  ];
+}
+
+function buildFormulaRows(
+  scan: typeof schema.audienceFitScans.$inferSelect,
+  rows: Array<typeof schema.scanCohortResults.$inferSelect>
+) {
+  // Best-cohort dimension means → formula rows. This is the per-
+  // dimension breakdown that drove that cohort's cohort_fit_score.
+  const best = rows.find((c) => c.cohortId === scan.bestCohortId);
+  if (!best) return [];
+  const w = DIMENSION_WEIGHTS_V1;
+  return [
+    { d: 'Engagement', s: Math.round(best.engagementMean ?? 0), w: w.engagement, c: 0.78 },
+    { d: 'Task Success', s: Math.round(best.taskSuccessMean ?? 0), w: w.task_success, c: 0.71 },
+    { d: 'Happiness', s: Math.round(best.happinessMean ?? 0), w: w.happiness, c: 0.65 },
+    { d: 'Adoption', s: Math.round(best.adoptionMean ?? 0), w: w.adoption, c: 0.38 },
+    { d: 'Retention', s: Math.round(best.retentionMean ?? 0), w: w.retention, c: 0.18 },
+  ];
+}
+
+function buildDimensionBreakdown(
+  rows: Array<typeof schema.scanCohortResults.$inferSelect>
+) {
+  // Cross-cohort dimension means weighted by n_completed — same shape
+  // as the engagement breakdown card on the report.
+  const valid = rows.filter((r) => r.cohortFitScore != null);
+  if (valid.length === 0) return [];
+  const totalN = valid.reduce((s, r) => s + r.nCompleted, 0) || 1;
+  const wAvg = (key: 'engagementMean' | 'happinessMean' | 'taskSuccessMean' | 'adoptionMean' | 'retentionMean') =>
+    Math.round(
+      valid.reduce((s, r) => s + (r[key] ?? 0) * r.nCompleted, 0) / totalN
+    );
+  const eng = wAvg('engagementMean');
+  const hap = wAvg('happinessMean');
+  const tsk = wAvg('taskSuccessMean');
+  const ado = wAvg('adoptionMean');
+  const ret = wAvg('retentionMean');
+  const tone = (v: number) => (v < 40 ? 'bad' : v < 60 ? 'warn' : 'ok');
+  return [
+    { l: 'Onboarding Completion', v: ado, sub: 'Sign-up likelihood', tone: tone(ado) },
+    { l: 'Time to Aha', v: tsk, sub: 'Task completion proxy', tone: tone(tsk) },
+    { l: 'Sentiment Resonance', v: hap, sub: 'SUS aggregate', tone: tone(hap) },
+    { l: 'Feature Discovery', v: eng, sub: 'Session depth', tone: tone(eng) },
+    { l: 'Return Intent', v: ret, sub: 'D-7 retention', tone: tone(ret) },
+  ];
+}
+
+function buildKpis(
+  scan: typeof schema.audienceFitScans.$inferSelect,
+  rows: Array<typeof schema.scanCohortResults.$inferSelect>
+) {
+  const best = rows.find((c) => c.cohortId === scan.bestCohortId);
+  const worst = rows.find((c) => c.cohortId === scan.worstCohortId);
+  return [
+    {
+      l: 'Best cohort fit',
+      v: String(Math.round(scan.bestCohortScore ?? 0)),
+      sub: best?.cohortLabel ?? '—',
+      tone: 'ok',
+    },
+    {
+      l: 'Worst cohort fit',
+      v: String(Math.round(scan.worstCohortScore ?? 0)),
+      sub: worst?.cohortLabel ?? '—',
+      tone: 'bad',
+    },
+    {
+      l: 'Personas analyzed',
+      v: String(scan.personasCompleted),
+      sub: `${scan.personasFlagged ?? 0} flagged`,
+      tone: 'faint',
+    },
+    {
+      l: 'Industry benchmark',
+      v: '—',
+      sub: 'coming soon',
+      tone: 'faint',
+    },
+  ];
+}
 
 function shapeScanMeta(s: typeof schema.audienceFitScans.$inferSelect) {
   return {
