@@ -66,7 +66,7 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
 pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
-pnpm --filter api test      # Run vitest (238 tests)
+pnpm --filter api test      # Run vitest (415 tests as of 2026-05-02)
 pnpm --filter api db:generate  # Emit a new versioned migration from schema changes → apps/api/drizzle/*.sql
 pnpm --filter api db:migrate   # Apply pending migrations to DATABASE_URL (preferred for Railway deploys)
 pnpm --filter api db:push      # Dev only: push schema directly, bypassing migration files
@@ -74,6 +74,10 @@ pnpm tsx scripts/seed-data.ts              # Base seed (5 hand-written + 2 tests
 pnpm tsx scripts/append-diverse-personas.ts  # +15 diverse profiles (total 20 personas)
 pnpm tsx scripts/run-persona-batch.ts --limit N   # Batch persona runs (default mode=text)
 pnpm tsx scripts/usage-summary.ts          # Analyze /tmp/llm-usage.jsonl
+pnpm tsx scripts/seed-validator-cohorts.ts # 112 personas across 8 STANDARD_COHORTS (Validator)
+pnpm tsx scripts/seed-calibration.ts       # 600 synthetic calibration_records (Validator §5)
+pnpm tsx scripts/backfill-cohort-ci.ts [--dry-run]                 # Validator: bootstrap CI for legacy cohort rows
+pnpm tsx scripts/backfill-site-classifier.ts [--dry-run] [--max N] # Validator: re-run classifier on placeholder scans
 ```
 
 ### persona-engine (Python)
@@ -580,6 +584,187 @@ re-running the persona.
   filtered out of the generic Questionnaire Answers list; the
   Structured Report section is the structured rendering.
 
+## Audience-Fit Validator (`/validator/*` + `/api/scan/*`, audited 2026-05-02)
+
+A separate product surface from the autotest/diagnosis pipeline.
+Measures **audience-fit** across 8 cohorts × 5 dimensions instead of
+running per-persona browser sessions. Pure capture-and-score: one
+screenshot per scan, ~100 LLM persona reactions, weighted aggregate.
+
+### Architecture
+
+```
+POST /api/scan                  apps/api/src/routes/scan.ts
+  → scan_pipeline.ts             startScanWorker(scanId) — fire-and-forget
+       Step 0 capturing           captureSite() — Playwright full-page screenshot
+       Step 0.5                   classifySite() — Haiku vision: {category, confidence, one_line_pitch}
+       Step 1 sampling            selectPersonasForCohorts(personas, cohortDefs)
+                                    └─ filtered by scan.targetCohorts when set
+       Step 2 responding          runPersonaResponseLLM() per persona
+                                    Sonnet vision when USE_VISION=1, Haiku text otherwise
+                                    writes scan_persona_responses (1 row per persona)
+       Step 3 aggregating         dimension means → computeCohortFitScore()
+                                    bootstrap CI → scan_cohort_results
+                                    clusterFrictions() — Haiku theme clustering
+                                    computeAudienceFit() — Option A formula
+       completed                  scan row + cohort rows queryable via /report
+```
+
+### Two modes
+
+- **Mode A — Discovery**: 8 STANDARD_COHORTS × 14 = ~112 personas. Headline
+  `audience_fit_score` is a 4-component composite (Option A, see
+  `services/audience_fit.ts`). When `target_cohorts` is set on the scan
+  row, only that subset runs.
+- **Mode B — Verification**: single audience parsed by Haiku from
+  `target_audience_text` ("30s DeFi expert mobile-first" → CohortSelector
+  jsonb). One bucket of ≤50 matching personas. Verdict thresholds per
+  spec §1.3: ≥60 pass / 40-60 conditional / <40 fail.
+
+### Pipeline math invariants (verified 2026-05-02)
+
+These are the six contracts the audit locked in. **All audited at 0
+mismatch across 1550 personas / 128 cohorts / 17 scans** — preserve
+them:
+
+1. `audience_fit_score = 0.4·best + 0.3·median + 0.2·task_global +
+   0.1·sentiment_global` (Mode A, `services/audience_fit.ts`)
+2. Mode B `audience_fit_score = cohort_fit_score` (single bucket, no
+   blend) — `scan_pipeline.ts::runModeBPipeline`
+3. Per-persona dims: `happiness = computeSusScore(sus_responses)`,
+   `adoption = signup_likelihood × 100`, `task_success =
+   completion_likelihood × 100`, `engagement = ENGAGEMENT_BAND_TO_SCORE`,
+   `retention_d7 = RETENTION_BAND_TO_DCURVE.d7` — `services/dimensions/llm.ts`
+4. Cohort dimension means = arithmetic mean of non-flagged persona scores
+5. `cohort_fit_score = 0.30·eng + 0.30·tsk + 0.25·hap + 0.10·ado + 0.05·ret`
+   (DIMENSION_WEIGHTS_V1)
+6. `personas_completed = COUNT(NOT is_flagged)`, invariant
+   **`attempted = completed + flagged`** holds across all 17 scans
+   (post-A1 backfill 2026-05-02)
+
+### Synthetic-persona trust contract (B2/B3 retro 2026-05-02)
+
+The 112 seed personas (`scripts/seed-validator-cohorts.ts`) are
+deliberately **labeled** as synthetic. Don't make them look more real
+than they are:
+
+- `personaAgeFromGroup(ageGroup)` returns the **bucket center**
+  (16/25/35/58). The persona vector only stores categorical
+  `age_group`; do not derive a per-persona age via hash jitter, even
+  when it makes cards look less repetitive (B2 anti-pattern, reverted).
+- `personaDisplayName(rawName, role, personaId)` substitutes
+  pool names ("Jonas Bauer") only when `isSyntheticSeedName(rawName,
+  role)` matches the seed pattern (`<role> #N`). Real tester
+  displayNames pass through untouched.
+- `ScanPersonaCard.is_synthetic: boolean` flags the substitution so
+  PersonaBoard can render a small "synth" marker. Stakeholders see
+  pool names AND the disclosure simultaneously — never just one.
+
+### AARRR is CUMULATIVE (not independent filters)
+
+`services/aarrr.ts::computeAarrrFromRows` filters cumulatively:
+each stage's set is a subset of the previous. This guarantees a
+monotonic non-increasing funnel shape. Independent thresholds (the
+2026-05-01 prior version) could produce non-funnel shapes like
+100→28→25→27→28 where Referral exceeded Activation. The pure compute
+helper is exported for unit tests; `audience_fit_helpers.test.ts`
+locks the monotonicity + threshold boundaries.
+
+Thresholds (from percentile audit, 2026-05-02):
+- Activation: task_success ≥ 30
+- Retention: + retention_d7 ≥ 30
+- Referral: + happiness ≥ 60
+- Revenue: + adoption ≥ 65
+
+### Friction clustering n invariant
+
+`assembleFrictionClusters(items, parsed)` (pure, exported) appends
+an "Other / long-tail frictions" bucket whenever the LLM left
+input personas unassigned. The cluster `n` sum + long-tail bucket
+**must equal `items.length`** — silently dropping 5-10% of friction
+inputs (the prior behavior) breaks the report's friction count
+across the top-N display.
+
+### Site classifier (Phase 1C-D)
+
+`services/site_classifier.ts::classifySite(targetUrl, screenshotUrls)`
+is a single Haiku vision call after capture. Replaces the previous
+hardcoded `category='DeFi', categoryConfidence=0.5, oneLinePitch=null`
+placeholder. Cost ~$0.0008/scan. Schema: 12 category enum + 0-1
+confidence + ≤160 char pitch. Failure returns null; caller leaves
+the row's existing nulls (report header conditionally hides empty
+pitch/benchmark).
+
+### Backfill scripts (operator-run, idempotent)
+
+- `scripts/backfill-cohort-ci.ts` — recompute bootstrap CI for legacy
+  cohort rows whose `cohort_fit_ci_low/high` are null.
+- `scripts/backfill-site-classifier.ts` — re-run Haiku classifier on
+  scans matching the placeholder triple
+  (`category='DeFi' AND category_confidence=0.5 AND one_line_pitch IS NULL`).
+  Default `--max 25`. Skips rows without cached screenshots.
+
+Both filter-on-shape and refuse to overwrite already-good data, so
+re-runs are no-ops once backfilled.
+
+### Pure-helper extraction pattern
+
+For new pipeline code that mixes DB I/O, LLM calls, and business
+rules: extract the pure compute into a helper (`computeAarrrFromRows`,
+`assembleFrictionClusters`, `shapePersonaCard`, `shapePersonaDetailResponse`)
+and leave the wrapper to do the I/O. The helper is exported for unit
+tests; the wrapper stays unexported. `__tests__/audience_fit_helpers.test.ts`
++ `__tests__/scan_shapers.test.ts` are the canonical examples.
+
+### Detail (`/validator/detail`) inputs are real
+
+- **Q1 Target users** chips each carry a `cohort` id. Selection sends
+  `target_cohorts: string[]` in the createScan body, which becomes the
+  `audience_fit_scans.target_cohorts` jsonb column. The pipeline filters
+  STANDARD_COHORTS to that subset before assignment. Empty/null = run
+  all 8.
+- **Q2 Category** is intentionally a placeholder ("auto-detected during
+  scan") — the real category lands from classifySite() at capture step.
+- **Q3 Hypothesis** textarea is sent as `hypothesis` and flows end-to-
+  end to `runPersonaResponseLLM()::buildUserPrompt`.
+- "Skip" sends `target_cohorts: undefined` + `hypothesis: undefined` so
+  the run uses defaults regardless of typed input.
+
+### Report screen Mode B KPI structure
+
+The 4 KPI cards differ between modes:
+- Mode A: Best cohort fit / Worst cohort fit / Personas analyzed / Industry benchmark
+- Mode B: **Audience fit / Verdict / Personas analyzed / Audience definition**
+
+Mode B never shows best/worst/median (all equal by construction —
+single bucket). The Audience fit value is `Math.floor(rawScore * 10)
+/ 10` so 39.99 reads as "39.9" next to "<40 = FAIL" instead of "40.0
+< 40" cognitive dissonance.
+
+### Persona detail (`/validator/persona/[id]`) requires `?scan=`
+
+`GET /api/scan/:scanId/persona/:personaId` returns `{scan, persona,
+response}`. The page reads `?scan=<scanId>` from the query string;
+without it, renders a "Missing scan context" warning. The report
+screen's PersonaBoard always passes `scanId` so links from real
+report cards always work.
+
+The "Dimension snapshot" card (5 chips for Engagement / Task /
+Happiness / Adoption / Retention D-7) is **NOT a page-step funnel** —
+it's a per-axis score visualisation. The previous "Session journey"
+label implied behavioural step tracking which we don't measure (spec
+§4 measures outcomes, not journey actions). Don't reintroduce a
+step-funnel framing without first adding the underlying capture.
+
+### Empty `_session_video` analog
+
+The validator pipeline does not record per-persona browser sessions
+(it's not Stagehand-driven — single screenshot only). There's no
+`_session_video` analog and no per-persona replay UI on
+`/validator/persona/[id]`. The screenshot URL is on the scan row's
+`captureScreenshotUrls` array; future per-persona replays would need
+a new pipeline.
+
 ## LLM Usage Tracking
 
 - Unified JSONL log at `USAGE_LOG_PATH` (default `/tmp/llm-usage.jsonl`)
@@ -824,6 +1009,49 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   `error` as one of the alternations — `{"error":"Not found"}` matches
   and the loop exits early. Use the HTTP status code (`curl -o /dev/null
   -w "%{http_code}"`) when waiting for a Railway redeploy.
+- Reintroduce per-persona age jitter in `personaAgeFromGroup`. The
+  persona vector only stores categorical `age_group`; jittering by
+  `personaId` hash invents data the system doesn't measure. Identical
+  ages within a cohort are an honesty signal, not a UX bug. The B2
+  retro 2026-05-02 reverted this; see Audience-Fit Validator §
+  "Synthetic-persona trust contract".
+- Drop the `is_synthetic` flag on `ScanPersonaCard` or the "synth"
+  marker in PersonaBoard. Pool names like "Jonas Bauer" without that
+  marker read as real users to a stakeholder watching a demo. The
+  pool + marker combo is the contract — they ship together.
+- Make AARRR threshold filters independent again in `services/aarrr.ts`.
+  Each stage MUST be a cumulative subset of the previous so the
+  funnel is monotonically non-increasing. Independent filters
+  produced 100→28→25→27→28 on uniswap (Referral exceeded Activation —
+  not a funnel). `audience_fit_helpers.test.ts` locks this via the
+  "monotonically non-increasing" + "passing referral implies passing
+  all earlier stages" cases.
+- Drop the long-tail bucket from `assembleFrictionClusters`. The
+  invariant that cluster `n` sum + long-tail equals `items.length`
+  is what stops the report from silently losing 5-10% of friction
+  inputs. The "n sum + long-tail equals input" test in
+  `audience_fit_helpers.test.ts` is the lock.
+- Hardcode `category: 'DeFi', categoryConfidence: 0.5, oneLinePitch:
+  null` back into `scan_pipeline.ts`. The Phase 1C-D Haiku
+  classifier (`services/site_classifier.ts`) is the source of truth.
+  If the call fails, leave the row's existing nulls — the report
+  screen conditionally hides empty pitch/benchmark.
+- Filter persona cards (`fitRows`/`nonFitRows` in `routes/scan.ts`)
+  without the `is_flagged=false` + `isNotNull(happinessScore)`
+  predicates. Without them, flagged rows surface with `score=0` and
+  the persona's static `voice_sample` as the quote — broken cards.
+  See `scan_shapers.test.ts::shapePersonaCard` "returns score=null
+  when all dimensions are null" for the related null-score lock.
+- Filter the persona detail endpoint or report cards by `cohortId =
+  'custom_audience'` for Mode B and assume Mode A. Mode B's single
+  bucket uses the literal cohort_id `'custom_audience'`; the
+  PersonaCard `role` lookup falls back to that string when
+  `COHORT_BY_ID` returns undefined. Don't special-case it elsewhere.
+- Send `target_users` selection from `/validator/detail` as a
+  hypothesis prefix instead of a real `target_cohorts` array. The
+  prior "audiences in hypothesis text" plumbing is gone — the
+  pipeline filters STANDARD_COHORTS by id when `target_cohorts` is
+  set. The chips on Detail carry cohort ids for exactly this.
 
 ## Dev harness (`/api/dev/*`)
 
