@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Suspense, useState } from "react";
 import { scanApi } from "@/lib/api";
-import { Btn, C, Card, FM, Frame, Pill } from "../_components/ui";
+import { Btn, C, Card, FM, Frame } from "../_components/ui";
 
 // Screen 2: Discovery detail — sharpening questions.
 // Maps to ScreenDiscoveryDetail in screens-v2.jsx.
@@ -27,13 +27,33 @@ function DetailInner() {
   const [selected, setSelected] = useState<Record<string, boolean>>(
     Object.fromEntries(TARGET_USERS.map((o) => [o.t, !!o.sel]))
   );
+  const [hypothesis, setHypothesis] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const toggle = (t: string) =>
     setSelected((prev) => ({ ...prev, [t]: !prev[t] }));
 
-  const startAnalysis = async () => {
+  // Combine selected target_users + free-text hypothesis into a single
+  // string the LLM persona prompt sees as the "company hypothesis to
+  // probe". Spec §6.4 — Mode A doesn't filter cohorts by stated audience
+  // (we always run all 8), but the LLM can prioritise the stated focus
+  // when sampling per-persona reactions.
+  const buildHypothesisText = (): string | undefined => {
+    const audiences = Object.entries(selected)
+      .filter(([t, on]) => on && !TARGET_USERS.find((o) => o.t === t)?.ghost)
+      .map(([t]) => t);
+    const trimmed = hypothesis.trim();
+    if (audiences.length === 0 && !trimmed) return undefined;
+    const parts: string[] = [];
+    if (audiences.length > 0) {
+      parts.push(`Target audiences: ${audiences.join(", ")}.`);
+    }
+    if (trimmed) parts.push(`Hypothesis to probe: ${trimmed}`);
+    return parts.join(" ");
+  };
+
+  const startAnalysis = async (skipInputs = false) => {
     if (submitting) return;
     setSubmitting(true);
     setError(null);
@@ -41,6 +61,7 @@ function DetailInner() {
       const { scanId } = await scanApi.createScan({
         target_url: url,
         mode: 'A',
+        hypothesis: skipInputs ? undefined : buildHypothesisText(),
       });
       router.push(
         `/validator/processing/${scanId}?url=${encodeURIComponent(url)}`
@@ -204,17 +225,7 @@ function DetailInner() {
                 Category / one-line pitch
               </div>
               <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>
-                auto-detected: <Pill tone="accent">DeFi</Pill>{" "}
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: C.textFaint,
-                    fontFamily: FM,
-                    marginLeft: 4,
-                  }}
-                >
-                  confidence 0.91
-                </span>
+                Auto-detected during scan from the captured page content
               </div>
             </div>
           </div>
@@ -224,13 +235,15 @@ function DetailInner() {
               background: "#f7f4ec",
               borderRadius: 6,
               border: `1px solid ${C.border}`,
-              fontSize: 13,
-              color: C.text,
+              fontSize: 12,
+              color: C.textFaint,
               lineHeight: 1.55,
+              fontStyle: "italic",
             }}
           >
-            DeFi swap aggregator on Solana — minimal slippage + MEV protection.
-            Mobile-wallet first.
+            We&apos;ll capture {url} on scan start and extract the category +
+            one-line pitch automatically. You&apos;ll see the result on the
+            report screen.
           </div>
         </Card>
 
@@ -270,21 +283,37 @@ function DetailInner() {
               </div>
             </div>
           </div>
-          <div
+          <textarea
+            value={hypothesis}
+            onChange={(e) => setHypothesis(e.target.value)}
+            placeholder='e.g. "Suspect drop-off at checkout" · "Verify usability for teen students" · "Is wallet onboarding friendly enough?"'
+            rows={3}
+            maxLength={1000}
             style={{
+              width: "100%",
               padding: 12,
               background: "#f7f4ec",
               borderRadius: 6,
               border: `1px solid ${C.border}`,
               fontSize: 13,
-              color: C.textDim,
+              color: C.text,
               lineHeight: 1.55,
-              fontStyle: "italic",
+              fontFamily: "inherit",
+              resize: "vertical",
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+          <div
+            style={{
+              marginTop: 6,
+              fontSize: 11,
+              color: C.textFaint,
+              fontFamily: FM,
+              textAlign: "right",
             }}
           >
-            e.g. &ldquo;Suspect drop-off at checkout&rdquo;, &ldquo;Verify
-            usability for teen students&rdquo;, &ldquo;Is wallet onboarding
-            friendly enough?&rdquo;
+            {hypothesis.length} / 1000
           </div>
         </Card>
 
@@ -305,8 +334,10 @@ function DetailInner() {
             )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <Btn onClick={startAnalysis}>{submitting ? "Skip…" : "Skip"}</Btn>
-            <Btn primary onClick={startAnalysis}>
+            <Btn onClick={() => startAnalysis(true)}>
+              {submitting ? "Skip…" : "Skip"}
+            </Btn>
+            <Btn primary onClick={() => startAnalysis(false)}>
               {submitting ? "Starting…" : "Start analysis →"}
             </Btn>
           </div>

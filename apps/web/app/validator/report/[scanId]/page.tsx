@@ -124,10 +124,19 @@ export default function ValidatorReportPage() {
             gap: 16,
           }}
         >
-          <div>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
               <Pill tone="accent">Report</Pill>
-              {r.scan.category && <Pill>{r.scan.category} · auto-detected</Pill>}
+              {r.scan.category && (
+                <Pill>
+                  {r.scan.category}
+                  {r.scan.category_confidence != null && (
+                    <span style={{ opacity: 0.7, marginLeft: 4 }}>
+                      · {Math.round(r.scan.category_confidence * 100)}%
+                    </span>
+                  )}
+                </Pill>
+              )}
               <span style={{ fontSize: 11, color: C.textFaint }}>
                 · {r.scan.personas_completed} personas · scan {r.scan.id.slice(0, 8)}
               </span>
@@ -135,6 +144,20 @@ export default function ValidatorReportPage() {
             <h1 style={{ fontSize: 24, fontWeight: 600, margin: 0, letterSpacing: "-0.01em" }}>
               {r.scan.target_url} — Survival Report
             </h1>
+            {r.scan.one_line_pitch && (
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 13,
+                  color: C.textDim,
+                  fontStyle: "italic",
+                  lineHeight: 1.5,
+                  maxWidth: 720,
+                }}
+              >
+                &ldquo;{r.scan.one_line_pitch}&rdquo;
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <Btn>Re-run</Btn>
@@ -526,8 +549,18 @@ export default function ValidatorReportPage() {
             marginBottom: 24,
           }}
         >
-          <PersonaBoard tone="ok" label="Fit personas" personas={fitPersonas} />
-          <PersonaBoard tone="bad" label="Non-fit personas" personas={nonFitPersonas} />
+          <PersonaBoard
+            tone="ok"
+            label="Fit personas"
+            personas={fitPersonas}
+            scanId={scanId}
+          />
+          <PersonaBoard
+            tone="bad"
+            label="Non-fit personas"
+            personas={nonFitPersonas}
+            scanId={scanId}
+          />
         </div>
 
         {/* ⓟ AARRR funnel — Pro tier (Phase 2-E). Mode A only;

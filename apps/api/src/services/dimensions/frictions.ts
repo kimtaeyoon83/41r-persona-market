@@ -127,10 +127,19 @@ export async function clusterFrictions(scanId: string): Promise<FrictionCluster[
     return null;
   }
 
+  // Track which input personas the LLM assigned to a cluster so we
+  // can fold any leftover into an "Other" bucket at the end. Without
+  // this, the cluster n's would sum to fewer than `items.length` and
+  // the report screen would silently lose ~5-10% of the frictions.
+  const assigned = new Set<number>();
   const ranked = parsed
     .map((c) => {
       const personasInCluster = c.persona_indices
-        .map((i) => items[i])
+        .map((i) => {
+          const it = items[i];
+          if (it !== undefined) assigned.add(i);
+          return it;
+        })
         .filter((it): it is (typeof items)[number] => it !== undefined);
       const cohortIds = Array.from(
         new Set(personasInCluster.map((p) => p.cohortId)),
@@ -148,6 +157,25 @@ export async function clusterFrictions(scanId: string): Promise<FrictionCluster[
     .filter((c) => c.n > 0)
     .sort((a, b) => b.n - a.n)
     .slice(0, 5);
+
+  // Long-tail bucket — every input persona that didn't land in any
+  // named cluster. We keep this even when small (n=1) so the n's sum
+  // to items.length and "Other" doesn't get hidden behind the top-5
+  // slice. Skipped only when zero personas are unassigned.
+  const unassigned = items.filter((_, i) => !assigned.has(i));
+  if (unassigned.length > 0) {
+    const otherCohorts = Array.from(
+      new Set(unassigned.map((p) => p.cohortId)),
+    ).map((id) => COHORT_BY_ID[id]?.label ?? id);
+    ranked.push({
+      title: 'Other / long-tail frictions',
+      summary: `${unassigned.length} persona${unassigned.length > 1 ? 's' : ''} raised one-off concerns that did not cluster with the main themes.`,
+      where: 'Various',
+      quote: unassigned[0]!.friction,
+      n: unassigned.length,
+      affected_cohorts: otherCohorts,
+    });
+  }
 
   const clusters: FrictionCluster[] = ranked.map((c, i) => ({
     rank: i + 1,

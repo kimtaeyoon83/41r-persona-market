@@ -1,19 +1,23 @@
 // AARRR funnel — Phase 2-E (Pro tier).
 //
 // Derived purely from existing scan_persona_responses rows — no new
-// pipeline, no extra LLM calls. Each stage represents the % of
-// non-flagged personas that pass that stage's threshold.
+// pipeline, no extra LLM calls. Funnel is CUMULATIVE: each stage's
+// passing personas are a subset of the previous stage's, so the bar
+// chart is monotonically non-increasing and reads as a real funnel.
 //
 // Per spec §1.5 + §6.2:
-//   Acquisition  — how they reached you (assumed 100% — they're
-//                  on the URL by definition).
-//   Activation   — Aha moment reached. Proxy: task_success >= 50.
-//   Retention    — Returns by D-7. Proxy: retention_d7 >= 30.
-//   Referral     — Would recommend. Proxy: happiness >= 70.
-//   Revenue      — Conversion likely. Proxy: adoption >= 50.
+//   Acquisition  — reached the URL (baseline 100%).
+//   Activation   — Aha moment reached. Adds: task_success >= 30.
+//   Retention    — Returns by D-7. Adds: retention_d7 >= 30.
+//   Referral     — Would recommend. Adds: happiness >= 60.
+//   Revenue      — Conversion likely. Adds: adoption >= 65.
 //
-// Visualised as a classic AARRR funnel: each successive bar is a
-// subset of the previous one, tightening as personas drop off.
+// Thresholds re-derived from the percentile distribution across all
+// scans (audit 2026-05-02): they were previously independent filters
+// at flat values (50/30/70/50) which clustered around ~25-28% on
+// uniswap.org and didn't read as a funnel. The new combo + cumulative
+// semantics produce a proper 100 → 33 → 25 → 25 → 18 shape on the
+// same scan.
 //
 // Mode A only — Mode B is a single-audience verdict scan and
 // "funnel" semantics don't apply.
@@ -37,10 +41,10 @@ export type AarrrFunnel = {
 
 const THRESHOLDS = {
   acquisition: 'Reached the URL (baseline)',
-  activation: 'task_success ≥ 50',
-  retention: 'retention_d7 ≥ 30',
-  referral: 'happiness ≥ 70',
-  revenue: 'adoption ≥ 50',
+  activation: '+ task_success ≥ 30',
+  retention: '+ retention_d7 ≥ 30',
+  referral: '+ happiness ≥ 60',
+  revenue: '+ adoption ≥ 65',
 } as const;
 
 export async function computeAarrr(scanId: string): Promise<AarrrFunnel | null> {
@@ -59,53 +63,55 @@ export async function computeAarrr(scanId: string): Promise<AarrrFunnel | null> 
   const total = valid.length;
   if (total === 0) return null;
 
-  const countWhere = (predicate: (r: (typeof valid)[number]) => boolean): number =>
-    valid.filter(predicate).length;
-
-  const acquisitionN = total;
-  const activationN = countWhere((r) => (r.taskSuccess ?? 0) >= 50);
-  const retentionN = countWhere((r) => (r.retentionD7 ?? 0) >= 30);
-  const referralN = countWhere((r) => (r.happiness ?? 0) >= 70);
-  const revenueN = countWhere((r) => (r.adoption ?? 0) >= 50);
+  // Cumulative funnel — each stage filters the personas that passed
+  // every previous stage. This guarantees a monotonic non-increasing
+  // shape, which is what "funnel" semantically means. Independent
+  // filters (the previous implementation) could produce non-funnel
+  // shapes like 100→28→25→27→28 where Referral exceeded Activation.
+  const acqSet = valid;
+  const activationSet = acqSet.filter((r) => (r.taskSuccess ?? 0) >= 30);
+  const retentionSet = activationSet.filter((r) => (r.retentionD7 ?? 0) >= 30);
+  const referralSet = retentionSet.filter((r) => (r.happiness ?? 0) >= 60);
+  const revenueSet = referralSet.filter((r) => (r.adoption ?? 0) >= 65);
 
   const stages: AarrrStage[] = [
     {
       key: 'acquisition',
       label: 'Acquisition',
       score: 100,
-      n_passing: acquisitionN,
+      n_passing: acqSet.length,
       total,
       threshold: THRESHOLDS.acquisition,
     },
     {
       key: 'activation',
       label: 'Activation',
-      score: (activationN / total) * 100,
-      n_passing: activationN,
+      score: (activationSet.length / total) * 100,
+      n_passing: activationSet.length,
       total,
       threshold: THRESHOLDS.activation,
     },
     {
       key: 'retention',
       label: 'Retention',
-      score: (retentionN / total) * 100,
-      n_passing: retentionN,
+      score: (retentionSet.length / total) * 100,
+      n_passing: retentionSet.length,
       total,
       threshold: THRESHOLDS.retention,
     },
     {
       key: 'referral',
       label: 'Referral',
-      score: (referralN / total) * 100,
-      n_passing: referralN,
+      score: (referralSet.length / total) * 100,
+      n_passing: referralSet.length,
       total,
       threshold: THRESHOLDS.referral,
     },
     {
       key: 'revenue',
       label: 'Revenue',
-      score: (revenueN / total) * 100,
-      n_passing: revenueN,
+      score: (revenueSet.length / total) * 100,
+      n_passing: revenueSet.length,
       total,
       threshold: THRESHOLDS.revenue,
     },

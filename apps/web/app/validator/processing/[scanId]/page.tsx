@@ -1,30 +1,41 @@
 "use client";
 
 import { useParams, useSearchParams, useRouter } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { scanApi, type ScanReport } from "@/lib/api";
 import { C, Card, FM, Frame, Pill } from "../../_components/ui";
 
-// Screen 3: Processing — live persona stream + abandonment funnel.
-// Maps to ScreenProcessing in screens-v2.jsx. Phase 0 simulates the
-// stream with a setInterval ticker; Phase 1 will swap to SSE per
-// spec §6.3 / §11.8.
+// Screen 3: Processing — live persona stream + cohort progress.
+// Polls /api/scan/:id/report every 800ms; drives the dot grid +
+// cohort progress bars + recent-response feed from the live data.
+// Auto-redirects to /validator/report/:scanId on status='completed'.
 
-const FUNNEL = [
-  { step: "Landing", n: 67, drop: 0, color: C.ok },
-  { step: "Hero scroll", n: 54, drop: 13, color: C.ok },
-  { step: "Features", n: 42, drop: 12, color: C.warn },
-  { step: "Wallet connect", n: 21, drop: 21, color: C.bad, hot: true },
-  { step: "First swap try", n: 14, drop: 7, color: C.warn },
-  { step: "Swap complete", n: 9, drop: 5, color: C.ok },
-];
+const STATUS_LABELS: Record<string, string> = {
+  pending: "Queued",
+  capturing: "Capturing site",
+  sampling: "Selecting personas",
+  responding: "Personas reacting",
+  aggregating: "Aggregating cohorts",
+  completed: "Complete",
+  failed: "Failed",
+};
 
-const FEED = [
-  { t: "now", id: "p_8a3f", cohort: "Teen newcomer", emo: "😟", msg: "I have no idea what this site does. Too much English jargon.", step: "Hero", tag: "misfit" },
-  { t: "2s",  id: "p_2c91", cohort: "DeFi beginner", emo: "😕", msg: "I can't find where the slippage setting is.", step: "Swap", tag: "friction" },
-  { t: "5s",  id: "p_4f02", cohort: "30s DeFi pro", emo: "😊", msg: "MEV protection being explicit gives me real confidence.", step: "Feature", tag: "positive" },
-  { t: "8s",  id: "p_71bc", cohort: "Designer (20s)", emo: "🤔", msg: "Interface is clean, but the visual hierarchy is weak.", step: "Landing", tag: "mixed" },
-  { t: "12s", id: "p_9012", cohort: "Senior (50+)", emo: "😣", msg: "Buttons and text are too small — I can't read it.", step: "Hero", tag: "friction" },
-];
+function sentimentTone(s: "positive" | "mixed" | "friction"): "ok" | "warn" | "bad" {
+  return s === "positive" ? "ok" : s === "mixed" ? "warn" : "bad";
+}
+
+function sentimentEmo(s: "positive" | "mixed" | "friction"): string {
+  return s === "positive" ? "😊" : s === "mixed" ? "🤔" : "😣";
+}
+
+function timeAgo(iso: string, now: number): string {
+  const ms = now - new Date(iso).getTime();
+  if (ms < 1500) return "now";
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.round(s / 60);
+  return `${m}m`;
+}
 
 function ProcessingInner() {
   const params = useParams();
@@ -33,144 +44,443 @@ function ProcessingInner() {
   const scanId = (params?.scanId as string) || "demo";
   const url = search.get("url") || "yoursite.com";
 
-  const [progress, setProgress] = useState(0);
+  const [report, setReport] = useState<ScanReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState<number>(() => Date.now());
+  const cancelled = useRef(false);
 
+  // Live polling — same cadence as the report screen so the two
+  // hand off cleanly when status transitions to 'completed'.
   useEffect(() => {
-    const id = setInterval(() => {
-      setProgress((p) => Math.min(p + 1, 100));
-    }, 600);
-    return () => clearInterval(id);
-  }, []);
+    cancelled.current = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const fetchOnce = async () => {
+      try {
+        const r = await scanApi.getReport(scanId);
+        if (cancelled.current) return;
+        setReport(r);
+        if (r.scan.status === "completed") {
+          router.replace(`/validator/report/${scanId}`);
+          return;
+        }
+        if (r.scan.status !== "failed") {
+          timer = setTimeout(fetchOnce, 800);
+        }
+      } catch (e) {
+        if (cancelled.current) return;
+        setError(e instanceof Error ? e.message : "Failed to load scan");
+        timer = setTimeout(fetchOnce, 2000);
+      }
+    };
+    fetchOnce();
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => {
+      cancelled.current = true;
+      if (timer) clearTimeout(timer);
+      clearInterval(tick);
+    };
+  }, [scanId, router]);
 
-  const total = 113;
-  const done = Math.floor((progress / 100) * 60);
-  const running = progress >= 100 ? 53 : progress < 5 ? 0 : 29;
-  const queued = total - done - running;
+  if (error && !report) {
+    return (
+      <Frame active="discovery">
+        <div style={{ padding: 32 }}>
+          <Pill tone="bad">Error</Pill>
+          <div style={{ marginTop: 8, fontSize: 13, color: C.bad }}>{error}</div>
+        </div>
+      </Frame>
+    );
+  }
+
+  if (!report) {
+    return (
+      <Frame active="discovery">
+        <div style={{ padding: 32, color: C.textFaint, fontSize: 13 }}>
+          Loading scan…
+        </div>
+      </Frame>
+    );
+  }
+
+  const { scan, recent_responses, cohort_progress } = report;
+  const done = scan.personas_completed;
+  // 113 ≈ Mode A target (8 cohorts × 14 + 1). Mode B uses whatever
+  // the worker decides — fall back to attempted or done so the dot
+  // grid never overshoots.
+  const total =
+    scan.personas_attempted > 0
+      ? scan.personas_attempted
+      : scan.mode === "A"
+      ? 113
+      : Math.max(done, 1);
+  const isWorking =
+    scan.status !== "completed" && scan.status !== "failed";
+  const queued = Math.max(total - done, 0);
 
   return (
     <Frame active="discovery">
       <div style={{ padding: "24px 32px" }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 18 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, letterSpacing: "-0.01em" }}>Analyzing {url}</h1>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 12,
+            marginBottom: 18,
+          }}
+        >
+          <h1
+            style={{
+              fontSize: 22,
+              fontWeight: 600,
+              margin: 0,
+              letterSpacing: "-0.01em",
+            }}
+          >
+            Analyzing {url}
+          </h1>
           <span style={{ fontSize: 13, color: C.textDim, fontFamily: FM }}>
-            {Math.floor((progress / 100) * 113)} / 113 · scan {scanId}
+            {done} / {total} · scan {scanId.slice(0, 8)}
           </span>
           <div style={{ flex: 1 }} />
-          <Pill tone="accent">⚡ Live</Pill>
+          <Pill tone={scan.status === "failed" ? "bad" : "accent"}>
+            {scan.status === "failed" ? "✕" : "⚡"}{" "}
+            {STATUS_LABELS[scan.status] ?? scan.status}
+          </Pill>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 14, marginBottom: 14 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1.4fr",
+            gap: 14,
+            marginBottom: 14,
+          }}
+        >
           <Card padding={16}>
-            <div style={{ fontSize: 11, color: C.textFaint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>
-              Personas in flight · 113
+            <div
+              style={{
+                fontSize: 11,
+                color: C.textFaint,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                marginBottom: 12,
+              }}
+            >
+              Personas in flight · {total}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 4 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(12, 1fr)",
+                gap: 4,
+              }}
+            >
               {Array.from({ length: total }).map((_, i) => {
-                const status = i < done ? "done" : i < done + running ? "running" : "queued";
-                const bg = status === "done" ? C.ok : status === "running" ? C.accent : "#e6e2d6";
+                const status =
+                  i < done
+                    ? "done"
+                    : i === done && isWorking
+                    ? "running"
+                    : "queued";
+                const bg =
+                  status === "done"
+                    ? C.ok
+                    : status === "running"
+                    ? C.accent
+                    : "#e6e2d6";
                 return (
                   <div
                     key={i}
-                    title={`p_${i.toString(16).padStart(4, "0")}`}
                     style={{
                       aspectRatio: "1",
                       borderRadius: "50%",
                       background: bg,
                       opacity: status === "queued" ? 0.5 : 1,
-                      boxShadow: status === "running" ? `0 0 0 2px ${C.accentSoft}` : "none",
-                      animation: status === "running" ? "validatorPulse 1.4s ease-in-out infinite" : "none",
+                      boxShadow:
+                        status === "running"
+                          ? `0 0 0 2px ${C.accentSoft}`
+                          : "none",
+                      animation:
+                        status === "running"
+                          ? "validatorPulse 1.4s ease-in-out infinite"
+                          : "none",
                     }}
                   />
                 );
               })}
             </div>
             <style>{`@keyframes validatorPulse{0%,100%{opacity:1}50%{opacity:.5}}`}</style>
-            <div style={{ display: "flex", gap: 14, marginTop: 14, fontSize: 11, color: C.textDim }}>
-              <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 999, background: C.ok, marginRight: 6, verticalAlign: "middle" }} />Done {done}</span>
-              <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 999, background: C.accent, marginRight: 6, verticalAlign: "middle" }} />Responding {running}</span>
-              <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 999, background: "#d4cfc1", marginRight: 6, verticalAlign: "middle" }} />Queued {queued}</span>
+            <div
+              style={{
+                display: "flex",
+                gap: 14,
+                marginTop: 14,
+                fontSize: 11,
+                color: C.textDim,
+              }}
+            >
+              <span>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 8,
+                    height: 8,
+                    borderRadius: 999,
+                    background: C.ok,
+                    marginRight: 6,
+                    verticalAlign: "middle",
+                  }}
+                />
+                Done {done}
+              </span>
+              <span>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 8,
+                    height: 8,
+                    borderRadius: 999,
+                    background: "#d4cfc1",
+                    marginRight: 6,
+                    verticalAlign: "middle",
+                  }}
+                />
+                Queued {queued}
+              </span>
+              {scan.personas_flagged > 0 && (
+                <span>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 8,
+                      height: 8,
+                      borderRadius: 999,
+                      background: C.bad,
+                      marginRight: 6,
+                      verticalAlign: "middle",
+                    }}
+                  />
+                  Flagged {scan.personas_flagged}
+                </span>
+              )}
             </div>
           </Card>
 
           <Card padding={16}>
-            <div style={{ fontSize: 11, color: C.textFaint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>
-              Real-time abandonment funnel
+            <div
+              style={{
+                fontSize: 11,
+                color: C.textFaint,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                marginBottom: 12,
+              }}
+            >
+              Cohort progress · {cohort_progress.length} live
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {FUNNEL.map((s, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ width: 110, fontSize: 12, color: C.textDim }}>{s.step}</div>
-                  <div style={{ flex: 1, position: "relative", height: 22, background: "#f3f0e8", borderRadius: 4, overflow: "hidden" }}>
-                    <div style={{
-                      position: "absolute", left: 0, top: 0, height: "100%",
-                      width: `${(s.n / 67) * 100}%`,
-                      background: s.color, opacity: 0.85, transition: "width .6s",
-                    }} />
-                    <div style={{
-                      position: "absolute", left: 8, top: 0, height: "100%",
-                      display: "flex", alignItems: "center",
-                      fontSize: 11, fontFamily: FM, color: "#fff", fontWeight: 600,
-                    }}>{s.n}</div>
-                  </div>
-                  {s.drop > 0 && (
-                    <div style={{ width: 48, fontSize: 11, fontFamily: FM, color: C.bad, textAlign: "right" }}>−{s.drop}</div>
-                  )}
-                  {s.hot && <Pill tone="bad" style={{ fontSize: 10 }}>🔥 hot</Pill>}
-                </div>
-              ))}
-            </div>
-            <div style={{
-              marginTop: 12, padding: 10, background: C.badSoft, borderRadius: 6,
-              fontSize: 12, color: C.bad, lineHeight: 1.5,
-            }}>
-              <b>Currently hottest drop-off:</b> Wallet connect step — 21
-              personas leaving. &ldquo;I don&apos;t know which wallet to
-              use&rdquo; pattern dominant.
-            </div>
+            {cohort_progress.length === 0 ? (
+              <div style={{ fontSize: 12, color: C.textFaint, padding: "20px 0" }}>
+                Waiting for first persona response…
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {cohort_progress.map((c) => {
+                  const pct = Math.min(
+                    100,
+                    Math.round((c.n_completed / Math.max(c.n_target, 1)) * 100)
+                  );
+                  const colour =
+                    pct >= 100 ? C.ok : pct >= 50 ? C.accent : C.warn;
+                  return (
+                    <div
+                      key={c.cohort_id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 130,
+                          fontSize: 12,
+                          color: C.textDim,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                        title={c.cohort_label}
+                      >
+                        {c.cohort_label}
+                      </div>
+                      <div
+                        style={{
+                          flex: 1,
+                          position: "relative",
+                          height: 22,
+                          background: "#f3f0e8",
+                          borderRadius: 4,
+                          overflow: "hidden",
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: "absolute",
+                            left: 0,
+                            top: 0,
+                            height: "100%",
+                            width: `${pct}%`,
+                            background: colour,
+                            opacity: 0.85,
+                            transition: "width .6s",
+                          }}
+                        />
+                        <div
+                          style={{
+                            position: "absolute",
+                            left: 8,
+                            top: 0,
+                            height: "100%",
+                            display: "flex",
+                            alignItems: "center",
+                            fontSize: 11,
+                            fontFamily: FM,
+                            color: pct > 25 ? "#fff" : C.text,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {c.n_completed} / {c.n_target}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Card>
         </div>
 
         <Card padding={16}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-            <div style={{ fontSize: 11, color: C.textFaint, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              Live AI feedback · last 30s
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 12,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: C.textFaint,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              Live AI feedback · {recent_responses.length} most recent
             </div>
-            <span style={{ width: 6, height: 6, borderRadius: 999, background: C.accent, animation: "validatorPulse 1s infinite" }} />
+            {isWorking && (
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 999,
+                  background: C.accent,
+                  animation: "validatorPulse 1s infinite",
+                }}
+              />
+            )}
           </div>
-          {FEED.map((p, i) => {
-            const tagTone = p.tag === "positive" ? "ok" : p.tag === "misfit" || p.tag === "friction" ? "bad" : "warn";
-            return (
-              <div key={i} style={{
-                display: "flex", gap: 10, padding: "10px 0",
-                borderTop: i ? `1px solid ${C.border}` : "none",
-                alignItems: "center",
-              }}>
-                <span style={{ fontFamily: FM, fontSize: 10, color: C.textFaint, width: 30 }}>{p.t}</span>
-                <span style={{ fontSize: 18, width: 24 }}>{p.emo}</span>
-                <span style={{ fontFamily: FM, fontSize: 11, color: C.textFaint, width: 50 }}>{p.id}</span>
-                <span style={{ fontSize: 11, color: C.textDim, width: 130 }}>{p.cohort}</span>
-                <Pill tone={tagTone} style={{ fontSize: 10, width: "auto" }}>{p.step}</Pill>
-                <span style={{ flex: 1, fontSize: 12, fontStyle: "italic", color: C.text }}>&ldquo;{p.msg}&rdquo;</span>
+          {recent_responses.length === 0 ? (
+            <div style={{ fontSize: 12, color: C.textFaint, padding: "20px 0" }}>
+              Persona reactions stream in here as they arrive.
+            </div>
+          ) : (
+            recent_responses.map((p, i) => (
+              <div
+                key={p.persona_id}
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  padding: "10px 0",
+                  borderTop: i ? `1px solid ${C.border}` : "none",
+                  alignItems: "center",
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: FM,
+                    fontSize: 10,
+                    color: C.textFaint,
+                    width: 30,
+                  }}
+                >
+                  {timeAgo(p.created_at, now)}
+                </span>
+                <span style={{ fontSize: 18, width: 24 }}>
+                  {sentimentEmo(p.sentiment)}
+                </span>
+                <span
+                  style={{
+                    fontFamily: FM,
+                    fontSize: 11,
+                    color: C.textFaint,
+                    width: 70,
+                  }}
+                >
+                  p_{p.persona_id.slice(0, 6)}
+                </span>
+                <span style={{ fontSize: 11, color: C.textDim, width: 130 }}>
+                  {p.cohort_label}
+                </span>
+                <Pill
+                  tone={sentimentTone(p.sentiment)}
+                  style={{ fontSize: 10, width: "auto" }}
+                >
+                  {p.sentiment}
+                </Pill>
+                <span
+                  style={{
+                    flex: 1,
+                    fontSize: 12,
+                    fontStyle: "italic",
+                    color: C.text,
+                  }}
+                >
+                  &ldquo;{p.voice}&rdquo;
+                </span>
               </div>
-            );
-          })}
+            ))
+          )}
         </Card>
 
-        <div style={{
-          marginTop: 18, display: "flex", justifyContent: "space-between", alignItems: "center",
-        }}>
+        <div
+          style={{
+            marginTop: 18,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
           <div style={{ fontSize: 12, color: C.textFaint, fontFamily: FM }}>
-            {progress < 100 ? "Analysis in progress…" : "Analysis complete"}
+            {scan.status === "failed"
+              ? "Scan failed — see error logs."
+              : isWorking
+              ? "Analysis in progress…"
+              : "Analysis complete"}
           </div>
           <button
             onClick={() => router.push(`/validator/report/${scanId}`)}
-            disabled={progress < 100}
+            disabled={isWorking}
             style={{
-              background: progress >= 100 ? C.accent : "#e6e2d6",
-              color: progress >= 100 ? "#fff" : C.textFaint,
-              border: "none", borderRadius: 7, padding: "8px 14px",
-              fontSize: 13, fontWeight: 500,
-              cursor: progress >= 100 ? "pointer" : "not-allowed",
+              background: !isWorking ? C.accent : "#e6e2d6",
+              color: !isWorking ? "#fff" : C.textFaint,
+              border: "none",
+              borderRadius: 7,
+              padding: "8px 14px",
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: !isWorking ? "pointer" : "not-allowed",
               fontFamily: "inherit",
             }}
           >

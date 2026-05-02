@@ -11,7 +11,7 @@
 // pending rows.
 
 import { Router, type Router as RouterType } from 'express';
-import { eq, asc, desc, sql } from 'drizzle-orm';
+import { and, eq, asc, desc, sql, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { COHORT_BY_ID } from '@41rpm/shared';
 import { db, schema } from '../db/index.js';
@@ -105,11 +105,17 @@ router.get('/:id/report', async (req, res) => {
   // Live persona completion count — the scan row's
   // personas_completed only gets set at synthesis time, but we want
   // the polling client to see "X of Y personas analyzed" while the
-  // responding step is still inserting rows.
+  // responding step is still inserting rows. Counts non-flagged
+  // rows only, matching the post-synthesis stored semantic.
   const [liveCount] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.scanPersonaResponses)
-    .where(eq(schema.scanPersonaResponses.scanId, id));
+    .where(
+      and(
+        eq(schema.scanPersonaResponses.scanId, id),
+        eq(schema.scanPersonaResponses.isFlagged, false)
+      )
+    );
   const livePersonasCompleted = liveCount?.n ?? 0;
 
   // Composite per-persona score for fit/non-fit ranking. Cheap proxy
@@ -130,6 +136,8 @@ router.get('/:id/report', async (req, res) => {
       taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
       voiceFirstImpression: schema.scanPersonaResponses.voiceFirstImpression,
       voiceBiggestFriction: schema.scanPersonaResponses.voiceBiggestFriction,
+      voiceWouldReturnBecause:
+        schema.scanPersonaResponses.voiceWouldReturnBecause,
       voiceSample: schema.personas.vector,
       displayName: schema.testers.displayName,
       ageGroup: schema.personas.vector,
@@ -143,7 +151,13 @@ router.get('/:id/report', async (req, res) => {
       schema.testers,
       eq(schema.testers.walletAddress, schema.personas.testerAddr)
     )
-    .where(eq(schema.scanPersonaResponses.scanId, id))
+    .where(
+      and(
+        eq(schema.scanPersonaResponses.scanId, id),
+        eq(schema.scanPersonaResponses.isFlagged, false),
+        isNotNull(schema.scanPersonaResponses.happinessScore)
+      )
+    )
     .orderBy(desc(sumExpr))
     .limit(3);
 
@@ -156,6 +170,8 @@ router.get('/:id/report', async (req, res) => {
       taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
       voiceFirstImpression: schema.scanPersonaResponses.voiceFirstImpression,
       voiceBiggestFriction: schema.scanPersonaResponses.voiceBiggestFriction,
+      voiceWouldReturnBecause:
+        schema.scanPersonaResponses.voiceWouldReturnBecause,
       voiceSample: schema.personas.vector,
       displayName: schema.testers.displayName,
       ageGroup: schema.personas.vector,
@@ -169,9 +185,61 @@ router.get('/:id/report', async (req, res) => {
       schema.testers,
       eq(schema.testers.walletAddress, schema.personas.testerAddr)
     )
-    .where(eq(schema.scanPersonaResponses.scanId, id))
+    .where(
+      and(
+        eq(schema.scanPersonaResponses.scanId, id),
+        eq(schema.scanPersonaResponses.isFlagged, false),
+        isNotNull(schema.scanPersonaResponses.happinessScore)
+      )
+    )
     .orderBy(asc(sumExpr))
     .limit(3);
+
+  // Most-recent persona responses for the processing screen feed.
+  // Pulled live so the polling UI shows the latest reactions as the
+  // worker writes them. Capped at 8 — newest first.
+  const recentRows = await db
+    .select({
+      personaId: schema.scanPersonaResponses.personaId,
+      cohortId: schema.scanPersonaResponses.cohortId,
+      voiceFirstImpression: schema.scanPersonaResponses.voiceFirstImpression,
+      voiceBiggestFriction: schema.scanPersonaResponses.voiceBiggestFriction,
+      happiness: schema.scanPersonaResponses.happinessScore,
+      taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
+      voiceSample: schema.personas.vector,
+      createdAt: schema.scanPersonaResponses.createdAt,
+    })
+    .from(schema.scanPersonaResponses)
+    .innerJoin(
+      schema.personas,
+      eq(schema.personas.id, schema.scanPersonaResponses.personaId)
+    )
+    .where(
+      and(
+        eq(schema.scanPersonaResponses.scanId, id),
+        eq(schema.scanPersonaResponses.isFlagged, false),
+        isNotNull(schema.scanPersonaResponses.voiceFirstImpression)
+      )
+    )
+    .orderBy(desc(schema.scanPersonaResponses.createdAt))
+    .limit(8);
+
+  // Per-cohort live completion count for the processing screen's
+  // cohort progress strip. Derived from scanPersonaResponses (not
+  // scanCohortResults) so it updates row-by-row mid-pipeline.
+  const cohortProgressRows = await db
+    .select({
+      cohortId: schema.scanPersonaResponses.cohortId,
+      n: sql<number>`count(*)::int`,
+    })
+    .from(schema.scanPersonaResponses)
+    .where(
+      and(
+        eq(schema.scanPersonaResponses.scanId, id),
+        eq(schema.scanPersonaResponses.isFlagged, false)
+      )
+    )
+    .groupBy(schema.scanPersonaResponses.cohortId);
 
   const completed = scan.status === 'completed';
 
@@ -209,8 +277,8 @@ router.get('/:id/report', async (req, res) => {
         }
       : null,
     cohorts: cohortRows.map(shapeCohort),
-    fit_personas: fitRows.map(shapePersonaCard),
-    non_fit_personas: nonFitRows.map(shapePersonaCard),
+    fit_personas: fitRows.map((r) => shapePersonaCard(r, 'fit')),
+    non_fit_personas: nonFitRows.map((r) => shapePersonaCard(r, 'non_fit')),
     // These three are computed at synthesis time; show them only when
     // the scan completes so partial state never displays misleading
     // pseudo-frictions or formula rows.
@@ -219,53 +287,365 @@ router.get('/:id/report', async (req, res) => {
     formula_rows: completed ? buildFormulaRows(scan, cohortRows) : [],
     dimension_breakdown: completed ? buildDimensionBreakdown(cohortRows) : [],
     kpis: completed ? await buildKpis(scan, cohortRows) : [],
+    // Live progressive fields — populated during scan + after.
+    recent_responses: recentRows.map(shapeRecentResponse),
+    cohort_progress: shapeCohortProgress(cohortProgressRows),
     // Pro tier: AARRR funnel — Mode A only (Mode B is single-audience).
     aarrr: completed && scan.mode === 'A' ? await computeAarrr(id) : null,
   });
 });
 
+// ─── GET /api/scan/:scanId/persona/:personaId ─────────────────────
+// Persona drill-down endpoint — returns the persona's vector +
+// their response in this scan + scan meta. Drives the per-persona
+// detail page. 404 when scan or persona-row absent.
+router.get('/:scanId/persona/:personaId', async (req, res) => {
+  const { scanId, personaId } = req.params;
+  if (!UUID_RE.test(scanId) || !UUID_RE.test(personaId)) {
+    res.status(400).json({ error: 'invalid_id' });
+    return;
+  }
+
+  const [scan] = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(eq(schema.audienceFitScans.id, scanId));
+  if (!scan) {
+    res.status(404).json({ error: 'scan_not_found' });
+    return;
+  }
+
+  const [row] = await db
+    .select({
+      personaId: schema.scanPersonaResponses.personaId,
+      cohortId: schema.scanPersonaResponses.cohortId,
+      happiness: schema.scanPersonaResponses.happinessScore,
+      engagement: schema.scanPersonaResponses.engagementScore,
+      taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
+      retentionD7: schema.scanPersonaResponses.retentionD7,
+      adoption: schema.scanPersonaResponses.adoptionScore,
+      retentionDCurve: schema.scanPersonaResponses.retentionDCurve,
+      rawResponse: schema.scanPersonaResponses.rawResponse,
+      voiceFirstImpression: schema.scanPersonaResponses.voiceFirstImpression,
+      voiceFriction: schema.scanPersonaResponses.voiceFriction,
+      voiceBiggestFriction: schema.scanPersonaResponses.voiceBiggestFriction,
+      voiceWouldReturnBecause:
+        schema.scanPersonaResponses.voiceWouldReturnBecause,
+      isFlagged: schema.scanPersonaResponses.isFlagged,
+      flagReason: schema.scanPersonaResponses.flagReason,
+      personaVector: schema.personas.vector,
+      displayName: schema.testers.displayName,
+      testerAddr: schema.personas.testerAddr,
+    })
+    .from(schema.scanPersonaResponses)
+    .innerJoin(
+      schema.personas,
+      eq(schema.personas.id, schema.scanPersonaResponses.personaId)
+    )
+    .innerJoin(
+      schema.testers,
+      eq(schema.testers.walletAddress, schema.personas.testerAddr)
+    )
+    .where(
+      and(
+        eq(schema.scanPersonaResponses.scanId, scanId),
+        eq(schema.scanPersonaResponses.personaId, personaId)
+      )
+    );
+
+  if (!row) {
+    res.status(404).json({ error: 'persona_response_not_found' });
+    return;
+  }
+
+  res.json(shapePersonaDetailResponse(scan, row));
+});
+
+export function shapePersonaDetailResponse(
+  scan: typeof schema.audienceFitScans.$inferSelect,
+  row: {
+    personaId: string;
+    cohortId: string;
+    happiness: number | null;
+    engagement: number | null;
+    taskSuccess: number | null;
+    retentionD7: number | null;
+    adoption: number | null;
+    retentionDCurve:
+      | { d1: number; d3: number; d7: number; d30: number }
+      | null;
+    rawResponse: unknown;
+    voiceFirstImpression: string | null;
+    voiceFriction: string | null;
+    voiceBiggestFriction: string | null;
+    voiceWouldReturnBecause: string | null;
+    isFlagged: boolean;
+    flagReason: string | null;
+    personaVector: typeof schema.personas.$inferSelect.vector;
+    displayName: string;
+    testerAddr: string;
+  }
+) {
+  const cohort = COHORT_BY_ID[row.cohortId];
+  const ageGroup = row.personaVector.demographics?.age_group ?? 'adult';
+  const age = personaAgeFromGroup(ageGroup, row.personaId);
+
+  // Flatten the persona vector axes the detail screen renders. Keep
+  // names matching the design's VECTOR_AXES list — the screen pairs
+  // them with progress bars.
+  const v = row.personaVector;
+  const vectorAxes = [
+    { k: 'tech_literacy', v: v.demographics?.tech_literacy ?? null },
+    { k: 'crypto_experience', v: v.demographics?.crypto_experience ?? null },
+    { k: 'patience_level', v: v.demographics?.patience_level ?? null },
+    {
+      k: 'mobile_first',
+      v: v.ux_preferences?.mobile_first ? 1 : 0,
+    },
+    { k: 'design_sensitivity', v: v.demographics?.design_sensitivity ?? null },
+    { k: 'expertise_defi', v: v.expertise?.defi ?? null },
+  ].filter((a): a is { k: string; v: number } => a.v != null);
+
+  const raw = row.rawResponse as
+    | {
+        sus_responses?: number[];
+        sus_raw_score?: number;
+        signup_likelihood?: number;
+        completion_likelihood?: number;
+      }
+    | null;
+
+  return {
+    scan: {
+      id: scan.id,
+      target_url: scan.targetUrl,
+      mode: scan.mode,
+      status: scan.status,
+    },
+    persona: {
+      id: row.personaId,
+      display_name: personaDisplayName(
+        row.displayName ?? 'Synthetic',
+        cohort?.label ?? row.cohortId,
+        row.personaId
+      ),
+      tester_addr: row.testerAddr,
+      age,
+      age_group: ageGroup,
+      cohort_id: row.cohortId,
+      cohort_label: cohort?.label ?? row.cohortId,
+      voice_sample: v.voice_sample ?? null,
+      vector_axes: vectorAxes,
+    },
+    response: {
+      happiness: row.happiness,
+      engagement: row.engagement,
+      task_success: row.taskSuccess,
+      retention_d7: row.retentionD7,
+      adoption: row.adoption,
+      retention_d_curve: row.retentionDCurve,
+      sus_responses: raw?.sus_responses ?? null,
+      sus_raw_score: raw?.sus_raw_score ?? null,
+      signup_likelihood: raw?.signup_likelihood ?? null,
+      completion_likelihood: raw?.completion_likelihood ?? null,
+      voice_first_impression: row.voiceFirstImpression,
+      voice_friction: row.voiceFriction,
+      voice_biggest_friction: row.voiceBiggestFriction,
+      voice_would_return_because: row.voiceWouldReturnBecause,
+      is_flagged: row.isFlagged,
+      flag_reason: row.flagReason,
+    },
+  };
+}
+
+// ─── Name helpers ────────────────────────────────────────────────
+// First × last pools combine into 30 × 30 = 900 unique pairs, vastly
+// reducing collisions inside one report (a 6-card render hits a
+// duplicate ~2% of the time vs ~30% with a 50-pair pool). Used only
+// to override the synthetic seed displayNames ("Crypto Native #9");
+// real tester wallets keep their stored displayName.
+const FIRST_NAMES: readonly string[] = [
+  'Alex', 'Sora', 'Mateo', 'Ines', 'Yuki', 'Noah', 'Aisha', 'Liam',
+  'Ravi', 'Eun-jin', 'Maya', 'Chen', 'Kofi', 'Priya', 'Lukas',
+  'Sara', 'Jakub', 'Hana', 'Diego', 'Claire', 'Emil', 'Layla',
+  'Tom', 'Mei', 'Ananya', 'Felipe', 'Anya', 'Jonas', 'Yara', 'Wei',
+];
+const LAST_NAMES: readonly string[] = [
+  'Park', 'Tanaka', 'García', 'Almeida', 'Sato', 'Bauer', 'Khan',
+  'O’Brien', 'Mehta', 'Lee', 'Cohen', 'Wei', 'Mensah', 'Iyer',
+  'Schmidt', 'Lindberg', 'Nowak', 'Rojas', 'Dubois', 'Andersen',
+  'Hassan', 'Becker', 'Lin', 'Rao', 'Souza', 'Volkov', 'Nielsen',
+  'Saab', 'Chen', 'Romano',
+];
+
+// Detect synthetic seed names like "Crypto Native #9" so we know when
+// to substitute. Real tester displayNames ("Alice Chen") pass through.
+function isSyntheticSeedName(displayName: string, roleLabel: string): boolean {
+  return displayName.toLowerCase().startsWith(roleLabel.toLowerCase() + ' #');
+}
+
+export function personaDisplayName(
+  rawDisplayName: string,
+  roleLabel: string,
+  personaId: string
+): string {
+  if (!isSyntheticSeedName(rawDisplayName, roleLabel)) return rawDisplayName;
+  const h = hash32(personaId);
+  // Two independent indices from the same hash via different bit
+  // shifts so the first/last picks are uncorrelated.
+  const first = FIRST_NAMES[h % FIRST_NAMES.length]!;
+  const last = LAST_NAMES[(h >>> 8) % LAST_NAMES.length]!;
+  return `${first} ${last}`;
+}
+
+// ─── Age helpers ─────────────────────────────────────────────────
+// FNV-1a 32-bit. Stable across processes, no crypto cost. Used only
+// for deterministic display jitter — never for security/randomness.
+function hash32(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+// Map age_group bucket → realistic age, deterministically jittered
+// from the personaId so the 14 personas inside one cohort don't all
+// display the same age (which read as obviously synthetic).
+export function personaAgeFromGroup(
+  ageGroup: string | undefined,
+  personaId: string
+): number {
+  const h = hash32(personaId);
+  switch (ageGroup) {
+    case 'teen':
+      return 13 + (h % 7); // 13-19
+    case 'young_adult':
+      return 22 + (h % 9); // 22-30
+    case 'senior':
+      return 50 + (h % 23); // 50-72
+    default:
+      return 30 + (h % 15); // 30-44 (adult / unknown)
+  }
+}
+
 // ─── Per-persona card shaping ─────────────────────────────────────
-function shapePersonaCard(r: {
-  personaId: string;
-  cohortId: string;
-  happiness: number | null;
-  engagement: number | null;
-  taskSuccess: number | null;
-  voiceFirstImpression?: string | null;
-  voiceBiggestFriction?: string | null;
-  voiceSample: typeof schema.personas.$inferSelect.vector;
-  displayName: string;
-}) {
-  const score = Math.round(
-    ((r.happiness ?? 0) + (r.engagement ?? 0) + (r.taskSuccess ?? 0)) / 3
+export function shapePersonaCard(
+  r: {
+    personaId: string;
+    cohortId: string;
+    happiness: number | null;
+    engagement: number | null;
+    taskSuccess: number | null;
+    voiceFirstImpression?: string | null;
+    voiceBiggestFriction?: string | null;
+    voiceWouldReturnBecause?: string | null;
+    voiceSample: typeof schema.personas.$inferSelect.vector;
+    displayName: string;
+  },
+  intent: 'fit' | 'non_fit' = 'fit'
+) {
+  // Average the dimensions we have. If all three are null (response
+  // is mid-flight or was filtered upstream), return null so the UI
+  // can render a placeholder rather than a misleading 0.
+  const present = [r.happiness, r.engagement, r.taskSuccess].filter(
+    (v): v is number => v != null
   );
+  const score =
+    present.length === 0
+      ? null
+      : Math.round(present.reduce((a, b) => a + b, 0) / present.length);
   const cohort = COHORT_BY_ID[r.cohortId];
   const ageGroup = r.voiceSample.demographics?.age_group;
-  const age =
-    ageGroup === 'teen'
-      ? 16
-      : ageGroup === 'young_adult'
-      ? 25
-      : ageGroup === 'senior'
-      ? 58
-      : 35;
-  // Prefer the LLM-generated quote when available (real Phase 1C
-  // scans). Falls back to the persona's seed voice_sample for
-  // simulator runs or rows from before the LLM pipeline shipped.
+  const age = personaAgeFromGroup(ageGroup, r.personaId);
+  // Prefer the LLM-generated quote that matches the card's intent —
+  // fit cards get the persona's "would_return_because" reason (positive
+  // tone, matches the high score), non-fit cards get "biggest_friction"
+  // (the why-it-failed). Both fall back to first_impression then the
+  // persona's static voice_sample so simulator/legacy rows still render.
   const quote =
-    r.voiceFirstImpression ||
-    r.voiceBiggestFriction ||
-    r.voiceSample.voice_sample ||
-    '';
+    intent === 'fit'
+      ? r.voiceWouldReturnBecause ||
+        r.voiceFirstImpression ||
+        r.voiceBiggestFriction ||
+        r.voiceSample.voice_sample ||
+        ''
+      : r.voiceBiggestFriction ||
+        r.voiceFirstImpression ||
+        r.voiceWouldReturnBecause ||
+        r.voiceSample.voice_sample ||
+        '';
+  // Dedupe tags — cohort_id (e.g. "senior") can collide with
+  // age_group bucket of the same name.
+  const tagSet = new Set([r.cohortId, ageGroup ?? 'unknown']);
+  const role = cohort?.label ?? r.cohortId;
   return {
     id: r.personaId,
-    name: r.displayName ?? 'Synthetic',
+    name: personaDisplayName(r.displayName ?? 'Synthetic', role, r.personaId),
     age,
-    role: cohort?.label ?? r.cohortId,
+    role,
     score,
     quote,
-    tags: [r.cohortId, ageGroup ?? 'unknown'],
+    tags: Array.from(tagSet),
   };
+}
+
+// ─── Live processing-feed shaping ────────────────────────────────
+// Sentiment classifier — bands the per-persona reaction into
+// positive | mixed | friction so the processing feed can paint a
+// coloured tag without having to re-render numeric scores.
+export function classifySentiment(
+  happiness: number | null,
+  taskSuccess: number | null
+): 'positive' | 'mixed' | 'friction' {
+  const h = happiness ?? 50;
+  const t = taskSuccess ?? 50;
+  const avg = (h + t) / 2;
+  if (avg >= 65) return 'positive';
+  if (avg >= 40) return 'mixed';
+  return 'friction';
+}
+
+export function shapeRecentResponse(r: {
+  personaId: string;
+  cohortId: string;
+  voiceFirstImpression: string | null;
+  voiceBiggestFriction: string | null;
+  happiness: number | null;
+  taskSuccess: number | null;
+  voiceSample: typeof schema.personas.$inferSelect.vector;
+  createdAt: Date;
+}) {
+  const cohort = COHORT_BY_ID[r.cohortId];
+  const ageGroup = r.voiceSample.demographics?.age_group ?? 'adult';
+  return {
+    persona_id: r.personaId,
+    cohort_id: r.cohortId,
+    cohort_label: cohort?.label ?? r.cohortId,
+    age_group: ageGroup,
+    voice: r.voiceFirstImpression ?? r.voiceBiggestFriction ?? '',
+    sentiment: classifySentiment(r.happiness, r.taskSuccess),
+    created_at: r.createdAt.toISOString(),
+  };
+}
+
+export function shapeCohortProgress(rows: Array<{ cohortId: string; n: number }>) {
+  // Target = 14 personas per standard cohort (Mode A). Mode B uses a
+  // single custom_audience row whose target floats with how many
+  // matched the selector — we report the live count as both n and
+  // target so the bar reads "X / X" once any rows arrive. This
+  // matches the worker's own targeting (selectPersonasForAudience).
+  return rows.map((r) => {
+    const cohort = COHORT_BY_ID[r.cohortId];
+    const target = cohort?.target_n ?? r.n;
+    return {
+      cohort_id: r.cohortId,
+      cohort_label: cohort?.label ?? r.cohortId,
+      n_completed: r.n,
+      n_target: target,
+    };
+  });
 }
 
 // ─── Synthesis-tied builders (only meaningful when status='completed') ──
@@ -377,6 +757,57 @@ async function buildKpis(
   scan: typeof schema.audienceFitScans.$inferSelect,
   rows: Array<typeof schema.scanCohortResults.$inferSelect>
 ) {
+  // Mode B is a single-audience verdict scan — best == worst == median
+  // by construction. Showing those as 3 different cards is misleading.
+  // Surface verdict + audience definition instead.
+  if (scan.mode === 'B') {
+    // Floor to 1 decimal so the Audience fit value reads consistently
+    // with the verdict band next to it (e.g. 39.9 reads as <40 → FAIL,
+    // not 40.0 reads as <40 — toFixed/round on 39.99 produced 40.0).
+    const rawScore = scan.audienceFitScore ?? 0;
+    const score = Math.floor(rawScore * 10) / 10;
+    const verdict = scan.modeBVerdict ?? 'pending';
+    const audience =
+      scan.targetAudienceText && scan.targetAudienceText.length > 36
+        ? `${scan.targetAudienceText.slice(0, 36)}…`
+        : scan.targetAudienceText ?? '—';
+    const verdictTone =
+      verdict === 'pass' ? 'ok' : verdict === 'conditional' ? 'warn' : 'bad';
+    return [
+      {
+        l: 'Audience fit',
+        v: score.toFixed(1),
+        sub: scan.targetAudienceText
+          ? `${rows[0]?.nCompleted ?? 0} matching personas`
+          : '—',
+        tone: rawScore >= 60 ? 'ok' : rawScore >= 40 ? 'warn' : 'bad',
+      },
+      {
+        l: 'Verdict',
+        v: verdict.toUpperCase(),
+        sub:
+          verdict === 'pass'
+            ? '≥60'
+            : verdict === 'conditional'
+            ? '40-60'
+            : '<40',
+        tone: verdictTone,
+      },
+      {
+        l: 'Personas analyzed',
+        v: String(scan.personasCompleted),
+        sub: `${scan.personasFlagged ?? 0} flagged`,
+        tone: 'faint',
+      },
+      {
+        l: 'Audience definition',
+        v: audience,
+        sub: scan.category ? `category: ${scan.category}` : '—',
+        tone: 'faint',
+      },
+    ];
+  }
+
   const best = rows.find((c) => c.cohortId === scan.bestCohortId);
   const worst = rows.find((c) => c.cohortId === scan.worstCohortId);
 

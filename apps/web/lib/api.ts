@@ -247,9 +247,26 @@ export type ScanPersonaCard = {
   name: string;
   age: number;
   role: string;
-  score: number;
+  score: number | null;
   quote: string;
   tags: string[];
+};
+
+export type ScanRecentResponse = {
+  persona_id: string;
+  cohort_id: string;
+  cohort_label: string;
+  age_group: string;
+  voice: string;
+  sentiment: 'positive' | 'mixed' | 'friction';
+  created_at: string;
+};
+
+export type ScanCohortProgress = {
+  cohort_id: string;
+  cohort_label: string;
+  n_completed: number;
+  n_target: number;
 };
 
 export type ScanFriction = {
@@ -317,6 +334,46 @@ export type ScanReport = {
       threshold: string;
     }[];
   } | null;
+  recent_responses: ScanRecentResponse[];
+  cohort_progress: ScanCohortProgress[];
+};
+
+export type ScanPersonaDetail = {
+  scan: {
+    id: string;
+    target_url: string;
+    mode: 'A' | 'B';
+    status: string;
+  };
+  persona: {
+    id: string;
+    display_name: string;
+    tester_addr: string;
+    age: number;
+    age_group: string;
+    cohort_id: string;
+    cohort_label: string;
+    voice_sample: string | null;
+    vector_axes: { k: string; v: number }[];
+  };
+  response: {
+    happiness: number | null;
+    engagement: number | null;
+    task_success: number | null;
+    retention_d7: number | null;
+    adoption: number | null;
+    retention_d_curve: { d1: number; d3: number; d7: number; d30: number } | null;
+    sus_responses: number[] | null;
+    sus_raw_score: number | null;
+    signup_likelihood: number | null;
+    completion_likelihood: number | null;
+    voice_first_impression: string | null;
+    voice_friction: string | null;
+    voice_biggest_friction: string | null;
+    voice_would_return_because: string | null;
+    is_flagged: boolean;
+    flag_reason: string | null;
+  };
 };
 
 export const scanApi = {
@@ -332,6 +389,9 @@ export const scanApi = {
     }),
 
   getReport: (id: string) => request<ScanReport>(`/api/scan/${id}/report`),
+
+  getPersona: (scanId: string, personaId: string) =>
+    request<ScanPersonaDetail>(`/api/scan/${scanId}/persona/${personaId}`),
 };
 
 // ─── Calibration API (Phase 2-C-1) ─────────────────────────────

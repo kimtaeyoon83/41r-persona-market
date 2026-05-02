@@ -45,6 +45,7 @@ import {
 } from './dimensions/llm.js';
 import { clusterFrictions } from './dimensions/frictions.js';
 import { captureSite } from './site_capture.js';
+import { classifySite } from './site_classifier.js';
 
 const log = logger.child({ service: 'scan_pipeline' });
 
@@ -179,6 +180,33 @@ async function runScan(scanId: string): Promise<void> {
         { scanId, urls: screenshotUrls.length, fromCache: cap.fromCache },
         'site capture complete'
       );
+
+      // Classify the captured page once, persist immediately so the
+      // report header shows real category + pitch even while the
+      // persona-response loop is still running. Null result leaves
+      // the row's existing nulls — the report card hides empty pitch
+      // and the benchmark card hides when category is null.
+      const cls = await classifySite(targetUrl, screenshotUrls);
+      if (cls) {
+        await db
+          .update(schema.audienceFitScans)
+          .set({
+            category: cls.category,
+            categoryConfidence: cls.category_confidence,
+            oneLinePitch: cls.one_line_pitch,
+          })
+          .where(eq(schema.audienceFitScans.id, scanId));
+        // Refresh local copy so downstream Mode A/B branches see the
+        // values they just persisted (pipeline reads `scan` from the
+        // top-level query, never re-fetched).
+        scan.category = cls.category;
+        scan.categoryConfidence = cls.category_confidence;
+        scan.oneLinePitch = cls.one_line_pitch;
+        log.info(
+          { scanId, category: cls.category, conf: cls.category_confidence },
+          'site classified',
+        );
+      }
     } catch (err) {
       log.warn(
         { scanId, err: err instanceof Error ? err.message : 'unknown' },
@@ -339,8 +367,11 @@ async function runScan(scanId: string): Promise<void> {
       scores: sim.scores,
       flagged: sim.is_flagged,
     });
-    totalCompleted += 1;
+    // personas_completed = produced a VALID (non-flagged) response.
+    // Flagged-but-parseable rows count toward personas_flagged only,
+    // so the invariant attempted = completed + flagged holds.
     if (sim.is_flagged) totalFlagged += 1;
+    else totalCompleted += 1;
     totalCostUsd += costUsd;
 
     await db.insert(schema.scanPersonaResponses).values({
@@ -508,11 +539,9 @@ async function runScan(scanId: string): Promise<void> {
       personasCompleted: totalCompleted,
       personasFlagged: totalFlagged,
       totalCostUsd: totalCostUsd,
-      // Auto-detect category not implemented in Phase 1B — Phase 1C
-      // adds a Haiku call during the 'capturing' step.
-      category: 'DeFi',
-      categoryConfidence: 0.5,
-      oneLinePitch: null,
+      // category/categoryConfidence/oneLinePitch are written during
+      // the 'capturing' step by classifySite() and intentionally NOT
+      // overwritten here — that earlier write is the source of truth.
       weightsVersion: 'v1.0',
       completedAt: new Date(),
     })
@@ -661,8 +690,9 @@ async function runModeBPipeline(args: {
     }
 
     bucket.push({ persona, scores: sim.scores, flagged: sim.is_flagged });
-    completed += 1;
+    // Same invariant as Mode A — completed counts only non-flagged.
     if (sim.is_flagged) flagged += 1;
+    else completed += 1;
     totalCostUsd += costUsd;
 
     await db.insert(schema.scanPersonaResponses).values({

@@ -636,7 +636,7 @@ export type PersonaCardData = {
   name: string;
   age: number;
   role: string;
-  score: number;
+  score: number | null;
   quote: string;
   tags: string[];
 };
@@ -645,10 +645,12 @@ export function PersonaBoard({
   tone,
   label,
   personas,
+  scanId,
 }: {
   tone: "ok" | "bad";
   label: string;
   personas: PersonaCardData[];
+  scanId?: string;
 }) {
   const cfg =
     tone === "ok"
@@ -690,7 +692,11 @@ export function PersonaBoard({
         {personas.map((p) => (
           <Link
             key={p.id}
-            href={`/validator/persona/${p.id}`}
+            href={
+              scanId
+                ? `/validator/persona/${p.id}?scan=${scanId}`
+                : `/validator/persona/${p.id}`
+            }
             style={{
               padding: 12,
               background: "#fff",
@@ -729,7 +735,14 @@ export function PersonaBoard({
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  {p.name}, {p.age}
+                  {/* Strip the role prefix from the displayed name so
+                      seed personas read "#9, 25 / Crypto Native" rather
+                      than "Crypto Native #9, 25 / Crypto Native". Real
+                      names ("Alice Chen") are kept intact. */}
+                  {p.name.toLowerCase().startsWith(p.role.toLowerCase() + " ")
+                    ? p.name.slice(p.role.length + 1)
+                    : p.name}
+                  , {p.age}
                 </div>
                 <div style={{ fontSize: 11, color: C.textDim }}>{p.role}</div>
               </div>
@@ -743,7 +756,7 @@ export function PersonaBoard({
                     fontFamily: FM,
                   }}
                 >
-                  {p.score}
+                  {p.score ?? "—"}
                 </div>
                 <div
                   style={{

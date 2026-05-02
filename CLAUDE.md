@@ -264,6 +264,45 @@ queue_dedup.ts::selectQueueableJobs(matches, modes, alreadyCovered)`
 folds DB-covered + in-batch dedup into one pass, exported so the
 6-test unit suite can lock the contract without spinning up Express.
 
+### Browser session replay (`_session_video` sentinel, 2026-04-27)
+
+Every stagehand_hybrid run records a low-res webm of the actual
+browser session and uploads it to Cloudflare R2. The link is
+persisted as a `_session_video` sentinel inside
+`test_reports.questionnaireAnswers` (same conditional pattern as
+`_quirks` / `_quality_breakdown` / `_session_error`). UI block on
+`/report/[id]` parses it and renders an HTML5 `<video>` player.
+
+Pipeline:
+
+```
+Stagehand (chrome-launcher CDP)            apps/api/src/services/stagehand_hybrid.ts
+  └─ Page.startScreencast (jpeg, 5fps)     mainSession TS bypass — Stagehand v3 has no
+  └─ Page.screencastFrame events           recordVideo option in localBrowserLaunchOptions
+  └─ write JPEGs → /tmp/stagehand-frames/<sid>/
+ffmpeg                                     apps/api/src/services/video.ts
+  └─ libvpx 854×480 @ 5fps, 200kbit
+  └─ /tmp/stagehand-videos/<sid>.webm
+R2 upload                                  apps/api/src/routes/autotest.ts
+  └─ key: replays/<sid>.webm  (no prefix; matches the local filename)
+  └─ url: https://pub-<bucket>.r2.dev/replays/<sid>.webm
+  └─ persisted as _session_video {url, sizeBytes, durationSec, width, height, fps}
+```
+
+Local dev fallback: when R2 isn't configured, `services/video.ts`
+returns the bucket key as the URL (`replays/<sid>.webm`). The web UI
+prefixes non-`http` URLs with `API_BASE`, and `index.ts` mounts
+`app.use('/replays', express.static('/tmp/stagehand-videos'))` in the
+non-production block so the local file serves directly. The
+post-upload `unlinkSync` in `routes/autotest.ts` is **skipped when
+the URL doesn't start with `http`** — required so the local file
+stays around for serving.
+
+Production needs `ffmpeg` in the runtime image — it's in the
+`apt-get install` line of `apps/api/Dockerfile`. `isFfmpegAvailable()`
+in `services/video.ts` caches the probe; restart the API after
+installing ffmpeg locally or the cached `false` will skip transcoding.
+
 ## Landing Dashboard (`/` + `/api/dashboard`)
 
 One-shot aggregate that powers every live widget on the Home page.
@@ -348,6 +387,77 @@ and `/:id/diagnosis` handlers (the deleted lines are in the
 - Cohort key defaults to `crypto_experience` (4 buckets). Matching personas
   to humans within same demographic reveals "persona ≈ human at 100% in
   novice cohort, diverges in expert cohort" — the real investor story.
+
+## Company Test Dashboard (`/company/test/[testId]`, 2026-04-28)
+
+8-section spec built on top of `/api/test/:id` aggregates. Sections
+in render order — keep this contract; the spec was the result of an
+explicit design discussion ("8섹션 spec") and reordering breaks the
+intended company-facing narrative:
+
+| § | Section | Source | Notes |
+|---|---|---|---|
+| 1 | Hero KPIs (4 cards) | `/api/test/:id/insights` | Personas Tested · Pain Points (count) · Avg Quality · Completion Rate |
+| 2 | Why Users Drop (chat bubbles) | aggregated voice samples | Top pain points as direct persona quotes — no analysis text |
+| 3 | Persona Insights (3 cards) | per-persona breakdown | Quality + completion + freeText snippet, max 3 |
+| 4 | Funnel | `/api/test/:id/funnel` | Auto-extracted (see below). Cards per step + furthest_step distribution |
+| 5 | Advanced Settings panel | `PATCH /api/test/:id/settings` | Inputs: `compare_with_test_id`, `monthly_visitors`, `conversion_value`, `current_conversion_rate` |
+| 6 | A/B Comparison | `compareWithTestId` | Side-by-side metrics vs another test ID. Hidden when not set |
+| 7 | Revenue Impact | `monthly_visitors × conversion_rate × conversion_value` | Hidden when inputs not set |
+| 8 | Raw Data accordion | `/api/test/:id/insights` | Unfiltered aggregate JSON for debugging |
+
+Only the Funnel and Advanced Settings inputs introduce new state.
+Everything else is a different shape over data the diagnosis
+aggregator already produces — do not re-fetch the raw reports per
+card.
+
+### Funnel auto-extraction (`services/scoring/funnel.ts`, 2026-04-28)
+
+Funnel is **NOT** company-input — it's auto-extracted from session
+data via Haiku per-session + clustering, mirroring the diagnosis
+pain-point pipeline. The user explicitly pushed back on the
+"company fills in funnel steps" UX ("Funnel은 자동으로 할 수 있는거
+아니야?"); do not regress to input-driven.
+
+Pipeline:
+
+1. `extractFurthestStep(report)` — single Haiku call per session,
+   given the persona's checklist + scenario log, returns the farthest
+   step the user got to in human-readable text (e.g. "스왑 확인 모달",
+   "트랜잭션 확인").
+2. `clusterFunnelSteps(extractions)` — single Haiku call collapses
+   semantic duplicates ("스왑 확인 모달" + "swap confirmation modal"
+   → one canonical step). Identity-map fallback on LLM failure.
+3. `buildFunnelFromExtractions()` — pure aggregator, returns
+   `{steps[], total, distribution}`.
+4. `generateFunnelForTest(testId)` — top-level orchestrator, persists
+   to `tests.funnelJson` + `funnelGeneratedAt` + `funnelReportCount`.
+
+Endpoints:
+- `GET /api/test/:id/funnel` — cached read; auto-regen when stale
+  (report count changed since last generation).
+- `POST /api/test/:id/funnel/regenerate` — explicit refresh
+  (rate-limited).
+
+### New endpoints + schema columns (2026-04-28)
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/test/:id/insights` | GET | Slim aggregator wrapping `aggregateForDiagnosis` for dashboard reads |
+| `/api/test/:id/funnel` | GET | Cached funnel; auto-regen on stale |
+| `/api/test/:id/funnel/regenerate` | POST | Force refresh (rate-limited) |
+| `/api/test/:id/settings` | PATCH | Update `compareWithTestId` / `monthlyVisitors` / `conversionValue` / `currentConversionRate` (signed request + `updateTestSettingsBodySchema`) |
+
+New `tests` table columns (drizzle migrations 0003 + 0004):
+- `funnelJson jsonb` — cached funnel payload
+- `funnelGeneratedAt timestamptz`
+- `funnelReportCount int` — staleness check
+- `compareWithTestId uuid` — A/B Comparison target
+- `monthlyVisitors int`, `conversionValue numeric`, `currentConversionRate numeric` — Revenue Impact inputs
+
+Mirror these in `apps/web/lib/api.ts`: `getInsights`, `getFunnel`,
+`regenerateFunnel`, `updateSettings` methods. The web UI only ever
+reads through these.
 
 ## Diagnosis validation pipeline (`services/scoring/diagnosis.ts`)
 
@@ -682,6 +792,38 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   personas sharing one testerAddr, and inlining the loop loses the
   in-batch dedup that prevents the wasted-compute symptom (full
   run + scoring → unique-constraint throw on insert).
+- Mutate / unset `DEV_TEST_KEY` while a stagehand chain is in flight.
+  `routes/dev.ts` runs personas sequentially via in-process
+  `chain.then()`; setting or removing the env var triggers a Railway
+  redeploy that kills the current process and drops every queued
+  persona's run on the floor. Workflow: poll `/api/dev/snapshot/:id`
+  until `reports_by_mode.stagehand_hybrid` reaches the expected count
+  before deleting the key.
+- Assume `enable_auto_test=true` (or `/api/dev/autotest/trigger`)
+  produces a final diagnosis report. The autotest queue lands the
+  raw reports only — `diagnosisMd` stays null until you explicitly
+  call `POST /api/dev/diagnosis/generate` (or the signed
+  `POST /api/test/:id/diagnosis`). The aitmpl ee2ad897 walkthrough
+  hit this gap; if a UX flow needs a diagnosis at the end, chain the
+  call yourself.
+- Reorder or hide sections in the Company Test Dashboard
+  (`/company/test/[id]`) without explicit need. The 8-section spec
+  (Hero KPIs → Why Users Drop → Persona Insights → Funnel → Advanced
+  Settings → A/B Comparison → Revenue Impact → Raw Data) was an
+  explicit design decision; A/B and Revenue panels conditionally hide
+  when their inputs are unset, but the others stay in order. New
+  metrics belong inside an existing section (or as a new one), not
+  shuffled in front.
+- Reintroduce input-driven funnel UX. Funnel steps are
+  auto-extracted by Haiku from session data
+  (`services/scoring/funnel.ts`); the user explicitly rejected the
+  "company fills in funnel steps" flow ("Funnel은 자동으로 할 수 있는거
+  아니야?"). If the LLM extraction is wrong, fix the prompt or add a
+  manual override field, but do not make manual the default path.
+- Polling for non-404 responses with a body grep that includes
+  `error` as one of the alternations — `{"error":"Not found"}` matches
+  and the loop exits early. Use the HTTP status code (`curl -o /dev/null
+  -w "%{http_code}"`) when waiting for a Railway redeploy.
 
 ## Dev harness (`/api/dev/*`)
 
@@ -714,6 +856,48 @@ Routes:
 Key: sent via `x-dev-key` header on every call. The sentinel `204`
 test-count + `diagnosis.test.ts` verify the router is gated when the
 env var is absent.
+
+### End-to-end run via dev harness (canonical workflow)
+
+When kicking off a full test on prod for verification, this is the
+sequence that worked for the aitmpl ee2ad897 walkthrough — keep it
+in mind as the reference flow:
+
+```bash
+# 1. Set temporary key + wait for redeploy
+DEV_KEY=$(openssl rand -hex 16)
+railway variable set "DEV_TEST_KEY=$DEV_KEY" --service api
+until [ "$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST https://api.../api/dev/tester \
+    -H "x-dev-key: $DEV_KEY" -d '{}')" = "200" ]; do sleep 8; done
+
+# 2. Register test with auto-trigger (returns test_id, queued personas)
+curl -X POST .../api/dev/test -H "x-dev-key: $DEV_KEY" \
+    --max-time 180 \
+    -d '{"target_url":"...","requirements":"...","enable_auto_test":true}'
+
+# 3. Poll until expected stagehand_hybrid count lands
+#    (3 personas → ~15-30 min total wall time, sequential chain)
+until [ "$(curl ... | jq '.reports_by_mode.stagehand_hybrid')" -ge "3" ]; do
+    sleep 60
+done
+
+# 4. Verify R2 video URLs (per report, parse _session_video sentinel)
+# 5. Generate diagnosis EXPLICITLY (autotest queue does not chain it)
+curl -X POST .../api/dev/diagnosis/generate -H "x-dev-key: $DEV_KEY" \
+    -d '{"test_id":"..."}'
+
+# 6. Remove key + verify 404
+railway variable delete DEV_TEST_KEY --service api
+until [ "$(curl ... -o /dev/null -w "%{http_code}")" = "404" ]; do sleep 8; done
+```
+
+Two quirks worth memorizing:
+- Step 3's wall time is ~5-10 min per persona because the
+  stagehand_hybrid chain is sequential (text mode runs in parallel,
+  so its 3 reports land in the first ~3 min).
+- Step 5 is what's missing if a UX flow shows reports but the
+  diagnosis tab is empty. The "최종리포트가 없는데" failure case.
 
 ## Investor Dashboard Narrative
 
