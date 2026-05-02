@@ -250,6 +250,7 @@ export type ScanPersonaCard = {
   score: number | null;
   quote: string;
   tags: string[];
+  is_synthetic: boolean;
 };
 
 export type ScanRecentResponse = {
@@ -382,6 +383,9 @@ export const scanApi = {
     mode?: 'A' | 'B';
     target_audience_text?: string;
     hypothesis?: string;
+    /** Mode A only — restrict the analysis to a subset of the 8
+     *  STANDARD_COHORTS by id. Omit / empty to run all 8. */
+    target_cohorts?: string[];
   }) =>
     request<{ scanId: string; status: string }>('/api/scan', {
       method: 'POST',

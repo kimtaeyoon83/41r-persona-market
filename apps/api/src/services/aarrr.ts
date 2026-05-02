@@ -47,18 +47,20 @@ const THRESHOLDS = {
   revenue: '+ adoption ≥ 65',
 } as const;
 
-export async function computeAarrr(scanId: string): Promise<AarrrFunnel | null> {
-  const rows = await db
-    .select({
-      isFlagged: schema.scanPersonaResponses.isFlagged,
-      happiness: schema.scanPersonaResponses.happinessScore,
-      taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
-      adoption: schema.scanPersonaResponses.adoptionScore,
-      retentionD7: schema.scanPersonaResponses.retentionD7,
-    })
-    .from(schema.scanPersonaResponses)
-    .where(eq(schema.scanPersonaResponses.scanId, scanId));
+export type AarrrInputRow = {
+  isFlagged: boolean;
+  happiness: number | null;
+  taskSuccess: number | null;
+  adoption: number | null;
+  retentionD7: number | null;
+};
 
+// Pure compute — exported for unit tests so the cumulative semantics
+// + threshold boundaries can be locked without spinning up the DB.
+// computeAarrr() is a thin wrapper that just adds the DB read.
+export function computeAarrrFromRows(
+  rows: readonly AarrrInputRow[],
+): AarrrFunnel | null {
   const valid = rows.filter((r) => !r.isFlagged);
   const total = valid.length;
   if (total === 0) return null;
@@ -118,4 +120,20 @@ export async function computeAarrr(scanId: string): Promise<AarrrFunnel | null> 
   ];
 
   return { stages, total_personas: total };
+}
+
+// Thin DB → pure-compute wrapper. The route handler calls this; the
+// business rules are tested via computeAarrrFromRows above.
+export async function computeAarrr(scanId: string): Promise<AarrrFunnel | null> {
+  const rows = await db
+    .select({
+      isFlagged: schema.scanPersonaResponses.isFlagged,
+      happiness: schema.scanPersonaResponses.happinessScore,
+      taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
+      adoption: schema.scanPersonaResponses.adoptionScore,
+      retentionD7: schema.scanPersonaResponses.retentionD7,
+    })
+    .from(schema.scanPersonaResponses)
+    .where(eq(schema.scanPersonaResponses.scanId, scanId));
+  return computeAarrrFromRows(rows);
 }

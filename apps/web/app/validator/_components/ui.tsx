@@ -639,6 +639,7 @@ export type PersonaCardData = {
   score: number | null;
   quote: string;
   tags: string[];
+  is_synthetic: boolean;
 };
 
 export function PersonaBoard({
@@ -734,15 +735,45 @@ export function PersonaBoard({
                 {p.name.split(" ")[0]![0]}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  {/* Strip the role prefix from the displayed name so
-                      seed personas read "#9, 25 / Crypto Native" rather
-                      than "Crypto Native #9, 25 / Crypto Native". Real
-                      names ("Alice Chen") are kept intact. */}
-                  {p.name.toLowerCase().startsWith(p.role.toLowerCase() + " ")
-                    ? p.name.slice(p.role.length + 1)
-                    : p.name}
-                  , {p.age}
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: 6,
+                  }}
+                >
+                  <span>
+                    {/* Strip the role prefix from the displayed name so
+                        seed personas read "#9, 25 / Crypto Native" rather
+                        than "Crypto Native #9, 25 / Crypto Native". Real
+                        names ("Alice Chen") are kept intact. */}
+                    {p.name
+                      .toLowerCase()
+                      .startsWith(p.role.toLowerCase() + " ")
+                      ? p.name.slice(p.role.length + 1)
+                      : p.name}
+                    , {p.age}
+                  </span>
+                  {p.is_synthetic && (
+                    <span
+                      title="Synthetic AI persona — not a real user"
+                      style={{
+                        fontSize: 9,
+                        fontFamily: FM,
+                        fontWeight: 500,
+                        color: C.textFaint,
+                        background: "#f3f0e8",
+                        padding: "1px 5px",
+                        borderRadius: 3,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                      }}
+                    >
+                      synth
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontSize: 11, color: C.textDim }}>{p.role}</div>
               </div>

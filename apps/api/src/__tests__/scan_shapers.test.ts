@@ -11,6 +11,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   classifySentiment,
+  isSyntheticSeedName,
+  personaAgeFromGroup,
+  personaDisplayName,
   shapeCohortProgress,
   shapePersonaCard,
   shapePersonaDetailResponse,
@@ -75,10 +78,13 @@ describe('shapePersonaCard', () => {
     });
     expect(card.score).toBe(80);
     expect(card.role).toBe('Crypto Native');
-    // young_adult bucket → 22..30 (deterministic from personaId hash).
-    expect(card.age).toBeGreaterThanOrEqual(22);
-    expect(card.age).toBeLessThanOrEqual(30);
+    // young_adult bucket → 25 (bucket-center; we don't synthesise
+    // a per-persona age — only the categorical age_group exists).
+    expect(card.age).toBe(25);
     expect(card.id).toBe('p1');
+    // Seed displayName "Crypto Native #1" matches role prefix → flagged
+    // synthetic so the UI can show a "synth" marker.
+    expect(card.is_synthetic).toBe(true);
   });
 
   it('returns score=null when all dimensions are null (does not fall back to 0)', () => {
@@ -210,9 +216,8 @@ describe('shapePersonaCard', () => {
       voiceSample: makeVector(),
       displayName: 'Mobile #1',
     });
-    // No age_group → adult/unknown bucket → 30..44 jittered.
-    expect(card.age).toBeGreaterThanOrEqual(30);
-    expect(card.age).toBeLessThanOrEqual(44);
+    // No age_group → adult/unknown bucket center 35.
+    expect(card.age).toBe(35);
     expect(card.tags).toEqual(['mobile_power', 'unknown']);
   });
 });
@@ -478,9 +483,8 @@ describe('shapePersonaDetailResponse', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (row.personaVector as any).demographics.age_group = 'senior';
     const out = shapePersonaDetailResponse(fakeScan, row);
-    // senior bucket → 50..72 jittered.
-    expect(out.persona.age).toBeGreaterThanOrEqual(50);
-    expect(out.persona.age).toBeLessThanOrEqual(72);
+    // senior bucket → 58 (bucket-center).
+    expect(out.persona.age).toBe(58);
     expect(out.persona.age_group).toBe('senior');
   });
 
@@ -490,5 +494,83 @@ describe('shapePersonaDetailResponse', () => {
       makeDetailRow({ displayName: null as unknown as string })
     );
     expect(out.persona.display_name).toBe('Synthetic');
+  });
+});
+
+// ───────────── name + age helpers (B2/B3 trust restoration) ─────────────
+
+describe('isSyntheticSeedName', () => {
+  it('detects "<role> #N" pattern (case insensitive)', () => {
+    expect(isSyntheticSeedName('Crypto Native #9', 'Crypto Native')).toBe(true);
+    expect(isSyntheticSeedName('senior (50+) #1', 'Senior (50+)')).toBe(true);
+  });
+
+  it('lets real names pass through', () => {
+    expect(isSyntheticSeedName('Alice Chen', 'Crypto Native')).toBe(false);
+    expect(isSyntheticSeedName('Ivan Petrov', 'Crypto Native')).toBe(false);
+  });
+
+  it('does not match when displayName starts with role but no "#"', () => {
+    expect(isSyntheticSeedName('Crypto Native enthusiast', 'Crypto Native')).toBe(false);
+  });
+});
+
+describe('personaDisplayName', () => {
+  it('replaces synthetic seed names with a deterministic pool entry', () => {
+    const out = personaDisplayName(
+      'Crypto Native #9',
+      'Crypto Native',
+      '11111111-1111-1111-1111-111111111111',
+    );
+    expect(out).not.toBe('Crypto Native #9');
+    expect(out).toMatch(/^[A-Z]\S+ \S+/); // "First Last" shape
+  });
+
+  it('is deterministic — same personaId yields same name', () => {
+    const args: [string, string, string] = [
+      'Crypto Native #9',
+      'Crypto Native',
+      'aaaaaaaa-1111-1111-1111-111111111111',
+    ];
+    expect(personaDisplayName(...args)).toBe(personaDisplayName(...args));
+  });
+
+  it('different personaIds usually yield different names', () => {
+    const a = personaDisplayName('Senior #1', 'Senior', 'aaaa1111-1111-1111-1111-111111111111');
+    const b = personaDisplayName('Senior #2', 'Senior', 'bbbb2222-2222-2222-2222-222222222222');
+    expect(a).not.toBe(b);
+  });
+
+  it('passes real names through unchanged', () => {
+    expect(personaDisplayName('Alice Chen', 'Crypto Native', 'p1')).toBe('Alice Chen');
+    expect(personaDisplayName('Ivan Petrov', 'Crypto Native', 'p2')).toBe('Ivan Petrov');
+  });
+
+  it('passes through "Synthetic" fallback (does not match the seed pattern)', () => {
+    expect(personaDisplayName('Synthetic', 'Crypto Native', 'p3')).toBe('Synthetic');
+  });
+});
+
+describe('personaAgeFromGroup', () => {
+  it('returns the bucket-center for each known age_group', () => {
+    expect(personaAgeFromGroup('teen')).toBe(16);
+    expect(personaAgeFromGroup('young_adult')).toBe(25);
+    expect(personaAgeFromGroup('senior')).toBe(58);
+    expect(personaAgeFromGroup('adult')).toBe(35);
+  });
+
+  it('falls back to 35 for undefined or unknown buckets', () => {
+    expect(personaAgeFromGroup(undefined)).toBe(35);
+    expect(personaAgeFromGroup('made-up-bucket')).toBe(35);
+  });
+
+  it('is deterministic — same input always yields same age (no jitter)', () => {
+    // Anti-regression: a previous version hashed personaId to jitter
+    // age within the bucket. The age field is bucket-center only —
+    // we don't synthesise an exact age that the persona vector
+    // doesn't store.
+    expect(personaAgeFromGroup('young_adult')).toBe(25);
+    expect(personaAgeFromGroup('young_adult')).toBe(25);
+    expect(personaAgeFromGroup('young_adult')).toBe(25);
   });
 });

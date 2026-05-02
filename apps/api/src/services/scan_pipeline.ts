@@ -234,7 +234,27 @@ async function runScan(scanId: string): Promise<void> {
     });
   }
 
-  const { assignments, unassigned } = selectPersonasForCohorts(personas);
+  // Mode A optional cohort restriction — filter STANDARD_COHORTS to
+  // the user-selected subset before assignment. Unknown ids are
+  // dropped silently. Empty filter (or null) = run all 8.
+  const cohortFilter = scan.targetCohorts;
+  const cohortDefs =
+    cohortFilter && cohortFilter.length > 0
+      ? STANDARD_COHORTS.filter((c) => cohortFilter.includes(c.id))
+      : STANDARD_COHORTS;
+  if (cohortDefs.length === 0) {
+    await setStatus(scanId, 'failed');
+    log.warn(
+      { scanId, requested: cohortFilter },
+      'target_cohorts filter matched zero standard cohorts',
+    );
+    return;
+  }
+
+  const { assignments, unassigned } = selectPersonasForCohorts(
+    personas,
+    cohortDefs,
+  );
   const assignedCount = Array.from(assignments.values()).reduce(
     (s, arr) => s + arr.length,
     0
@@ -245,6 +265,7 @@ async function runScan(scanId: string): Promise<void> {
       pool: personas.length,
       assigned: assignedCount,
       unassigned: unassigned.length,
+      cohortsRunning: cohortDefs.map((c) => c.id),
     },
     'cohort selection complete'
   );
@@ -421,7 +442,10 @@ async function runScan(scanId: string): Promise<void> {
   await setStatus(scanId, 'aggregating');
   const cohortFits: CohortFit[] = [];
 
-  for (const cohortDef of STANDARD_COHORTS) {
+  // Aggregate only the cohorts the scan actually ran. When a target
+  // filter is set, the un-selected standard cohorts have no rows and
+  // should not appear in the cohort_results table at all.
+  for (const cohortDef of cohortDefs) {
     const bucket = cohortBuckets.get(cohortDef.id) ?? [];
     const validScores = bucket.filter((b) => !b.flagged).map((b) => b.scores);
 

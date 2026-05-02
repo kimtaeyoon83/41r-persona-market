@@ -30,6 +30,9 @@ const createScanBody = z.object({
   mode: z.enum(['A', 'B']).default('A'),
   target_audience_text: z.string().max(500).optional(),
   hypothesis: z.string().max(1000).optional(),
+  // Mode A optional — restricts the analysis to a subset of the 8
+  // standard cohorts. Empty array or absent → all 8 run.
+  target_cohorts: z.array(z.string().min(1).max(40)).max(8).optional(),
 });
 
 const UUID_RE =
@@ -41,7 +44,8 @@ router.post('/', async (req, res) => {
     res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
     return;
   }
-  const { target_url, mode, target_audience_text, hypothesis } = parsed.data;
+  const { target_url, mode, target_audience_text, hypothesis, target_cohorts } =
+    parsed.data;
 
   const [scan] = await db
     .insert(schema.audienceFitScans)
@@ -50,6 +54,9 @@ router.post('/', async (req, res) => {
       mode,
       targetAudienceText: target_audience_text ?? null,
       hypothesis: hypothesis ?? null,
+      // Empty array → null so the pipeline reads "no restriction" cleanly.
+      targetCohorts:
+        target_cohorts && target_cohorts.length > 0 ? target_cohorts : null,
       status: 'pending',
       weightsVersion: 'v1.0',
     })
@@ -388,7 +395,7 @@ export function shapePersonaDetailResponse(
 ) {
   const cohort = COHORT_BY_ID[row.cohortId];
   const ageGroup = row.personaVector.demographics?.age_group ?? 'adult';
-  const age = personaAgeFromGroup(ageGroup, row.personaId);
+  const age = personaAgeFromGroup(ageGroup);
 
   // Flatten the persona vector axes the detail screen renders. Keep
   // names matching the design's VECTOR_AXES list — the screen pairs
@@ -480,7 +487,10 @@ const LAST_NAMES: readonly string[] = [
 
 // Detect synthetic seed names like "Crypto Native #9" so we know when
 // to substitute. Real tester displayNames ("Alice Chen") pass through.
-function isSyntheticSeedName(displayName: string, roleLabel: string): boolean {
+// Exported so the card shaper can also flag the card as synthetic
+// (UI surfaces a "synth" marker so stakeholders don't read pool names
+// like "Jonas Bauer" as actual users).
+export function isSyntheticSeedName(displayName: string, roleLabel: string): boolean {
   return displayName.toLowerCase().startsWith(roleLabel.toLowerCase() + ' #');
 }
 
@@ -500,7 +510,8 @@ export function personaDisplayName(
 
 // ─── Age helpers ─────────────────────────────────────────────────
 // FNV-1a 32-bit. Stable across processes, no crypto cost. Used only
-// for deterministic display jitter — never for security/randomness.
+// by the name pool below for deterministic first/last picks — never
+// for security/randomness.
 function hash32(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) {
@@ -510,23 +521,22 @@ function hash32(s: string): number {
   return h >>> 0;
 }
 
-// Map age_group bucket → realistic age, deterministically jittered
-// from the personaId so the 14 personas inside one cohort don't all
-// display the same age (which read as obviously synthetic).
-export function personaAgeFromGroup(
-  ageGroup: string | undefined,
-  personaId: string
-): number {
-  const h = hash32(personaId);
+// age_group bucket → bucket-center age. Spec only stores the
+// categorical age_group (teen / young_adult / adult / senior); we
+// don't synthesise an exact age inside the bucket. Identical ages
+// across a cohort honestly signal that the bucket granularity is
+// what we measure (the prior personaId-hash jitter invented data
+// that wasn't in the persona vector).
+export function personaAgeFromGroup(ageGroup: string | undefined): number {
   switch (ageGroup) {
     case 'teen':
-      return 13 + (h % 7); // 13-19
+      return 16;
     case 'young_adult':
-      return 22 + (h % 9); // 22-30
+      return 25;
     case 'senior':
-      return 50 + (h % 23); // 50-72
+      return 58;
     default:
-      return 30 + (h % 15); // 30-44 (adult / unknown)
+      return 35;
   }
 }
 
@@ -558,7 +568,7 @@ export function shapePersonaCard(
       : Math.round(present.reduce((a, b) => a + b, 0) / present.length);
   const cohort = COHORT_BY_ID[r.cohortId];
   const ageGroup = r.voiceSample.demographics?.age_group;
-  const age = personaAgeFromGroup(ageGroup, r.personaId);
+  const age = personaAgeFromGroup(ageGroup);
   // Prefer the LLM-generated quote that matches the card's intent —
   // fit cards get the persona's "would_return_because" reason (positive
   // tone, matches the high score), non-fit cards get "biggest_friction"
@@ -580,14 +590,19 @@ export function shapePersonaCard(
   // age_group bucket of the same name.
   const tagSet = new Set([r.cohortId, ageGroup ?? 'unknown']);
   const role = cohort?.label ?? r.cohortId;
+  const rawName = r.displayName ?? 'Synthetic';
   return {
     id: r.personaId,
-    name: personaDisplayName(r.displayName ?? 'Synthetic', role, r.personaId),
+    name: personaDisplayName(rawName, role, r.personaId),
     age,
     role,
     score,
     quote,
     tags: Array.from(tagSet),
+    // Flagged when the displayed name comes from the pool (synthetic
+    // seed) rather than a real tester. UI prints a "synth" marker so
+    // stakeholders don't read "Jonas Bauer" as an actual user.
+    is_synthetic: isSyntheticSeedName(rawName, role),
   };
 }
 

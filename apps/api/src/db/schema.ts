@@ -202,6 +202,11 @@ export const audienceFitScans = pgTable('audience_fit_scans', {
   mode: varchar('mode', { length: 8 }).notNull().default('A'), // 'A' | 'B'
   targetAudienceText: text('target_audience_text'),  // Mode B only
   hypothesis: text('hypothesis'),                    // Optional probe (§1.2)
+  /** Mode A optional — list of cohort IDs to restrict the analysis to.
+   *  null means run all 8 STANDARD_COHORTS. Set from /validator/detail
+   *  Q1 (Target users multi-select). When narrowing, the per-cohort
+   *  bootstrap CIs widen as fewer personas land per cohort. */
+  targetCohorts: jsonb('target_cohorts').$type<string[]>(),
   /** pending | capturing | sampling | responding | aggregating |
    *  completed | failed. The Phase 0 frontend Processing screen
    *  polls/streams against transitions of this column. */

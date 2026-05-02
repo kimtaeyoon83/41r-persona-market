@@ -14,13 +14,24 @@ function DetailInner() {
   const router = useRouter();
   const url = params.get("url") || "yoursite.com";
 
-  const TARGET_USERS = [
-    { t: "DeFi power users (30s)", sel: true },
-    { t: "DeFi beginners", sel: true },
-    { t: "Teen students", sel: false },
-    { t: "Seniors (50+)", sel: false },
-    { t: "Designers", sel: false },
-    { t: "Mobile-first", sel: false },
+  // Each entry maps to a STANDARD_COHORTS id so the selection can
+  // restrict the analysis to a real subset (not just hint to the LLM).
+  // ghost rows have no cohort id — they're decorative ("+ Custom"
+  // belongs to the Mode B audience flow).
+  const TARGET_USERS: Array<{
+    t: string;
+    sel: boolean;
+    cohort?: string;
+    ghost?: boolean;
+  }> = [
+    { t: "DeFi power users (30s)", sel: true, cohort: "web3_pro" },
+    { t: "DeFi beginners", sel: true, cohort: "defi_beginner" },
+    { t: "Teen students", sel: false, cohort: "teen_newcomer" },
+    { t: "Seniors (50+)", sel: false, cohort: "senior" },
+    { t: "Designers", sel: false, cohort: "designer_20s" },
+    { t: "Mobile-first", sel: false, cohort: "mobile_power" },
+    { t: "Crypto Native", sel: false, cohort: "crypto_native" },
+    { t: "Non-technical 30s", sel: false, cohort: "non_tech_30s" },
     { t: "+ Custom", sel: false, ghost: true },
   ];
 
@@ -34,23 +45,21 @@ function DetailInner() {
   const toggle = (t: string) =>
     setSelected((prev) => ({ ...prev, [t]: !prev[t] }));
 
-  // Combine selected target_users + free-text hypothesis into a single
-  // string the LLM persona prompt sees as the "company hypothesis to
-  // probe". Spec §6.4 — Mode A doesn't filter cohorts by stated audience
-  // (we always run all 8), but the LLM can prioritise the stated focus
-  // when sampling per-persona reactions.
+  // Free-text hypothesis sent verbatim to the LLM persona prompt.
+  // (Cohort selection is sent separately as target_cohorts so the
+  // pipeline actually filters which 8 cohorts run, not just hints.)
   const buildHypothesisText = (): string | undefined => {
-    const audiences = Object.entries(selected)
-      .filter(([t, on]) => on && !TARGET_USERS.find((o) => o.t === t)?.ghost)
-      .map(([t]) => t);
     const trimmed = hypothesis.trim();
-    if (audiences.length === 0 && !trimmed) return undefined;
-    const parts: string[] = [];
-    if (audiences.length > 0) {
-      parts.push(`Target audiences: ${audiences.join(", ")}.`);
-    }
-    if (trimmed) parts.push(`Hypothesis to probe: ${trimmed}`);
-    return parts.join(" ");
+    return trimmed ? trimmed : undefined;
+  };
+
+  // List of selected cohort ids — empty array (or skip) means
+  // "run all 8 STANDARD_COHORTS".
+  const buildTargetCohorts = (): string[] => {
+    return Object.entries(selected)
+      .filter(([, on]) => on)
+      .map(([t]) => TARGET_USERS.find((o) => o.t === t)?.cohort)
+      .filter((c): c is string => typeof c === "string");
   };
 
   const startAnalysis = async (skipInputs = false) => {
@@ -58,10 +67,12 @@ function DetailInner() {
     setSubmitting(true);
     setError(null);
     try {
+      const cohorts = skipInputs ? [] : buildTargetCohorts();
       const { scanId } = await scanApi.createScan({
         target_url: url,
         mode: 'A',
         hypothesis: skipInputs ? undefined : buildHypothesisText(),
+        target_cohorts: cohorts.length > 0 ? cohorts : undefined,
       });
       router.push(
         `/validator/processing/${scanId}?url=${encodeURIComponent(url)}`
