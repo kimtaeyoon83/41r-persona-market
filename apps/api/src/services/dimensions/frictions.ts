@@ -11,13 +11,12 @@
 //
 // Cost: ~$0.003 per scan (~5K input tokens, ~1K output Haiku).
 
-import type Anthropic from '@anthropic-ai/sdk';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { COHORT_BY_ID } from '@41rpm/shared';
 import { db, schema } from '../../db/index.js';
 import { logger } from '../../logger.js';
-import { client, withRoute } from '../anthropic_client.js';
+import { client, extractTextContent, withRoute } from '../anthropic_client.js';
 import { parseJsonSafe, SCORING_MODELS } from '../llm.js';
 
 const log = logger.child({ service: 'frictions' });
@@ -191,11 +190,7 @@ export async function clusterFrictions(scanId: string): Promise<FrictionCluster[
         messages: [{ role: 'user', content: user }],
       }),
     );
-    const text = msg.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
-    const raw = parseJsonSafe<unknown>(text);
+    const raw = parseJsonSafe<unknown>(extractTextContent(msg));
     parsed = clusterSchema.parse(raw);
   } catch (err) {
     log.warn(

@@ -128,79 +128,11 @@ router.get('/:id/report', async (req, res) => {
   // Composite per-persona score for fit/non-fit ranking. Cheap proxy
   // for the §4.2 weighted aggregate; using the same dimensions keeps
   // partial-state ordering consistent with the final cohort_fit_score.
-  const sumExpr = sql<number>`(
-    coalesce(${schema.scanPersonaResponses.happinessScore}, 0)
-    + coalesce(${schema.scanPersonaResponses.engagementScore}, 0)
-    + coalesce(${schema.scanPersonaResponses.taskSuccessScore}, 0)
-  )`;
-
-  const fitRows = await db
-    .select({
-      personaId: schema.scanPersonaResponses.personaId,
-      cohortId: schema.scanPersonaResponses.cohortId,
-      happiness: schema.scanPersonaResponses.happinessScore,
-      engagement: schema.scanPersonaResponses.engagementScore,
-      taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
-      voiceFirstImpression: schema.scanPersonaResponses.voiceFirstImpression,
-      voiceBiggestFriction: schema.scanPersonaResponses.voiceBiggestFriction,
-      voiceWouldReturnBecause:
-        schema.scanPersonaResponses.voiceWouldReturnBecause,
-      voiceSample: schema.personas.vector,
-      displayName: schema.testers.displayName,
-      ageGroup: schema.personas.vector,
-    })
-    .from(schema.scanPersonaResponses)
-    .innerJoin(
-      schema.personas,
-      eq(schema.personas.id, schema.scanPersonaResponses.personaId)
-    )
-    .innerJoin(
-      schema.testers,
-      eq(schema.testers.walletAddress, schema.personas.testerAddr)
-    )
-    .where(
-      and(
-        eq(schema.scanPersonaResponses.scanId, id),
-        eq(schema.scanPersonaResponses.isFlagged, false),
-        isNotNull(schema.scanPersonaResponses.happinessScore)
-      )
-    )
-    .orderBy(desc(sumExpr))
-    .limit(3);
-
-  const nonFitRows = await db
-    .select({
-      personaId: schema.scanPersonaResponses.personaId,
-      cohortId: schema.scanPersonaResponses.cohortId,
-      happiness: schema.scanPersonaResponses.happinessScore,
-      engagement: schema.scanPersonaResponses.engagementScore,
-      taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
-      voiceFirstImpression: schema.scanPersonaResponses.voiceFirstImpression,
-      voiceBiggestFriction: schema.scanPersonaResponses.voiceBiggestFriction,
-      voiceWouldReturnBecause:
-        schema.scanPersonaResponses.voiceWouldReturnBecause,
-      voiceSample: schema.personas.vector,
-      displayName: schema.testers.displayName,
-      ageGroup: schema.personas.vector,
-    })
-    .from(schema.scanPersonaResponses)
-    .innerJoin(
-      schema.personas,
-      eq(schema.personas.id, schema.scanPersonaResponses.personaId)
-    )
-    .innerJoin(
-      schema.testers,
-      eq(schema.testers.walletAddress, schema.personas.testerAddr)
-    )
-    .where(
-      and(
-        eq(schema.scanPersonaResponses.scanId, id),
-        eq(schema.scanPersonaResponses.isFlagged, false),
-        isNotNull(schema.scanPersonaResponses.happinessScore)
-      )
-    )
-    .orderBy(asc(sumExpr))
-    .limit(3);
+  // 'desc' = top fit candidates, 'asc' = bottom non-fit candidates.
+  const [fitRows, nonFitRows] = await Promise.all([
+    buildPersonaCardQuery(id, 'desc'),
+    buildPersonaCardQuery(id, 'asc'),
+  ]);
 
   // Most-recent persona responses for the processing screen feed.
   // Pulled live so the polling UI shows the latest reactions as the
@@ -368,6 +300,40 @@ router.get('/:scanId/persona/:personaId', async (req, res) => {
   res.json(shapePersonaDetailResponse(scan, row));
 });
 
+// Persona-detail rawResponse hides behind Drizzle's `unknown` jsonb
+// type. Both the simulator (`sim.raw`) and LLM (`SimulatedResponse.raw`)
+// paths produce the same 4-field SUS shape; errored rows store
+// `{error: '...'}` (no SUS fields). safeParse extracts the typed
+// fields when present, returns null on schema mismatch, and lets
+// `?? null` carry through unknown shapes so the response stays
+// well-formed even if a future writer drifts.
+const detailRawSchema = z
+  .object({
+    sus_responses: z.array(z.number()).optional(),
+    sus_raw_score: z.number().optional(),
+    signup_likelihood: z.number().optional(),
+    completion_likelihood: z.number().optional(),
+  })
+  .passthrough();
+
+type DetailRawResponse = {
+  sus_responses?: number[];
+  sus_raw_score?: number;
+  signup_likelihood?: number;
+  completion_likelihood?: number;
+};
+
+function parseDetailRawResponse(raw: unknown): DetailRawResponse | null {
+  if (raw === null || raw === undefined) return null;
+  const parsed = detailRawSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  // Strip non-typed passthrough fields — only the 4 SUS keys reach
+  // the response shape. Keeps the consumer contract narrow.
+  const { sus_responses, sus_raw_score, signup_likelihood, completion_likelihood } =
+    parsed.data;
+  return { sus_responses, sus_raw_score, signup_likelihood, completion_likelihood };
+}
+
 export function shapePersonaDetailResponse(
   scan: typeof schema.audienceFitScans.$inferSelect,
   row: {
@@ -413,14 +379,7 @@ export function shapePersonaDetailResponse(
     { k: 'expertise_defi', v: v.expertise?.defi ?? null },
   ].filter((a): a is { k: string; v: number } => a.v != null);
 
-  const raw = row.rawResponse as
-    | {
-        sus_responses?: number[];
-        sus_raw_score?: number;
-        signup_likelihood?: number;
-        completion_likelihood?: number;
-      }
-    | null;
+  const raw = parseDetailRawResponse(row.rawResponse);
 
   return {
     scan: {
@@ -538,6 +497,53 @@ export function personaAgeFromGroup(ageGroup: string | undefined): number {
     default:
       return 35;
   }
+}
+
+// ─── Persona-card query (fit + non-fit share this shape) ─────────
+// Top/bottom 3 by composite (happiness + engagement + task_success).
+// Same column list, same joins, same filter — only the orderBy
+// direction differs. Direct asc/desc in the orderBy lets Drizzle
+// type-narrow the column expression so we don't lose typing on the
+// returned shape.
+function buildPersonaCardQuery(scanId: string, order: 'asc' | 'desc') {
+  const sumExpr = sql<number>`(
+    coalesce(${schema.scanPersonaResponses.happinessScore}, 0)
+    + coalesce(${schema.scanPersonaResponses.engagementScore}, 0)
+    + coalesce(${schema.scanPersonaResponses.taskSuccessScore}, 0)
+  )`;
+  return db
+    .select({
+      personaId: schema.scanPersonaResponses.personaId,
+      cohortId: schema.scanPersonaResponses.cohortId,
+      happiness: schema.scanPersonaResponses.happinessScore,
+      engagement: schema.scanPersonaResponses.engagementScore,
+      taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
+      voiceFirstImpression: schema.scanPersonaResponses.voiceFirstImpression,
+      voiceBiggestFriction: schema.scanPersonaResponses.voiceBiggestFriction,
+      voiceWouldReturnBecause:
+        schema.scanPersonaResponses.voiceWouldReturnBecause,
+      voiceSample: schema.personas.vector,
+      displayName: schema.testers.displayName,
+      ageGroup: schema.personas.vector,
+    })
+    .from(schema.scanPersonaResponses)
+    .innerJoin(
+      schema.personas,
+      eq(schema.personas.id, schema.scanPersonaResponses.personaId)
+    )
+    .innerJoin(
+      schema.testers,
+      eq(schema.testers.walletAddress, schema.personas.testerAddr)
+    )
+    .where(
+      and(
+        eq(schema.scanPersonaResponses.scanId, scanId),
+        eq(schema.scanPersonaResponses.isFlagged, false),
+        isNotNull(schema.scanPersonaResponses.happinessScore)
+      )
+    )
+    .orderBy(order === 'desc' ? desc(sumExpr) : asc(sumExpr))
+    .limit(3);
 }
 
 // ─── Per-persona card shaping ─────────────────────────────────────

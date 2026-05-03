@@ -12,10 +12,9 @@
 //
 // Cost: ~$0.001 per scan (one Haiku call).
 
-import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import type { CohortSelector } from '@41rpm/shared';
-import { client, withRoute } from '../anthropic_client.js';
+import { client, extractTextContent, withRoute } from '../anthropic_client.js';
 import { parseJsonSafe, SCORING_MODELS } from '../llm.js';
 import { logger } from '../../logger.js';
 
@@ -25,7 +24,7 @@ const log = logger.child({ service: 'audience_parser' });
 const AGE_GROUPS = ['teen', 'young_adult', 'adult', 'senior'] as const;
 const RANGE = z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]);
 
-export const selectorSchema = z.object({
+const selectorSchema = z.object({
   age_group: z.array(z.enum(AGE_GROUPS)).optional(),
   tech_literacy: RANGE.optional(),
   crypto_experience: RANGE.optional(),
@@ -70,7 +69,7 @@ RULES:
 - Be GENEROUS with ranges — prefer [0.4, 0.8] over narrow [0.6, 0.7]
   unless the description is unambiguous.`;
 
-export type ParsedAudience = {
+type ParsedAudience = {
   selector: CohortSelector;
   label: string;
   isFallback: boolean;
@@ -101,11 +100,7 @@ export async function parseAudience(text: string): Promise<ParsedAudience> {
         messages: [{ role: 'user', content: user }],
       }),
     );
-    const blockText = msg.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
-    const raw = parseJsonSafe<unknown>(blockText);
+    const raw = parseJsonSafe<unknown>(extractTextContent(msg));
     const selector = selectorSchema.parse(raw);
     return { selector, label: trimmed, isFallback: false };
   } catch (err) {

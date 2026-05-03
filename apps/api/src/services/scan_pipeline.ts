@@ -31,6 +31,7 @@ import {
   bootstrapCohortFitCI,
   computeAudienceFit,
   computeCohortFitScore,
+  meanDimensions,
 } from './audience_fit.js';
 import {
   selectPersonasForAudience,
@@ -316,105 +317,27 @@ async function runScan(scanId: string): Promise<void> {
   }
   totalAttempted = work.length;
 
-  // Per-persona handler. Catches errors so one bad persona doesn't
-  // sink the entire scan — failed personas land in scan_persona_
-  // responses with isFlagged=true so the cohort aggregator skips them.
+  // Per-persona handler. runPersonaAndPersist swallows LLM errors
+  // (recorded as a flagged row) so one bad persona doesn't sink the
+  // entire scan. We update counters + cohort buckets from its result.
+  // personas_completed = produced a VALID (non-flagged) response so
+  // the invariant `attempted = completed + flagged` holds.
   const handle = async ({ persona, cohortId }: WorkItem): Promise<void> => {
-    let sim: SimulatedResponse | null = null;
-    let voice = {
-      voiceFirstImpression: null as string | null,
-      voiceFriction: null as string | null,
-      voiceBiggestFriction: null as string | null,
-      voiceWouldReturnBecause: null as string | null,
-    };
-    let costUsd = 0;
-    let latencyMs = 0;
-    let llmErr: string | null = null;
-
-    try {
-      if (USE_SIMULATOR) {
-        sim = simulatePersonaResponse(persona, targetUrl, hypothesis);
-        await sleep(SIM_PERSONA_DELAY_MS);
-      } else {
-        // Pass screenshots only when vision is enabled — otherwise
-        // stay on cheap Haiku text path even if capture succeeded.
-        const result = await runPersonaResponseLLM(
-          persona,
-          targetUrl,
-          hypothesis,
-          USE_VISION ? screenshotUrls : undefined,
-        );
-        sim = result.sim;
-        voice = extractVoiceQuotes(result.parsed);
-        costUsd = result.llmCostUsd;
-        latencyMs = result.llmLatencyMs;
-      }
-    } catch (e) {
-      llmErr = e instanceof Error ? e.message.slice(0, 400) : 'unknown';
-      log.warn({ scanId, personaId: persona.id, err: llmErr }, 'persona response failed');
-    }
-
-    if (!sim) {
-      // LLM error or schema rejection — record a flagged row so we
-      // don't silently lose the persona. cohort aggregator skips
-      // flagged rows.
-      totalErrored += 1;
-      totalFlagged += 1;
-      await db.insert(schema.scanPersonaResponses).values({
-        scanId,
-        personaId: persona.id,
-        cohortId,
-        rawResponse: { error: llmErr },
-        happinessScore: null,
-        engagementScore: null,
-        adoptionScore: null,
-        retentionD7: null,
-        taskSuccessScore: null,
-        retentionDCurve: null,
-        voiceFirstImpression: null,
-        voiceFriction: null,
-        voiceBiggestFriction: null,
-        voiceWouldReturnBecause: null,
-        isFlagged: true,
-        flagReason: llmErr ?? 'no response',
-        llmCostUsd: 0,
-        llmLatencyMs: latencyMs,
-      });
-      return;
-    }
-
-    cohortBuckets.get(cohortId)!.push({
-      persona,
-      scores: sim.scores,
-      flagged: sim.is_flagged,
-    });
-    // personas_completed = produced a VALID (non-flagged) response.
-    // Flagged-but-parseable rows count toward personas_flagged only,
-    // so the invariant attempted = completed + flagged holds.
-    if (sim.is_flagged) totalFlagged += 1;
-    else totalCompleted += 1;
-    totalCostUsd += costUsd;
-
-    await db.insert(schema.scanPersonaResponses).values({
+    const r = await runPersonaAndPersist({
       scanId,
-      personaId: persona.id,
+      persona,
       cohortId,
-      rawResponse: sim.raw,
-      happinessScore: sim.scores.happiness,
-      engagementScore: sim.scores.engagement,
-      adoptionScore: sim.scores.adoption,
-      retentionD7: sim.scores.retention_d7,
-      taskSuccessScore: sim.scores.task_success,
-      retentionDCurve: sim.retention_d_curve,
-      voiceFirstImpression: voice.voiceFirstImpression,
-      voiceFriction: voice.voiceFriction,
-      voiceBiggestFriction: voice.voiceBiggestFriction,
-      voiceWouldReturnBecause: voice.voiceWouldReturnBecause,
-      isFlagged: sim.is_flagged,
-      flagReason: sim.flag_reason,
-      llmCostUsd: costUsd,
-      llmLatencyMs: latencyMs,
+      targetUrl,
+      hypothesis,
+      screenshotUrls,
     });
+    if (r.errored) totalErrored += 1;
+    if (r.flagged) totalFlagged += 1;
+    if (r.bucketEntry) {
+      cohortBuckets.get(cohortId)!.push(r.bucketEntry);
+      if (!r.bucketEntry.flagged) totalCompleted += 1;
+    }
+    totalCostUsd += r.costUsd;
   };
 
   if (USE_SIMULATOR) {
@@ -447,79 +370,22 @@ async function runScan(scanId: string): Promise<void> {
   // should not appear in the cohort_results table at all.
   for (const cohortDef of cohortDefs) {
     const bucket = cohortBuckets.get(cohortDef.id) ?? [];
-    const validScores = bucket.filter((b) => !b.flagged).map((b) => b.scores);
-
-    if (validScores.length === 0) {
-      // Empty / fully flagged cohort: persist a row showing under-quota
-      // for the UI but skip from synthesis input.
-      await db.insert(schema.scanCohortResults).values({
-        scanId,
-        cohortId: cohortDef.id,
-        cohortLabel: cohortDef.label,
-        nTarget: cohortDef.target_n,
-        nCompleted: 0,
-        nFlagged: bucket.length,
-        happinessMean: null,
-        engagementMean: null,
-        adoptionMean: null,
-        retentionMean: null,
-        taskSuccessMean: null,
-        cohortFitScore: null,
-        cohortFitCiLow: null,
-        cohortFitCiHigh: null,
-        retentionDCurve: null,
-      });
-      continue;
-    }
-
-    const dimMeans: PersonaDimensionScores = {
-      happiness: avg(validScores.map((s) => s.happiness)),
-      engagement: avg(validScores.map((s) => s.engagement)),
-      adoption: avg(validScores.map((s) => s.adoption)),
-      retention_d7: avg(validScores.map((s) => s.retention_d7)),
-      task_success: avg(validScores.map((s) => s.task_success)),
-    };
-    const cohortFitScore = computeCohortFitScore(dimMeans);
-
-    const dCurves = bucket
-      .filter((b) => !b.flagged)
-      .map((b) => simulateRetentionDCurveFromD7(b.scores.retention_d7));
-    const dMean = {
-      d1: avg(dCurves.map((d) => d.d1)),
-      d3: avg(dCurves.map((d) => d.d3)),
-      d7: avg(dCurves.map((d) => d.d7)),
-      d30: avg(dCurves.map((d) => d.d30)),
-    };
-
-    // Bootstrap 95% CI on the cohort's fit score (n=14 samples).
-    // Returns { low, high } — both equal to point estimate when n<3.
-    const bootstrapCi = bootstrapCohortFitCI(validScores);
-
-    cohortFits.push({
-      cohort_id: cohortDef.id,
-      cohort_label: cohortDef.label,
-      n_completed: validScores.length,
-      dimension_means: dimMeans,
-      cohort_fit_score: cohortFitScore,
-    });
-
-    await db.insert(schema.scanCohortResults).values({
+    const agg = await persistCohortAggregate({
       scanId,
       cohortId: cohortDef.id,
       cohortLabel: cohortDef.label,
       nTarget: cohortDef.target_n,
-      nCompleted: validScores.length,
-      nFlagged: bucket.length - validScores.length,
-      happinessMean: dimMeans.happiness,
-      engagementMean: dimMeans.engagement,
-      adoptionMean: dimMeans.adoption,
-      retentionMean: dimMeans.retention_d7,
-      taskSuccessMean: dimMeans.task_success,
-      cohortFitScore,
-      cohortFitCiLow: bootstrapCi.low,
-      cohortFitCiHigh: bootstrapCi.high,
-      retentionDCurve: dMean,
+      bucket,
     });
+    if (agg) {
+      cohortFits.push({
+        cohort_id: agg.cohortId,
+        cohort_label: agg.cohortLabel,
+        n_completed: agg.nCompleted,
+        dimension_means: agg.dimMeans,
+        cohort_fit_score: agg.cohortFitScore,
+      });
+    }
   }
 
   if (cohortFits.length === 0) {
@@ -532,19 +398,9 @@ async function runScan(scanId: string): Promise<void> {
 
   // Step 3.5 — friction clustering (real-LLM path only). Simulator
   // doesn't write voice columns, so there's nothing to cluster.
-  // Failure is non-fatal: clusterFrictions returns null on error and
-  // the report falls back to the placeholder cohort-derived
-  // frictions in routes/scan.ts.
-  if (!USE_SIMULATOR) {
-    try {
-      await clusterFrictions(scanId);
-    } catch (err) {
-      log.warn(
-        { scanId, err: err instanceof Error ? err.message : 'unknown' },
-        'friction clustering threw — continuing',
-      );
-    }
-  }
+  // Failure is non-fatal: report falls back to the placeholder
+  // cohort-derived frictions in routes/scan.ts.
+  await tryClusterFrictions(scanId);
 
   // Step 4 — completed.
   await db
@@ -655,90 +511,22 @@ async function runModeBPipeline(args: {
 
   const handle = async (persona: PersonaRow): Promise<void> => {
     attempted += 1;
-    let sim: SimulatedResponse | null = null;
-    let voice = {
-      voiceFirstImpression: null as string | null,
-      voiceFriction: null as string | null,
-      voiceBiggestFriction: null as string | null,
-      voiceWouldReturnBecause: null as string | null,
-    };
-    let costUsd = 0;
-    let latencyMs = 0;
-    let llmErr: string | null = null;
-
-    try {
-      if (USE_SIMULATOR) {
-        sim = simulatePersonaResponse(persona, targetUrl, hypothesis);
-        await sleep(SIM_PERSONA_DELAY_MS);
-      } else {
-        const result = await runPersonaResponseLLM(
-          persona,
-          targetUrl,
-          hypothesis,
-          USE_VISION ? screenshotUrls : undefined,
-        );
-        sim = result.sim;
-        voice = extractVoiceQuotes(result.parsed);
-        costUsd = result.llmCostUsd;
-        latencyMs = result.llmLatencyMs;
-      }
-    } catch (e) {
-      llmErr = e instanceof Error ? e.message.slice(0, 400) : 'unknown';
-      log.warn({ scanId, personaId: persona.id, err: llmErr }, 'persona response failed');
-    }
-
-    if (!sim) {
-      errored += 1;
-      flagged += 1;
-      await db.insert(schema.scanPersonaResponses).values({
-        scanId,
-        personaId: persona.id,
-        cohortId,
-        rawResponse: { error: llmErr },
-        happinessScore: null,
-        engagementScore: null,
-        adoptionScore: null,
-        retentionD7: null,
-        taskSuccessScore: null,
-        retentionDCurve: null,
-        voiceFirstImpression: null,
-        voiceFriction: null,
-        voiceBiggestFriction: null,
-        voiceWouldReturnBecause: null,
-        isFlagged: true,
-        flagReason: llmErr ?? 'no response',
-        llmCostUsd: 0,
-        llmLatencyMs: latencyMs,
-      });
-      return;
-    }
-
-    bucket.push({ persona, scores: sim.scores, flagged: sim.is_flagged });
-    // Same invariant as Mode A — completed counts only non-flagged.
-    if (sim.is_flagged) flagged += 1;
-    else completed += 1;
-    totalCostUsd += costUsd;
-
-    await db.insert(schema.scanPersonaResponses).values({
+    const r = await runPersonaAndPersist({
       scanId,
-      personaId: persona.id,
+      persona,
       cohortId,
-      rawResponse: sim.raw,
-      happinessScore: sim.scores.happiness,
-      engagementScore: sim.scores.engagement,
-      adoptionScore: sim.scores.adoption,
-      retentionD7: sim.scores.retention_d7,
-      taskSuccessScore: sim.scores.task_success,
-      retentionDCurve: sim.retention_d_curve,
-      voiceFirstImpression: voice.voiceFirstImpression,
-      voiceFriction: voice.voiceFriction,
-      voiceBiggestFriction: voice.voiceBiggestFriction,
-      voiceWouldReturnBecause: voice.voiceWouldReturnBecause,
-      isFlagged: sim.is_flagged,
-      flagReason: sim.flag_reason,
-      llmCostUsd: costUsd,
-      llmLatencyMs: latencyMs,
+      targetUrl,
+      hypothesis,
+      screenshotUrls,
     });
+    if (r.errored) errored += 1;
+    if (r.flagged) flagged += 1;
+    if (r.bucketEntry) {
+      bucket.push(r.bucketEntry);
+      // Same invariant as Mode A — completed counts only non-flagged.
+      if (!r.bucketEntry.flagged) completed += 1;
+    }
+    totalCostUsd += r.costUsd;
   };
 
   if (USE_SIMULATOR) {
@@ -754,9 +542,15 @@ async function runModeBPipeline(args: {
 
   // Step 3 — aggregating (single bucket).
   await setStatus(scanId, 'aggregating');
-  const validScores = bucket.filter((b) => !b.flagged).map((b) => b.scores);
+  const agg = await persistCohortAggregate({
+    scanId,
+    cohortId,
+    cohortLabel: parsed.label,
+    nTarget: MODE_B_TARGET_N,
+    bucket,
+  });
 
-  if (validScores.length === 0) {
+  if (!agg) {
     await db
       .update(schema.audienceFitScans)
       .set({
@@ -768,55 +562,10 @@ async function runModeBPipeline(args: {
     return;
   }
 
-  const dimMeans: PersonaDimensionScores = {
-    happiness: avg(validScores.map((s) => s.happiness)),
-    engagement: avg(validScores.map((s) => s.engagement)),
-    adoption: avg(validScores.map((s) => s.adoption)),
-    retention_d7: avg(validScores.map((s) => s.retention_d7)),
-    task_success: avg(validScores.map((s) => s.task_success)),
-  };
-  const cohortFitScore = computeCohortFitScore(dimMeans);
-  const bootstrapCi = bootstrapCohortFitCI(validScores);
-
-  const dCurves = bucket
-    .filter((b) => !b.flagged)
-    .map((b) => simulateRetentionDCurveFromD7(b.scores.retention_d7));
-  const dMean = {
-    d1: avg(dCurves.map((d) => d.d1)),
-    d3: avg(dCurves.map((d) => d.d3)),
-    d7: avg(dCurves.map((d) => d.d7)),
-    d30: avg(dCurves.map((d) => d.d30)),
-  };
-
-  await db.insert(schema.scanCohortResults).values({
-    scanId,
-    cohortId,
-    cohortLabel: parsed.label,
-    nTarget: MODE_B_TARGET_N,
-    nCompleted: validScores.length,
-    nFlagged: bucket.length - validScores.length,
-    happinessMean: dimMeans.happiness,
-    engagementMean: dimMeans.engagement,
-    adoptionMean: dimMeans.adoption,
-    retentionMean: dimMeans.retention_d7,
-    taskSuccessMean: dimMeans.task_success,
-    cohortFitScore,
-    cohortFitCiLow: bootstrapCi.low,
-    cohortFitCiHigh: bootstrapCi.high,
-    retentionDCurve: dMean,
-  });
+  const { dimMeans, cohortFitScore } = agg;
 
   // Step 3.5 — friction clustering (LLM path only).
-  if (!USE_SIMULATOR) {
-    try {
-      await clusterFrictions(scanId);
-    } catch (err) {
-      log.warn(
-        { scanId, err: err instanceof Error ? err.message : 'unknown' },
-        'mode B friction clustering threw',
-      );
-    }
-  }
+  await tryClusterFrictions(scanId);
 
   // Pass/Fail verdict per spec §1.3:
   //   ≥60 = pass | 40-60 = conditional | <40 = fail
@@ -863,22 +612,244 @@ async function setStatus(scanId: string, status: string): Promise<void> {
     .where(eq(schema.audienceFitScans.id, scanId));
 }
 
-function avg(xs: readonly number[]): number {
-  if (xs.length === 0) return 0;
-  return xs.reduce((s, x) => s + x, 0) / xs.length;
-}
+type DCurve = { d1: number; d3: number; d7: number; d30: number };
 
 // Reverse-map a D-7 score back to its source band's full D-curve so
 // the cohort aggregate D-curve has all four numbers, not just D-7.
 // Phase 1C will pass the full D-curve through directly.
-function simulateRetentionDCurveFromD7(d7: number): {
-  d1: number;
-  d3: number;
-  d7: number;
-  d30: number;
-} {
+function simulateRetentionDCurveFromD7(d7: number): DCurve {
   if (d7 >= 55) return { d1: 85, d3: 70, d7: 55, d30: 30 };
   if (d7 >= 30) return { d1: 70, d3: 50, d7: 30, d30: 10 };
   if (d7 >= 5) return { d1: 40, d3: 15, d7: 5, d30: 1 };
   return { d1: 5, d3: 1, d7: 0, d30: 0 };
+}
+
+function avgDCurve(curves: readonly DCurve[]): DCurve {
+  const n = curves.length || 1;
+  return {
+    d1: curves.reduce((s, c) => s + c.d1, 0) / n,
+    d3: curves.reduce((s, c) => s + c.d3, 0) / n,
+    d7: curves.reduce((s, c) => s + c.d7, 0) / n,
+    d30: curves.reduce((s, c) => s + c.d30, 0) / n,
+  };
+}
+
+// Wraps the friction-clustering call so both Mode A and Mode B share
+// one error-handling path. Real-LLM only — simulator doesn't write
+// voice columns. Failure is non-fatal: caller continues with the
+// placeholder cohort-derived frictions in routes/scan.ts.
+async function tryClusterFrictions(scanId: string): Promise<void> {
+  if (USE_SIMULATOR) return;
+  try {
+    await clusterFrictions(scanId);
+  } catch (err) {
+    log.warn(
+      { scanId, err: err instanceof Error ? err.message : 'unknown' },
+      'friction clustering threw — continuing',
+    );
+  }
+}
+
+// ─── Per-persona LLM/simulator + DB write ────────────────────────
+// Catches LLM/simulator errors so one bad persona doesn't sink the
+// scan. Returns the bucket entry (or null on error) plus accounting
+// fields so the caller updates its counters correctly.
+type VoiceQuotes = {
+  voiceFirstImpression: string | null;
+  voiceFriction: string | null;
+  voiceBiggestFriction: string | null;
+  voiceWouldReturnBecause: string | null;
+};
+
+type PersonaBucketEntry = {
+  persona: PersonaRow;
+  scores: PersonaDimensionScores;
+  flagged: boolean;
+};
+
+type PersonaPersistResult = {
+  bucketEntry: PersonaBucketEntry | null; // null when LLM errored
+  costUsd: number;
+  errored: boolean;
+  flagged: boolean; // true when errored OR sim.is_flagged
+};
+
+async function runPersonaAndPersist(args: {
+  scanId: string;
+  persona: PersonaRow;
+  cohortId: string;
+  targetUrl: string;
+  hypothesis: string | undefined;
+  screenshotUrls: string[];
+}): Promise<PersonaPersistResult> {
+  const { scanId, persona, cohortId, targetUrl, hypothesis, screenshotUrls } = args;
+  let sim: SimulatedResponse | null = null;
+  let voice: VoiceQuotes = {
+    voiceFirstImpression: null,
+    voiceFriction: null,
+    voiceBiggestFriction: null,
+    voiceWouldReturnBecause: null,
+  };
+  let costUsd = 0;
+  let latencyMs = 0;
+  let llmErr: string | null = null;
+
+  try {
+    if (USE_SIMULATOR) {
+      sim = simulatePersonaResponse(persona, targetUrl, hypothesis);
+      await sleep(SIM_PERSONA_DELAY_MS);
+    } else {
+      // Pass screenshots only when vision is enabled — otherwise stay
+      // on cheap Haiku text path even if capture succeeded.
+      const result = await runPersonaResponseLLM(
+        persona,
+        targetUrl,
+        hypothesis,
+        USE_VISION ? screenshotUrls : undefined,
+      );
+      sim = result.sim;
+      voice = extractVoiceQuotes(result.parsed);
+      costUsd = result.llmCostUsd;
+      latencyMs = result.llmLatencyMs;
+    }
+  } catch (e) {
+    llmErr = e instanceof Error ? e.message.slice(0, 400) : 'unknown';
+    log.warn({ scanId, personaId: persona.id, err: llmErr }, 'persona response failed');
+  }
+
+  if (!sim) {
+    // LLM error or schema rejection — record a flagged row so we
+    // don't silently lose the persona. Cohort aggregator skips
+    // flagged rows.
+    await db.insert(schema.scanPersonaResponses).values({
+      scanId,
+      personaId: persona.id,
+      cohortId,
+      rawResponse: { error: llmErr },
+      happinessScore: null,
+      engagementScore: null,
+      adoptionScore: null,
+      retentionD7: null,
+      taskSuccessScore: null,
+      retentionDCurve: null,
+      voiceFirstImpression: null,
+      voiceFriction: null,
+      voiceBiggestFriction: null,
+      voiceWouldReturnBecause: null,
+      isFlagged: true,
+      flagReason: llmErr ?? 'no response',
+      llmCostUsd: 0,
+      llmLatencyMs: latencyMs,
+    });
+    return { bucketEntry: null, costUsd: 0, errored: true, flagged: true };
+  }
+
+  await db.insert(schema.scanPersonaResponses).values({
+    scanId,
+    personaId: persona.id,
+    cohortId,
+    rawResponse: sim.raw,
+    happinessScore: sim.scores.happiness,
+    engagementScore: sim.scores.engagement,
+    adoptionScore: sim.scores.adoption,
+    retentionD7: sim.scores.retention_d7,
+    taskSuccessScore: sim.scores.task_success,
+    retentionDCurve: sim.retention_d_curve,
+    voiceFirstImpression: voice.voiceFirstImpression,
+    voiceFriction: voice.voiceFriction,
+    voiceBiggestFriction: voice.voiceBiggestFriction,
+    voiceWouldReturnBecause: voice.voiceWouldReturnBecause,
+    isFlagged: sim.is_flagged,
+    flagReason: sim.flag_reason,
+    llmCostUsd: costUsd,
+    llmLatencyMs: latencyMs,
+  });
+
+  return {
+    bucketEntry: { persona, scores: sim.scores, flagged: sim.is_flagged },
+    costUsd,
+    errored: false,
+    flagged: sim.is_flagged,
+  };
+}
+
+// ─── Cohort aggregation + DB row ─────────────────────────────────
+// Both Mode A (per-cohort loop) and Mode B (single bucket) compute
+// the same shape: dim means → cohort_fit_score → bootstrap CI →
+// D-curve mean → INSERT scan_cohort_results. Returns null when the
+// bucket has no valid (non-flagged) scores — caller skips that
+// cohort from synthesis input.
+type CohortAggregate = {
+  cohortId: string;
+  cohortLabel: string;
+  nCompleted: number;
+  dimMeans: PersonaDimensionScores;
+  cohortFitScore: number;
+};
+
+async function persistCohortAggregate(args: {
+  scanId: string;
+  cohortId: string;
+  cohortLabel: string;
+  nTarget: number;
+  bucket: readonly PersonaBucketEntry[];
+}): Promise<CohortAggregate | null> {
+  const { scanId, cohortId, cohortLabel, nTarget, bucket } = args;
+  const validScores = bucket.filter((b) => !b.flagged).map((b) => b.scores);
+
+  if (validScores.length === 0) {
+    // Empty / fully flagged cohort: persist a row showing under-quota
+    // for the UI but skip from synthesis input.
+    await db.insert(schema.scanCohortResults).values({
+      scanId,
+      cohortId,
+      cohortLabel,
+      nTarget,
+      nCompleted: 0,
+      nFlagged: bucket.length,
+      happinessMean: null,
+      engagementMean: null,
+      adoptionMean: null,
+      retentionMean: null,
+      taskSuccessMean: null,
+      cohortFitScore: null,
+      cohortFitCiLow: null,
+      cohortFitCiHigh: null,
+      retentionDCurve: null,
+    });
+    return null;
+  }
+
+  const dimMeans = meanDimensions(validScores);
+  const cohortFitScore = computeCohortFitScore(dimMeans);
+  const bootstrapCi = bootstrapCohortFitCI(validScores);
+  const dMean = avgDCurve(
+    validScores.map((s) => simulateRetentionDCurveFromD7(s.retention_d7)),
+  );
+
+  await db.insert(schema.scanCohortResults).values({
+    scanId,
+    cohortId,
+    cohortLabel,
+    nTarget,
+    nCompleted: validScores.length,
+    nFlagged: bucket.length - validScores.length,
+    happinessMean: dimMeans.happiness,
+    engagementMean: dimMeans.engagement,
+    adoptionMean: dimMeans.adoption,
+    retentionMean: dimMeans.retention_d7,
+    taskSuccessMean: dimMeans.task_success,
+    cohortFitScore,
+    cohortFitCiLow: bootstrapCi.low,
+    cohortFitCiHigh: bootstrapCi.high,
+    retentionDCurve: dMean,
+  });
+
+  return {
+    cohortId,
+    cohortLabel,
+    nCompleted: validScores.length,
+    dimMeans,
+    cohortFitScore,
+  };
 }

@@ -17,7 +17,7 @@
 // the whole scan.
 
 import type Anthropic from '@anthropic-ai/sdk';
-import { client, withRoute } from './anthropic_client.js';
+import { client, extractTextContent, withRoute } from './anthropic_client.js';
 import { parseJsonSafe, SCORING_MODELS } from './llm.js';
 import { readCaptureAsBase64 } from './site_capture.js';
 import { z } from 'zod';
@@ -120,11 +120,7 @@ ${RULES}`;
         ],
       }),
     );
-    const text = msg.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
-    const raw = parseJsonSafe<unknown>(text);
+    const raw = parseJsonSafe<unknown>(extractTextContent(msg));
     return responseSchema.parse(raw);
   } catch (err) {
     log.warn(

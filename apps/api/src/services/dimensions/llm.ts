@@ -15,7 +15,7 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import { client, withRoute } from '../anthropic_client.js';
+import { client, extractTextContent, withRoute } from '../anthropic_client.js';
 import { parseJsonSafe, SCORING_MODELS } from '../llm.js';
 import {
   ENGAGEMENT_BAND_TO_SCORE,
@@ -305,12 +305,7 @@ export async function runPersonaResponseLLM(
     }),
   );
 
-  const text = msg.content
-    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-    .map((b) => b.text)
-    .join('');
-
-  const rawJson = parseJsonSafe<unknown>(text);
+  const rawJson = parseJsonSafe<unknown>(extractTextContent(msg));
   const parsed = personaResponseSchema.parse(rawJson);
   const sim = mapLLMResponseToSimulated(parsed);
 

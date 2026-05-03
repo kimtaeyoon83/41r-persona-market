@@ -495,6 +495,52 @@ describe('shapePersonaDetailResponse', () => {
     );
     expect(out.persona.display_name).toBe('Synthetic');
   });
+
+  it('coerces malformed rawResponse shape to null SUS fields (Zod safeParse safety net)', () => {
+    const out = shapePersonaDetailResponse(
+      fakeScan,
+      makeDetailRow({
+        // Wrong shape: sus_responses is a string, not an array. Pre-Zod
+        // cast would have leaked the string straight into the response.
+        rawResponse: {
+          sus_responses: 'definitely not an array',
+          signup_likelihood: 'also wrong',
+        },
+      })
+    );
+    expect(out.response.sus_responses).toBeNull();
+    expect(out.response.sus_raw_score).toBeNull();
+    expect(out.response.signup_likelihood).toBeNull();
+    expect(out.response.completion_likelihood).toBeNull();
+  });
+
+  it('coerces non-object rawResponse to null (e.g. accidental string write)', () => {
+    const out = shapePersonaDetailResponse(
+      fakeScan,
+      makeDetailRow({ rawResponse: 'oops not an object' })
+    );
+    expect(out.response.sus_responses).toBeNull();
+    expect(out.response.sus_raw_score).toBeNull();
+  });
+
+  it('lets the errored {error: "..."} shape through with null SUS fields', () => {
+    const out = shapePersonaDetailResponse(
+      fakeScan,
+      makeDetailRow({
+        rawResponse: { error: 'persona response failed' },
+        isFlagged: true,
+        flagReason: 'persona response failed',
+      })
+    );
+    // Errored rows have no SUS payload → all 4 fields stay null.
+    expect(out.response.sus_responses).toBeNull();
+    expect(out.response.sus_raw_score).toBeNull();
+    expect(out.response.signup_likelihood).toBeNull();
+    expect(out.response.completion_likelihood).toBeNull();
+    // But the flag fields surface unchanged.
+    expect(out.response.is_flagged).toBe(true);
+    expect(out.response.flag_reason).toBe('persona response failed');
+  });
 });
 
 // ───────────── name + age helpers (B2/B3 trust restoration) ─────────────

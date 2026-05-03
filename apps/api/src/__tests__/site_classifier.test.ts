@@ -13,6 +13,13 @@ vi.mock('../services/anthropic_client.js', () => {
   return {
     client: { messages: { create: mockCreate } },
     withRoute: <T>(_route: string, fn: () => Promise<T>) => fn(),
+    // Mirror the real extractTextContent — site_classifier calls it
+    // to pull text out of the mocked message.content.
+    extractTextContent: (msg: { content: Array<{ type: string; text?: string }> }) =>
+      msg.content
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text ?? '')
+        .join(''),
     __mockCreate: mockCreate,
   };
 });

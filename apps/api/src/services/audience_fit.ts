@@ -138,13 +138,6 @@ export function median(xs: readonly number[]): number {
     : sorted[mid]!;
 }
 
-export function mean(xs: readonly number[]): number {
-  if (xs.length === 0) {
-    throw new Error('mean: empty array');
-  }
-  return xs.reduce((s, x) => s + x, 0) / xs.length;
-}
-
 // ─── Cohort-fit aggregator ────────────────────────────────────────
 // Given dimension means for one cohort, produce its weighted §4.2
 // aggregate. This is what the spec calls the "audience_fit_score per
@@ -200,7 +193,13 @@ export function bootstrapCohortFitCI(
   };
 }
 
-function meanDimensions(xs: readonly PersonaDimensionScores[]): PersonaDimensionScores {
+// Per-dimension arithmetic mean across personas. Throws on empty —
+// callers must gate on `xs.length > 0` (the pipeline does this via
+// the validScores filter).
+export function meanDimensions(xs: readonly PersonaDimensionScores[]): PersonaDimensionScores {
+  if (xs.length === 0) {
+    throw new Error('meanDimensions: empty array');
+  }
   const n = xs.length;
   return {
     happiness: xs.reduce((s, x) => s + x.happiness, 0) / n,

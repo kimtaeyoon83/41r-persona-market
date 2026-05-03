@@ -8,7 +8,7 @@
 // frontend rendering — keep them stable. Renaming requires a data
 // migration on `scan_cohort_results.cohort_id`.
 
-export type AgeGroup = 'teen' | 'young_adult' | 'adult' | 'senior';
+type AgeGroup = 'teen' | 'young_adult' | 'adult' | 'senior';
 
 export type CohortSelector = {
   age_group?: AgeGroup[];
@@ -137,9 +137,4 @@ export const STANDARD_COHORTS: readonly CohortDef[] = [
 
 export const COHORT_BY_ID: Record<string, CohortDef> = Object.fromEntries(
   STANDARD_COHORTS.map((c) => [c.id, c])
-);
-
-export const TOTAL_TARGET_PERSONAS = STANDARD_COHORTS.reduce(
-  (sum, c) => sum + c.target_n,
-  0
 );

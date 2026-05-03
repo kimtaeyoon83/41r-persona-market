@@ -69,6 +69,17 @@ export function withRequestId<T>(
   return als.run({ route: parent?.route ?? 'unknown', requestId }, fn);
 }
 
+// Concatenate all text blocks from an Anthropic message. Non-text
+// blocks (images, tool use, etc.) are skipped. Use this everywhere
+// instead of inlining the filter+map+join pattern — it keeps the SDK
+// type dependency (`Anthropic.TextBlock`) in one place.
+export function extractTextContent(msg: Anthropic.Message): string {
+  return msg.content
+    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+    .map((b) => b.text)
+    .join('');
+}
+
 // The wrapped client. Everything outside `services/llm.ts` that wants to
 // call Anthropic should import from here.
 export const client = new Anthropic();

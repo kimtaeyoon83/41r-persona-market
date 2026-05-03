@@ -180,7 +180,7 @@ export function Btn({
   );
 }
 
-export type TopBarActive = "discovery" | "pro" | "report" | "calibration";
+type TopBarActive = "discovery" | "pro" | "report" | "calibration";
 
 export function TopBar({ active = "discovery" }: { active?: TopBarActive }) {
   const items: { id: TopBarActive; label: string; href: string; dim?: boolean }[] =
