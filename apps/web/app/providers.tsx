@@ -11,8 +11,9 @@
 // default, but PrivyProvider uses React Context + hooks → must be in
 // a Client Component. This file is the boundary.
 
-import { PrivyProvider } from "@privy-io/react-auth";
-import type { ReactNode } from "react";
+import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
+import { useEffect, type ReactNode } from "react";
+import { setAuthTokenGetter } from "@/lib/api";
 
 const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 
@@ -56,7 +57,22 @@ export function Providers({ children }: { children: ReactNode }) {
         },
       }}
     >
-      {children}
+      <AuthBridge>{children}</AuthBridge>
     </PrivyProvider>
   );
+}
+
+// Wires Privy's getAccessToken into lib/api.ts so every request()
+// auto-attaches `Authorization: Bearer <token>`. Effect-only — renders
+// children unchanged.
+function AuthBridge({ children }: { children: ReactNode }) {
+  const { ready, authenticated, getAccessToken } = usePrivy();
+  useEffect(() => {
+    if (ready && authenticated) {
+      setAuthTokenGetter(() => getAccessToken());
+    } else {
+      setAuthTokenGetter(null);
+    }
+  }, [ready, authenticated, getAccessToken]);
+  return <>{children}</>;
 }

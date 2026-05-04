@@ -22,6 +22,12 @@ import {
 import { startScanWorker } from '../services/scan_pipeline.js';
 import { getCategoryBenchmark } from '../services/benchmark.js';
 import { computeAarrr } from '../services/aarrr.js';
+import { requirePrivyAuth, optionalPrivyAuth } from '../middleware/privy_auth.js';
+import {
+  buildSponsoredZeroTx,
+  broadcastSignedTx,
+  solscanUrl,
+} from '../services/sponsored_tx.js';
 
 const router: RouterType = Router();
 
@@ -38,7 +44,7 @@ const createScanBody = z.object({
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-router.post('/', async (req, res) => {
+router.post('/', optionalPrivyAuth, async (req, res) => {
   const parsed = createScanBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
@@ -57,6 +63,9 @@ router.post('/', async (req, res) => {
       // Empty array → null so the pipeline reads "no restriction" cleanly.
       targetCohorts:
         target_cohorts && target_cohorts.length > 0 ? target_cohorts : null,
+      // Phase 4 §1 — claim ownership when the requester is logged in.
+      // Anonymous requests still allowed (legacy / pre-login demos).
+      userId: req.privyUser?.id ?? null,
       status: 'pending',
       weightsVersion: 'v1.0',
     })
@@ -174,6 +183,31 @@ router.get('/live', async (_req, res) => {
     .orderBy(desc(schema.audienceFitScans.createdAt))
     .limit(20);
   res.json({ scans: await attachBestCohortLabels(scans) });
+});
+
+// ─── My Analyses (Phase 4 §1 / P4-5) ─────────────────────────────
+// Auth-gated list of scans owned by the current Privy user. Includes
+// payment_tx_signature so the UI can render Solscan links per scan.
+router.get('/me', requirePrivyAuth, async (req, res) => {
+  const u = req.privyUser!;
+  const scans = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(eq(schema.audienceFitScans.userId, u.id))
+    .orderBy(desc(schema.audienceFitScans.createdAt))
+    .limit(50);
+  const summaries = await attachBestCohortLabels(scans);
+  // Attach payment_tx_signature alongside each summary (the helper
+  // strips it because the public Recent feed shouldn't expose it).
+  const sigByScan = new Map<string, string | null>();
+  for (const s of scans) sigByScan.set(s.id, s.paymentTxSignature ?? null);
+  res.json({
+    scans: summaries.map((s) => ({
+      ...s,
+      payment_tx_signature: sigByScan.get(s.id) ?? null,
+      payment_solscan: sigByScan.get(s.id) ? solscanUrl(sigByScan.get(s.id)!) : null,
+    })),
+  });
 });
 
 router.get('/:id/report', async (req, res) => {
@@ -486,6 +520,120 @@ router.post('/:id/survey', async (req, res) => {
       delta: dims.reduce((acc, d) => ({ ...acc, [d]: llm[d] - human[d] }), {} as Record<string, number>),
     },
   });
+});
+
+// ─── Sponsored 0 USDC payment (Phase 4 D6 / P4-4) ────────────────
+// Two-step flow:
+//   1. POST /:id/payment-tx     → returns Fee-Payer-partial-signed tx
+//                                  (user signs client-side via Privy)
+//   2. POST /:id/payment-confirm → broadcasts user-signed tx, persists
+//                                  signature on the scan row.
+//
+// Both routes require Privy auth + scan ownership. /payment-tx will
+// lazily claim ownership if the scan was created anonymously.
+
+router.post('/:id/payment-tx', requirePrivyAuth, async (req, res) => {
+  const u = req.privyUser!;
+  if (!u.walletAddress) {
+    res.status(400).json({
+      error: 'no_wallet',
+      detail: 'Privy user has no Solana wallet linked',
+    });
+    return;
+  }
+  const id = String(req.params.id ?? '');
+  if (!UUID_RE.test(id)) {
+    res.status(404).json({ error: 'scan_not_found' });
+    return;
+  }
+  const [scan] = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(eq(schema.audienceFitScans.id, id));
+  if (!scan) {
+    res.status(404).json({ error: 'scan_not_found' });
+    return;
+  }
+  if (scan.userId && scan.userId !== u.id) {
+    res.status(403).json({ error: 'not_owner' });
+    return;
+  }
+  if (scan.paymentTxSignature) {
+    res.status(409).json({
+      error: 'already_paid',
+      signature: scan.paymentTxSignature,
+      solscan: solscanUrl(scan.paymentTxSignature),
+    });
+    return;
+  }
+  // Lazy ownership claim — a scan created before login (e.g., demo
+  // path) becomes owned by whoever pays for it.
+  if (!scan.userId) {
+    await db
+      .update(schema.audienceFitScans)
+      .set({ userId: u.id })
+      .where(eq(schema.audienceFitScans.id, id));
+  }
+  try {
+    const result = await buildSponsoredZeroTx(u.walletAddress);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({
+      error: 'tx_build_failed',
+      detail: err instanceof Error ? err.message : 'unknown',
+    });
+  }
+});
+
+const paymentConfirmBody = z.object({
+  signed_tx_base64: z.string().min(1).max(20_000),
+});
+
+router.post('/:id/payment-confirm', requirePrivyAuth, async (req, res) => {
+  const u = req.privyUser!;
+  const id = String(req.params.id ?? '');
+  if (!UUID_RE.test(id)) {
+    res.status(404).json({ error: 'scan_not_found' });
+    return;
+  }
+  const parsed = paymentConfirmBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
+    return;
+  }
+  const [scan] = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(eq(schema.audienceFitScans.id, id));
+  if (!scan) {
+    res.status(404).json({ error: 'scan_not_found' });
+    return;
+  }
+  if (scan.userId !== u.id) {
+    res.status(403).json({ error: 'not_owner' });
+    return;
+  }
+  if (scan.paymentTxSignature) {
+    res.status(409).json({
+      error: 'already_paid',
+      signature: scan.paymentTxSignature,
+      solscan: solscanUrl(scan.paymentTxSignature),
+    });
+    return;
+  }
+  try {
+    const sig = await broadcastSignedTx(parsed.data.signed_tx_base64);
+    await db
+      .update(schema.audienceFitScans)
+      .set({ paymentTxSignature: sig })
+      .where(eq(schema.audienceFitScans.id, id));
+    res.json({ signature: sig, solscan: solscanUrl(sig) });
+  } catch (err) {
+    res.status(502).json({
+      error: 'broadcast_failed',
+      detail: err instanceof Error ? err.message : 'unknown',
+    });
+  }
 });
 
 router.get('/:scanId/persona/:personaId', async (req, res) => {

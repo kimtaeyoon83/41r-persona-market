@@ -113,6 +113,45 @@ async function upsertUser(claims: AuthTokenClaims, user: PrivyUser): Promise<Aut
 }
 
 /**
+ * Soft variant — if a valid Privy token is present, attaches
+ * `req.privyUser` and continues. If absent / invalid, just calls
+ * next() without setting `req.privyUser`. Use on routes that work
+ * for both authed and anonymous traffic (e.g., POST /api/scan).
+ */
+export const optionalPrivyAuth: RequestHandler = async (
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+) => {
+  const client = getPrivyClient();
+  if (!client) {
+    next();
+    return;
+  }
+  const header = req.headers.authorization;
+  if (!header || !header.toLowerCase().startsWith('bearer ')) {
+    next();
+    return;
+  }
+  const token = header.slice(7).trim();
+  if (!token) {
+    next();
+    return;
+  }
+  try {
+    const claims = await client.verifyAuthToken(token);
+    const user = await client.getUser(claims.userId);
+    req.privyUser = await upsertUser(claims, user);
+  } catch (err) {
+    log.warn(
+      { err: err instanceof Error ? err.message : 'unknown' },
+      'optional privy auth failed — proceeding anonymously',
+    );
+  }
+  next();
+};
+
+/**
  * Express middleware — requires a valid Privy access token. On success
  * attaches `req.privyUser` and calls next(). On failure responds 401
  * (or 503 if the server isn't configured for Privy yet).

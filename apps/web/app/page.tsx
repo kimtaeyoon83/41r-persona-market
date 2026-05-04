@@ -219,10 +219,20 @@ export default function HomePage() {
             justifyContent: "space-between",
           }}
         >
-          <span>41R · Devnet · Phase 2 Internal Testing</span>
-          <Link href="/validator" style={{ color: C.textDim, textDecoration: "none" }}>
-            Verify a specific audience (Mode B) →
-          </Link>
+          <span>41R · Devnet · Phase 4 Internal Testing</span>
+          <span style={{ display: "flex", gap: 16 }}>
+            {authenticated && (
+              <Link
+                href="/me/analyses"
+                style={{ color: C.textDim, textDecoration: "none" }}
+              >
+                My Analyses →
+              </Link>
+            )}
+            <Link href="/validator" style={{ color: C.textDim, textDecoration: "none" }}>
+              Verify a specific audience (Mode B) →
+            </Link>
+          </span>
         </div>
       </div>
     </Frame>

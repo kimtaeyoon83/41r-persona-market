@@ -274,6 +274,17 @@ export const audienceFitScans = pgTable('audience_fit_scans', {
    *  scan actually used. Null for Mode A. */
   modeBParsedSelector: jsonb('mode_b_parsed_selector'),
 
+  /** Privy-authed user that requested this scan (Phase 4 §1).
+   *  Null for legacy/anonymous scans. FK → users.id with ON DELETE
+   *  SET NULL so deleting a user preserves their public scans. */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+
+  /** Solana base58 sig of the sponsored 0 USDC payment tx (D6).
+   *  Set after the user signs + the tx confirms. Null until paid.
+   *  Used by /me/analyses for Solscan link rendering and by Phase 5
+   *  reward distribution to verify payment. */
+  paymentTxSignature: text('payment_tx_signature'),
+
   createdAt: timestamp('created_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),
 });

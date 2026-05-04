@@ -1,14 +1,25 @@
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4100';
 
+// Phase 4 §1 — Privy access-token injector.
+// Set from the Privy provider boundary (usePrivy().getAccessToken).
+// When set, request() auto-attaches `Authorization: Bearer <token>`.
+let _getAuthToken: (() => Promise<string | null>) | null = null;
+
+export function setAuthTokenGetter(fn: (() => Promise<string | null>) | null): void {
+  _getAuthToken = fn;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   // Spread options *first* so explicit headers merge on top — otherwise
   // `...options` at the end wipes the Content-Type we just set and the
   // server's json parser skips the body.
+  const token = _getAuthToken ? await _getAuthToken().catch(() => null) : null;
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       'ngrok-skip-browser-warning': '1',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },
   });
@@ -424,6 +435,38 @@ export const scanApi = {
   /** Currently in-flight scans (capturing/sampling/responding/aggregating). */
   getLive: () => request<{ scans: ScanSummary[] }>('/api/scan/live'),
 
+  /** Phase 4 P4-5 — auth-gated list of scans owned by the current user.
+   *  Each summary includes payment_tx_signature + Solscan link. */
+  getMyScans: () =>
+    request<{
+      scans: Array<ScanSummary & {
+        payment_tx_signature: string | null;
+        payment_solscan: string | null;
+      }>;
+    }>('/api/scan/me'),
+
+  /** Phase 4 D6 — request a Fee Payer-partial-signed 0 USDC tx for the
+   *  authenticated user to sign with their Privy wallet. */
+  getPaymentTx: (scanId: string) =>
+    request<{
+      txBase64: string;
+      blockhash: string;
+      lastValidBlockHeight: number;
+      feePayer: string;
+      expiresAt: string;
+    }>(`/api/scan/${scanId}/payment-tx`, { method: 'POST', body: '{}' }),
+
+  /** Broadcast the user-signed tx (base64). Backend persists the
+   *  signature on the scan row and returns a Solscan link. */
+  confirmPayment: (scanId: string, signedTxBase64: string) =>
+    request<{ signature: string; solscan: string }>(
+      `/api/scan/${scanId}/payment-confirm`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ signed_tx_base64: signedTxBase64 }),
+      },
+    ),
+
   /** Submit a human survey for an already-completed scan (Phase 2 D3 / P2-5).
    *  Each call writes 5 calibration_records rows (one per dimension)
    *  with source='human_baseline'. */
@@ -492,4 +535,21 @@ export type CalibrationReport = {
 
 export const calibrationApi = {
   getCurrent: () => request<CalibrationReport>('/api/calibration/current'),
+};
+
+// ─── Auth API (Phase 4 §1) ─────────────────────────────────────
+export type MeResponse = {
+  user: {
+    id: string;
+    privyId: string;
+    email: string | null;
+    walletAddress: string | null;
+    displayName: string | null;
+  };
+};
+
+export const authApi = {
+  /** Verify Privy bearer token + upsert user. Caller must set
+   *  setAuthTokenGetter() so the bearer is auto-attached. */
+  getMe: () => request<MeResponse>('/api/auth/me'),
 };
