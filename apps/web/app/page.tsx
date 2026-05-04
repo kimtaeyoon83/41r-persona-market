@@ -58,7 +58,13 @@ export default function HomePage() {
 
   return (
     <Frame active="discovery">
-      <div style={{ padding: "60px 32px 80px", maxWidth: 1080, margin: "0 auto" }}>
+      <div
+        style={{
+          padding: "clamp(32px, 6vw, 60px) clamp(16px, 4vw, 32px) 80px",
+          maxWidth: 1080,
+          margin: "0 auto",
+        }}
+      >
         {/* ─── Hero ─── */}
         <div style={{ textAlign: "center", marginBottom: 56 }}>
           <div
@@ -75,7 +81,7 @@ export default function HomePage() {
           </div>
           <h1
             style={{
-              fontSize: 44,
+              fontSize: "clamp(26px, 6vw, 44px)",
               fontWeight: 600,
               lineHeight: 1.15,
               letterSpacing: "-0.025em",
@@ -89,14 +95,14 @@ export default function HomePage() {
           </h1>
           <div
             style={{
-              fontSize: 15,
+              fontSize: "clamp(13px, 3vw, 15px)",
               color: C.textDim,
               marginBottom: 28,
               lineHeight: 1.55,
+              padding: "0 8px",
             }}
           >
             Drop a URL. 800 AI personas across 8 cohorts react. You get an audience-fit score,
-            <br />
             cohort × dimension breakdown, and a friction map within minutes.
           </div>
 
