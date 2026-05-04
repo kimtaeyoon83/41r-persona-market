@@ -377,6 +377,24 @@ export type ScanPersonaDetail = {
   };
 };
 
+/** Lightweight scan summary used by the public homepage feeds
+ *  (Recent / Top / Live). Per Phase 2 §8.1 / P2-4. */
+export type ScanSummary = {
+  id: string;
+  target_url: string;
+  category: string | null;
+  one_line_pitch: string | null;
+  audience_fit_score: number | null;
+  best_cohort_id: string | null;
+  best_cohort_label: string | null;
+  best_cohort_score: number | null;
+  mode: 'A' | 'B';
+  status: string;
+  personas_completed: number;
+  created_at: string;
+  completed_at: string | null;
+};
+
 export const scanApi = {
   createScan: (body: {
     target_url: string;
@@ -396,6 +414,55 @@ export const scanApi = {
 
   getPersona: (scanId: string, personaId: string) =>
     request<ScanPersonaDetail>(`/api/scan/${scanId}/persona/${personaId}`),
+
+  /** Recent 20 completed scans (newest first). */
+  getRecent: () => request<{ scans: ScanSummary[] }>('/api/scan/recent'),
+
+  /** Top 10 scans by audience_fit_score (descending). */
+  getTop: () => request<{ scans: ScanSummary[] }>('/api/scan/top'),
+
+  /** Currently in-flight scans (capturing/sampling/responding/aggregating). */
+  getLive: () => request<{ scans: ScanSummary[] }>('/api/scan/live'),
+
+  /** Submit a human survey for an already-completed scan (Phase 2 D3 / P2-5).
+   *  Each call writes 5 calibration_records rows (one per dimension)
+   *  with source='human_baseline'. */
+  submitSurvey: (
+    scanId: string,
+    body: {
+      email: string;
+      sus_responses: number[]; // length 10, each 1-5
+      engagement_category: 'abandon' | 'skim' | 'browse' | 'engage' | 'extended';
+      signup_likelihood: number; // 0-1
+      retention_category: 'no_return' | 'weak' | 'moderate' | 'strong';
+      completion_likelihood: number; // 0-1
+      voice: {
+        first_impression?: string;
+        biggest_friction?: string;
+        would_return_because?: string;
+        if_could_change_one_thing?: string;
+      };
+      demographics: {
+        age_group: 'teen' | 'young_adult' | 'adult' | 'senior';
+        tech_literacy: number; // 0-1
+        crypto_experience: number; // 0-1
+        mobile_first: boolean;
+      };
+    },
+  ) =>
+    request<{
+      ok: boolean;
+      scanId: string;
+      rows_created: number;
+      summary: {
+        llm: Record<string, number>;
+        human: Record<string, number>;
+        delta: Record<string, number>;
+      };
+    }>(`/api/scan/${scanId}/survey`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 };
 
 // ─── Calibration API (Phase 2-C-1) ─────────────────────────────

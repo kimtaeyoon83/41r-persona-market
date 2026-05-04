@@ -11,7 +11,7 @@
 // pending rows.
 
 import { Router, type Router as RouterType } from 'express';
-import { and, eq, asc, desc, sql, isNotNull } from 'drizzle-orm';
+import { and, eq, asc, desc, sql, isNotNull, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { COHORT_BY_ID } from '@41rpm/shared';
 import { db, schema } from '../db/index.js';
@@ -72,6 +72,108 @@ router.post('/', async (req, res) => {
   startScanWorker(scan.id);
 
   res.json({ scanId: scan.id, status: scan.status });
+});
+
+// ─── Public homepage feeds (Phase 2 §8.1, P2-4) ──────────────────
+// Lightweight read endpoints powering the new main page Recent /
+// Top / Live feeds. No auth, no payment — every completed scan is
+// publicly browsable per the v1.0 decision doc §8.1.
+//
+// Wallet/email exposure is wallet-prefix-only; full addresses /
+// per-persona detail still require the persona drill-down which
+// has its own gate decisions in Phase 4 / 5.
+
+const ACTIVE_STATUSES = ['capturing', 'sampling', 'responding', 'aggregating'] as const;
+
+function shapeScanSummary(
+  scan: typeof schema.audienceFitScans.$inferSelect,
+  bestCohortLabel: string | null,
+) {
+  return {
+    id: scan.id,
+    target_url: scan.targetUrl,
+    category: scan.category,
+    one_line_pitch: scan.oneLinePitch,
+    audience_fit_score: scan.audienceFitScore,
+    best_cohort_id: scan.bestCohortId,
+    best_cohort_label: bestCohortLabel,
+    best_cohort_score: scan.bestCohortScore,
+    mode: scan.mode,
+    status: scan.status,
+    personas_completed: scan.personasCompleted,
+    created_at: scan.createdAt.toISOString(),
+    completed_at: scan.completedAt ? scan.completedAt.toISOString() : null,
+  };
+}
+
+async function attachBestCohortLabels(
+  scans: ReadonlyArray<typeof schema.audienceFitScans.$inferSelect>,
+): Promise<Array<ReturnType<typeof shapeScanSummary>>> {
+  const ids = scans
+    .map((s) => s.id)
+    .filter((id): id is string => typeof id === 'string');
+  if (ids.length === 0) return [];
+
+  // Pull just the best-cohort row for each scan in one query.
+  const rows = await db
+    .select({
+      scanId: schema.scanCohortResults.scanId,
+      cohortId: schema.scanCohortResults.cohortId,
+      cohortLabel: schema.scanCohortResults.cohortLabel,
+    })
+    .from(schema.scanCohortResults)
+    .where(inArray(schema.scanCohortResults.scanId, ids));
+
+  const byScanId = new Map<string, Map<string, string>>();
+  for (const r of rows) {
+    if (!byScanId.has(r.scanId)) byScanId.set(r.scanId, new Map());
+    byScanId.get(r.scanId)!.set(r.cohortId, r.cohortLabel);
+  }
+
+  return scans.map((s) => {
+    const cohortMap = byScanId.get(s.id);
+    const label = cohortMap && s.bestCohortId ? cohortMap.get(s.bestCohortId) ?? null : null;
+    return shapeScanSummary(s, label);
+  });
+}
+
+router.get('/recent', async (_req, res) => {
+  // Last 20 completed scans, newest first.
+  const scans = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(eq(schema.audienceFitScans.status, 'completed'))
+    .orderBy(desc(schema.audienceFitScans.completedAt))
+    .limit(20);
+  res.json({ scans: await attachBestCohortLabels(scans) });
+});
+
+router.get('/top', async (_req, res) => {
+  // Top 10 by audience_fit_score (descending).
+  const scans = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(
+      and(
+        eq(schema.audienceFitScans.status, 'completed'),
+        isNotNull(schema.audienceFitScans.audienceFitScore),
+      )
+    )
+    .orderBy(desc(schema.audienceFitScans.audienceFitScore))
+    .limit(10);
+  res.json({ scans: await attachBestCohortLabels(scans) });
+});
+
+router.get('/live', async (_req, res) => {
+  // Currently in-flight scans (capturing / sampling / responding /
+  // aggregating). Used by the homepage "Live Now" strip.
+  const scans = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(inArray(schema.audienceFitScans.status, [...ACTIVE_STATUSES]))
+    .orderBy(desc(schema.audienceFitScans.createdAt))
+    .limit(20);
+  res.json({ scans: await attachBestCohortLabels(scans) });
 });
 
 router.get('/:id/report', async (req, res) => {
@@ -238,6 +340,154 @@ router.get('/:id/report', async (req, res) => {
 // Persona drill-down endpoint — returns the persona's vector +
 // their response in this scan + scan meta. Drives the per-persona
 // detail page. 404 when scan or persona-row absent.
+// ─── Human survey (Phase 2 D3, P2-5) ─────────────────────────────
+// A human takes the same §11.1 survey as the AI personas for the
+// SAME url, then we drop one calibration_records row per dimension
+// (source='human_baseline'). Track A aggregator picks these up and
+// computes LLM-vs-human deltas.
+//
+// No auth in Phase 2 — email field is for traceability only. Phase 4
+// promotes this to Privy login.
+
+const surveyBody = z.object({
+  email: z.string().email().max(200),
+  // SUS-10 (Q1..Q10), 1-5 Likert.
+  sus_responses: z.array(z.number().int().min(1).max(5)).length(10),
+  // Engagement band — same enum as the AI persona schema.
+  engagement_category: z.enum(['abandon', 'skim', 'browse', 'engage', 'extended']),
+  // Adoption — likelihood to sign up (0-1).
+  signup_likelihood: z.number().min(0).max(1),
+  // Retention band — same enum as AI persona schema.
+  retention_category: z.enum(['no_return', 'weak', 'moderate', 'strong']),
+  // Task success — likelihood of completing the core action (0-1).
+  completion_likelihood: z.number().min(0).max(1),
+  // Voice quotes — required even if short.
+  voice: z.object({
+    first_impression: z.string().max(800).optional().default(''),
+    biggest_friction: z.string().max(400).optional().default(''),
+    would_return_because: z.string().max(400).optional().default(''),
+    if_could_change_one_thing: z.string().max(400).optional().default(''),
+  }),
+  // Self-reported demographics (cohort axes).
+  demographics: z.object({
+    age_group: z.enum(['teen', 'young_adult', 'adult', 'senior']),
+    tech_literacy: z.number().min(0).max(1),
+    crypto_experience: z.number().min(0).max(1),
+    mobile_first: z.boolean(),
+  }),
+});
+
+// Map human-side enum answers into the same 0-100 dimension scores
+// the AI persona pipeline produces. Mirrors mapLLMResponseToSimulated
+// in services/dimensions/llm.ts so LLM vs human are directly
+// comparable.
+const HUMAN_ENGAGEMENT_TO_SCORE: Record<string, number> = {
+  abandon: 10, skim: 30, browse: 55, engage: 75, extended: 90,
+};
+const HUMAN_RETENTION_TO_D7: Record<string, number> = {
+  no_return: 0, weak: 5, moderate: 30, strong: 55,
+};
+
+function computeSusScoreLocal(responses: readonly number[]): number {
+  // Same canonical SUS-10 calc as services/audience_fit.ts.
+  // Inlined to avoid pulling cross-module imports here.
+  let sum = 0;
+  for (let i = 0; i < 10; i++) {
+    const r = responses[i]!;
+    sum += i % 2 === 0 ? r - 1 : 5 - r;
+  }
+  return sum * 2.5;
+}
+
+router.post('/:id/survey', async (req, res) => {
+  const { id } = req.params;
+  if (!UUID_RE.test(id ?? '')) {
+    res.status(404).json({ error: 'scan_not_found' });
+    return;
+  }
+
+  const parsed = surveyBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
+    return;
+  }
+  const body = parsed.data;
+
+  const [scan] = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(eq(schema.audienceFitScans.id, id));
+  if (!scan) {
+    res.status(404).json({ error: 'scan_not_found' });
+    return;
+  }
+  if (scan.status !== 'completed') {
+    res.status(409).json({ error: 'scan_not_completed', status: scan.status });
+    return;
+  }
+
+  // Compute the human-side dimension scores (0-100) — same shape as
+  // the AI per-persona scores so calibration_records rows compare apples-to-apples.
+  const human = {
+    happiness: computeSusScoreLocal(body.sus_responses),
+    engagement: HUMAN_ENGAGEMENT_TO_SCORE[body.engagement_category]!,
+    adoption: body.signup_likelihood * 100,
+    retention: HUMAN_RETENTION_TO_D7[body.retention_category]!,
+    task_success: body.completion_likelihood * 100,
+  };
+
+  // Pull the LLM-side dimension means from scan_cohort_results,
+  // weighted by n_completed. Same recipe as services/audience_fit
+  // global_*_avg fields.
+  const cohortRows = await db
+    .select()
+    .from(schema.scanCohortResults)
+    .where(eq(schema.scanCohortResults.scanId, id));
+  const totalN = cohortRows.reduce((s, c) => s + c.nCompleted, 0) || 1;
+  const wAvg = (
+    key: 'happinessMean' | 'engagementMean' | 'adoptionMean' | 'retentionMean' | 'taskSuccessMean',
+  ) =>
+    cohortRows.reduce((s, c) => s + (c[key] ?? 0) * c.nCompleted, 0) / totalN;
+  const llm = {
+    happiness: wAvg('happinessMean'),
+    engagement: wAvg('engagementMean'),
+    adoption: wAvg('adoptionMean'),
+    retention: wAvg('retentionMean'),
+    task_success: wAvg('taskSuccessMean'),
+  };
+
+  // One calibration_records row per dimension. groundTruth = human,
+  // llmInference = scan-level avg. Track A reads these to compute
+  // correlation per dimension.
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const dims: Array<keyof typeof human> = [
+    'happiness', 'engagement', 'adoption', 'retention', 'task_success',
+  ];
+  for (const d of dims) {
+    await db.insert(schema.calibrationRecords).values({
+      date: dateStr,
+      siteUrl: scan.targetUrl,
+      personaId: null,
+      dimension: d,
+      llmInference: llm[d],
+      groundTruth: human[d],
+      delta: llm[d] - human[d],
+      source: 'human_baseline',
+    });
+  }
+
+  res.json({
+    ok: true,
+    scanId: id,
+    rows_created: dims.length,
+    summary: {
+      llm,
+      human,
+      delta: dims.reduce((acc, d) => ({ ...acc, [d]: llm[d] - human[d] }), {} as Record<string, number>),
+    },
+  });
+});
+
 router.get('/:scanId/persona/:personaId', async (req, res) => {
   const { scanId, personaId } = req.params;
   if (!UUID_RE.test(scanId) || !UUID_RE.test(personaId)) {
