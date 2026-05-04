@@ -131,7 +131,7 @@ function DetailInner() {
 
   return (
     <Frame active="discovery">
-      <div style={{ padding: "32px 48px", maxWidth: 780, margin: "0 auto" }}>
+      <div style={{ padding: "clamp(20px, 5vw, 32px) clamp(16px, 4vw, 48px)", maxWidth: 780, margin: "0 auto" }}>
         <div
           style={{
             display: "flex",

@@ -106,6 +106,16 @@
 [data-radius="round"] { --r-1: 6px; --r-2: 10px; --r-3: 14px; --r-4: 18px; --r-5: 22px; }
 
 /* ─── Base ─── */
+html, body {
+  /* Phase 4 mobile fix — TopBar + Credits widget extends past 390px on
+     phones and was forcing the whole document into horizontal scroll.
+     With body wider than viewport, Privy's position:fixed login modal
+     ends up landing off-screen because the visual viewport drifts to
+     the right. Clamping width + clipping overflow keeps the modal
+     anchored to the actual phone screen. */
+  max-width: 100%;
+  overflow-x: hidden;
+}
 body {
   color: var(--fg-0);
   background: var(--bg-0);
@@ -388,3 +398,12 @@ body::before {
   text-underline-offset: 2px;
 }
 .prose-diagnosis a:hover { opacity: 0.85; }
+
+/* ─── Mobile responsive utilities ─── */
+/* Used by TopBar (validator/_components/ui.tsx) to hide the Credits
+   widget + secondary nav items on phone-width screens. The TopBar is
+   built with inline styles so a className escape hatch is the cleanest
+   way to wire a media query without rewriting the component. */
+@media (max-width: 640px) {
+  .hide-mobile { display: none !important; }
+}

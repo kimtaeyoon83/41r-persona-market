@@ -239,6 +239,10 @@ export function TopBar({ active = "discovery" }: { active?: TopBarActive }) {
           <Link
             key={i.id}
             href={i.href}
+            // Keep Discovery (active landing tab) always visible on
+            // mobile; collapse Pro / Report / Calibration to free
+            // horizontal space so the TopBar fits in 390px.
+            className={i.id === "discovery" ? undefined : "hide-mobile"}
             style={{
               padding: "6px 12px",
               fontSize: 13,
@@ -273,6 +277,7 @@ export function TopBar({ active = "discovery" }: { active?: TopBarActive }) {
       </div>
       <div style={{ flex: 1 }} />
       <div
+        className="hide-mobile"
         style={{
           display: "flex",
           alignItems: "center",
