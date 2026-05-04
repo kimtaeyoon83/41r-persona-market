@@ -92,6 +92,21 @@ const envSchema = z.object({
   PERSONA_ENGINE_AUTH_TOKEN: z.string().optional(),
   PERSONA_SOURCE_REPORT_LIMIT: intFromString(5),
 
+  // Privy (Phase 4 §1) — single-auth identity provider.
+  // Local dev without these set disables /api/auth/me (returns 503).
+  // Prod must have both.
+  PRIVY_APP_ID: z.string().optional(),
+  PRIVY_APP_SECRET: z.string().optional(),
+
+  // 41R Fee Payer wallet (Phase 2 §3 / D6) — sponsored 0 USDC SPL
+  // transfer + future USDC reward distribution.
+  FEE_PAYER_KEYPAIR_JSON: z.string().optional(),
+
+  // Master mnemonic for HD-derived synthetic persona wallets
+  // (Phase 2 §D2). Only seed scripts + show-persona-key CLI need it —
+  // the API itself doesn't sign as personas.
+  PERSONA_MASTER_MNEMONIC: z.string().optional(),
+
   // R2 (production only — empty default lets dev run without it)
   R2_ACCOUNT_ID: z.string().default(''),
   R2_ACCESS_KEY_ID: z.string().default(''),
