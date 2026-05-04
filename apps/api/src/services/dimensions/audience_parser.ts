@@ -91,7 +91,7 @@ export async function parseAudience(text: string): Promise<ParsedAudience> {
   ].join('\n');
 
   try {
-    const msg = await withRoute('audience_fit.parse_audience', () =>
+    const msg = await withRoute('validator.parse_audience', () =>
       client.messages.create({
         model: SCORING_MODELS.haiku,
         max_tokens: 600,

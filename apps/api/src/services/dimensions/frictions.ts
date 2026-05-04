@@ -181,7 +181,7 @@ export async function clusterFrictions(scanId: string): Promise<FrictionCluster[
 
   let parsed: z.infer<typeof clusterSchema>;
   try {
-    const msg = await withRoute('audience_fit.cluster_frictions', () =>
+    const msg = await withRoute('validator.cluster_frictions', () =>
       client.messages.create({
         model: SCORING_MODELS.haiku,
         max_tokens: 2000,

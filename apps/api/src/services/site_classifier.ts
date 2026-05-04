@@ -109,7 +109,7 @@ ${JSON.stringify(SCHEMA_TEMPLATE, null, 2)}
 ${RULES}`;
 
   try {
-    const msg = await withRoute('audience_fit.site_classify', () =>
+    const msg = await withRoute('validator.classify_site', () =>
       client.messages.create({
         model: SCORING_MODELS.haiku,
         max_tokens: 220,

@@ -295,7 +295,7 @@ export async function runPersonaResponseLLM(
       ]
     : [{ type: 'text', text: userText }];
 
-  const msg = await withRoute('audience_fit.persona_response', () =>
+  const msg = await withRoute('validator.persona_response', () =>
     client.messages.create({
       model,
       max_tokens: 1400,
