@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Suspense, useState } from "react";
+import { usePrivy } from "@privy-io/react-auth";
+import {
+  useSignTransaction,
+  useWallets as useSolanaWallets,
+} from "@privy-io/react-auth/solana";
 import { scanApi } from "@/lib/api";
 import { Btn, C, Card, FM, Frame } from "../_components/ui";
 
@@ -40,7 +45,18 @@ function DetailInner() {
   );
   const [hypothesis, setHypothesis] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [submitStage, setSubmitStage] = useState<
+    null | "creating" | "signing" | "broadcasting" | "redirecting"
+  >(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Phase 4 D6 — Privy embedded wallet + sign-transaction hook.
+  // wallets[0] is the user's Solana embedded wallet (auto-created on
+  // email login). Phantom users connect their external wallet which
+  // also surfaces here.
+  const { authenticated } = usePrivy();
+  const { signTransaction } = useSignTransaction();
+  const { wallets: solanaWallets } = useSolanaWallets();
 
   const toggle = (t: string) =>
     setSelected((prev) => ({ ...prev, [t]: !prev[t] }));
@@ -65,8 +81,11 @@ function DetailInner() {
   const startAnalysis = async (skipInputs = false) => {
     if (submitting) return;
     setSubmitting(true);
+    setSubmitStage("creating");
     setError(null);
     try {
+      // 1. Create the scan row (anonymous if not logged in; ownership
+      //    claimed lazily by /payment-tx if/when authenticated).
       const cohorts = skipInputs ? [] : buildTargetCohorts();
       const { scanId } = await scanApi.createScan({
         target_url: url,
@@ -74,12 +93,39 @@ function DetailInner() {
         hypothesis: skipInputs ? undefined : buildHypothesisText(),
         target_cohorts: cohorts.length > 0 ? cohorts : undefined,
       });
+
+      // 2. Sponsored 0 USDC tx — Phase 4 D6.
+      //    Only attempt if a Privy Solana wallet is available. This
+      //    runs in parallel with the worker that already started
+      //    server-side; on failure we still proceed to the processing
+      //    screen (the scan itself doesn't gate on payment yet).
+      const wallet = solanaWallets[0];
+      if (authenticated && wallet) {
+        try {
+          setSubmitStage("signing");
+          const build = await scanApi.getPaymentTx(scanId);
+          const txBytes = base64ToBytes(build.txBase64);
+          const { signedTransaction } = await signTransaction({
+            transaction: txBytes,
+            wallet,
+          });
+          setSubmitStage("broadcasting");
+          await scanApi.confirmPayment(scanId, bytesToBase64(signedTransaction));
+        } catch (payErr) {
+          // Payment failure is non-fatal — log and continue. Scan
+          // still runs; user just doesn't get a Solscan receipt.
+          console.warn("[payment]", payErr);
+        }
+      }
+
+      setSubmitStage("redirecting");
       router.push(
         `/validator/processing/${scanId}?url=${encodeURIComponent(url)}`
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start analysis');
       setSubmitting(false);
+      setSubmitStage(null);
     }
   };
 
@@ -349,7 +395,7 @@ function DetailInner() {
               {submitting ? "Skip…" : "Skip"}
             </Btn>
             <Btn primary onClick={() => startAnalysis(false)}>
-              {submitting ? "Starting…" : "Start analysis →"}
+              {submitting ? stageLabel(submitStage) : "Start analysis →"}
             </Btn>
           </div>
         </div>
@@ -358,10 +404,41 @@ function DetailInner() {
   );
 }
 
+function stageLabel(stage: string | null): string {
+  switch (stage) {
+    case "creating":
+      return "Creating scan…";
+    case "signing":
+      return "Sign in your wallet…";
+    case "broadcasting":
+      return "Broadcasting tx…";
+    case "redirecting":
+      return "Loading processing…";
+    default:
+      return "Starting…";
+  }
+}
+
 export default function ValidatorDiscoveryDetailPage() {
   return (
     <Suspense fallback={<Frame active="discovery">{null}</Frame>}>
       <DetailInner />
     </Suspense>
   );
+}
+
+// Browser-safe base64 ↔ Uint8Array helpers. Avoids Node Buffer in the
+// client bundle (Next.js polyfills exist but tree-shaking quirks hit
+// us during the Privy 3.23 + @solana/kit transitive-dep mess).
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  return btoa(bin);
 }
