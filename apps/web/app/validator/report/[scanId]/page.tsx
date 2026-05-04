@@ -440,20 +440,6 @@ export default function ValidatorReportPage() {
                 </div>
               );
             })}
-            <div
-              style={{
-                marginTop: 10,
-                padding: 8,
-                background: C.expSoft,
-                borderRadius: 5,
-                fontSize: 11,
-                color: C.exp,
-                lineHeight: 1.5,
-              }}
-            >
-              ⚗ AARRR 5-stage funnel lives in <b>Pro mode</b> — Acquisition / Activation /
-              Retention / Referral / Revenue measured separately.
-            </div>
           </Card>
         </div>
 
@@ -563,9 +549,9 @@ export default function ValidatorReportPage() {
           />
         </div>
 
-        {/* ⓟ AARRR funnel — Pro tier (Phase 2-E). Mode A only;
-            Mode B reports skip this since the audience is already
-            narrow and "funnel" semantics don't apply. */}
+        {/* ⑤ AARRR funnel — Mode A only (Mode B audience is already
+            narrow and "funnel" semantics don't apply). Free feature
+            on the main report after the Pro tier was retired (D8). */}
         {r.aarrr && <AarrrFunnelBlock funnel={r.aarrr} />}
 
         <div
@@ -616,7 +602,7 @@ function verdictBorder(score: number): string {
   return C.ok;
 }
 
-// ─── AARRR funnel block (Pro tier — Phase 2-E) ───────────────────
+// ─── AARRR funnel block — main report section (Phase 2 D8) ──────
 // Visualises the 5-stage AARRR funnel as horizontal bars whose
 // width is proportional to the % of personas passing each stage.
 // The bars narrow from Acquisition (always 100%) downward — the
@@ -633,7 +619,7 @@ function AarrrFunnelBlock({
       <SectionLabel
         n="P"
         label="AARRR Funnel"
-        sub={`Pro tier · Acquisition → Activation → Retention → Referral → Revenue · n=${funnel.total_personas}`}
+        sub={`Acquisition → Activation → Retention → Referral → Revenue · n=${funnel.total_personas}`}
       />
       <Card padding={20} style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -731,8 +717,8 @@ function AarrrFunnelBlock({
             lineHeight: 1.5,
           }}
         >
-          ⓟ Pro tier — derived from per-persona dimension scores.
-          Custom thresholds + daily-monitoring deltas land in Phase 3.
+          ⓘ Derived from per-persona dimension scores. Custom thresholds
+          + daily-monitoring deltas planned for a later phase.
         </div>
       </Card>
     </>
