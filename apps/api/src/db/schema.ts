@@ -368,6 +368,22 @@ export const scanCohortResults = pgTable('scan_cohort_results', {
     .on(t.scanId, t.cohortId),
 }));
 
+// ─── Users (Phase 4 §1 — Privy single-auth) ─────────
+// One row per Privy-authenticated user. privy_id is the canonical
+// identity (DID format like did:privy:c0123...). email + wallet are
+// denormalized from Privy linked accounts for quick display and may
+// be null until the user links them. Replaces the autotest-era
+// testers/companies dichotomy with a single user concept.
+export const users = pgTable('users', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  privyId: text('privy_id').notNull().unique(),
+  email: text('email'),
+  walletAddress: text('wallet_address'),
+  displayName: text('display_name'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ─── Calibration Records (spec §5) ──────────────────
 // One row per (LLM inference, ground truth) pair. Track A is auto-
 // populated by the weekly Stagehand cron. Tracks B and C are manual

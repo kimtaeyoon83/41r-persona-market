@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import { Inter_Tight, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
-import { SolanaWalletProvider } from "@/components/wallet-provider";
-import { EvmWalletProvider } from "@/components/evm-wallet-provider";
+import { Providers } from "./providers";
 
 const interTight = Inter_Tight({
   subsets: ["latin"],
@@ -41,11 +40,9 @@ export default function RootLayout({
       <body
         className={`${interTight.variable} ${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
-        <SolanaWalletProvider>
-          <EvmWalletProvider>
-            <AppShell>{children}</AppShell>
-          </EvmWalletProvider>
-        </SolanaWalletProvider>
+        <Providers>
+          <AppShell>{children}</AppShell>
+        </Providers>
       </body>
     </html>
   );

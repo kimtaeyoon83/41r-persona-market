@@ -25,7 +25,10 @@
       "bufferutil",
       "utf-8-validate",
       "bigint-buffer"
-    ]
+    ],
+    "overrides": {
+      "@solana/kit": "^5.5.1"
+    }
   },
   "dependencies": {
     "@browserbasehq/stagehand": "^3.1.0",

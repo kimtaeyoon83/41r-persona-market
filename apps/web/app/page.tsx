@@ -11,11 +11,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { usePrivy } from "@privy-io/react-auth";
 import { scanApi, type ScanSummary } from "@/lib/api";
 import { C, FM, FS, Frame, Pill } from "./validator/_components/ui";
 
 export default function HomePage() {
   const router = useRouter();
+  const { ready, authenticated, login } = usePrivy();
   const [url, setUrl] = useState("yoursite.com");
   const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +45,14 @@ export default function HomePage() {
   const onAnalyze = () => {
     if (!url.trim()) return;
     setError(null);
+    // Phase 4 §1 — gate Analyze on Privy login. Unauthenticated
+    // visitors see the modal; once authenticated they continue to
+    // /validator/detail (where the scan is actually started).
+    if (!authenticated) {
+      if (!ready) return; // Privy still loading
+      login();
+      return;
+    }
     router.push(`/validator/detail?url=${encodeURIComponent(url.trim())}`);
   };
 

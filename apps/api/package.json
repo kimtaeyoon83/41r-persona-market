@@ -74,6 +74,7 @@
     "@anthropic-ai/sdk": "^0.78.0",
     "@aws-sdk/client-s3": "^3.1022.0",
     "@browserbasehq/stagehand": "^3.1.0",
+    "@privy-io/server-auth": "^1.32.5",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "@x402/core": "^2.5.0",
