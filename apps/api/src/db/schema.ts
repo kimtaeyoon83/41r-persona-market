@@ -163,6 +163,11 @@ export const personas = pgTable('personas', {
   }>().notNull(),
   isActive: boolean('is_active').notNull().default(true),
   sasAttestId: text('sas_attest_id'),
+  /** HD derivation index for synthetic-cohort personas (Phase 2 §D2).
+   *  Null for legacy wallet-based personas (real testers). When set,
+   *  the persona's wallet is m/44'/501'/<hd_index>'/0' under the
+   *  PERSONA_MASTER_MNEMONIC. UNIQUE so one slot maps to one wallet. */
+  hdIndex: integer('hd_index').unique(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

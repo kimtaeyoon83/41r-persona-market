@@ -69,7 +69,6 @@
     ]
   },
   "dependencies": {
-    "@41rpm/persona-client": "workspace:*",
     "@41rpm/shared": "workspace:*",
     "@41rpm/solana-utils": "workspace:*",
     "@anthropic-ai/sdk": "^0.78.0",
@@ -81,10 +80,12 @@
     "@x402/evm": "^2.10.0",
     "@x402/express": "^2.5.0",
     "@x402/svm": "^2.5.0",
+    "bip39": "^3.1.0",
     "bs58": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.0",
+    "ed25519-hd-key": "^2.0.0",
     "express": "^4.21.0",
     "express-rate-limit": "^8.3.2",
     "pg": "^8.13.0",

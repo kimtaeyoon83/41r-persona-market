@@ -1,22 +1,36 @@
 #!/usr/bin/env npx tsx
 /**
- * Seed the local DB with 112 fake personas covering all 8
- * STANDARD_COHORTS (14 per cohort) for the Audience-Fit Validator
- * Phase 1B simulator runs. Without this seed the cohort selector
- * leaves senior / web3_pro / etc. under-quota when only the legacy
- * append-diverse-personas pool (~20 personas) is loaded.
+ * Seed the DB with 8 STANDARD_COHORTS × 100 = 800 synthetic personas
+ * for the Audience-Fit Validator (Phase 2 §D2).
  *
- * Idempotent: each tester wallet is `seed_cohort_<id>_NN`. Existing
- * rows are skipped via ON CONFLICT / pre-check, so re-running is a
- * no-op once the 112 wallets exist.
+ * Wallet generation — HD-derived (BIP-39 + SLIP-10 ed25519):
+ *   master mnemonic → seed → m/44'/501'/<hd_index>'/0' → Solana keypair
+ *
+ *   hd_index assignment:
+ *     cohort_index 0 (crypto_native)     → indices 0..99
+ *     cohort_index 1 (defi_beginner)     → indices 100..199
+ *     ...
+ *     cohort_index 7 (non_tech_30s)      → indices 700..799
+ *
+ *   Re-running with the same mnemonic produces the same wallets.
+ *   Re-runs are idempotent (skipped via hd_index UNIQUE check).
+ *
+ * Required env:
+ *   DATABASE_URL              - Postgres connection string
+ *   PERSONA_MASTER_MNEMONIC   - 24-word BIP-39 mnemonic (auto-loaded
+ *                                from .env at repo root)
  *
  * Usage:
- *   DATABASE_URL=... pnpm tsx scripts/seed-validator-cohorts.ts
+ *   pnpm tsx scripts/seed-validator-cohorts.ts
+ *   pnpm tsx scripts/seed-validator-cohorts.ts --per-cohort 50  # smaller pool for tests
+ *   pnpm tsx scripts/seed-validator-cohorts.ts --dry-run
  */
 
+import 'dotenv/config';
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { STANDARD_COHORTS, type CohortDef } from '@41rpm/shared';
+import { getPersonaAddress } from '../apps/api/src/services/persona_wallets.js';
 
 const { Client } = pg;
 
@@ -25,6 +39,22 @@ if (!DB_URL) {
   console.error('DATABASE_URL required');
   process.exit(1);
 }
+
+if (!process.env.PERSONA_MASTER_MNEMONIC) {
+  console.error('PERSONA_MASTER_MNEMONIC required (set in .env)');
+  process.exit(1);
+}
+
+// CLI args
+const args = process.argv.slice(2);
+const PER_COHORT = (() => {
+  const idx = args.indexOf('--per-cohort');
+  if (idx >= 0 && args[idx + 1]) return parseInt(args[idx + 1]!, 10);
+  return 100;
+})();
+const DRY_RUN = args.includes('--dry-run');
+
+// ─── Vector building (carried over from prior version) ───────────
 
 // Deterministic-ish RNG so a re-run with the same seed produces the
 // same vectors (useful for diffing scan results).
@@ -44,8 +74,6 @@ function inRange(
   return lo + rand() * (hi - lo);
 }
 
-// Cohort-specific voice sample templates. Sounds like the persona,
-// not like the engineer who built them.
 const VOICE_BY_COHORT: Record<string, string[]> = {
   crypto_native: [
     'Slippage and MEV signaling matter most to me. I move fast.',
@@ -156,26 +184,54 @@ function buildVectorForCohort(cohort: CohortDef): unknown {
   };
 }
 
+// ─── Main ─────────────────────────────────────────────────────────
+
 async function main(): Promise<void> {
+  console.log(`Seeding ${STANDARD_COHORTS.length} cohorts × ${PER_COHORT} = ${STANDARD_COHORTS.length * PER_COHORT} personas`);
+  if (DRY_RUN) console.log('(dry-run — no DB writes)');
+
   const client = new Client({ connectionString: DB_URL });
   await client.connect();
 
   let testersCreated = 0;
   let personasCreated = 0;
+  let skippedExisting = 0;
 
   try {
-    for (const cohort of STANDARD_COHORTS) {
-      for (let i = 1; i <= cohort.target_n; i++) {
-        const wallet = `seed_cohort_${cohort.id}_${String(i).padStart(2, '0')}`;
-        const displayName = `${cohort.label} #${i}`;
+    for (let cohortIdx = 0; cohortIdx < STANDARD_COHORTS.length; cohortIdx++) {
+      const cohort = STANDARD_COHORTS[cohortIdx]!;
+      for (let i = 0; i < PER_COHORT; i++) {
+        const hdIndex = cohortIdx * PER_COHORT + i;
+        const walletAddr = getPersonaAddress(hdIndex);
+        const displayName = `${cohort.label} #${i + 1}`;
 
+        // Idempotent — skip if a persona already exists at this hd_index.
+        const existing = await client.query(
+          `SELECT id FROM personas WHERE hd_index = $1 LIMIT 1`,
+          [hdIndex]
+        );
+        if (existing.rowCount && existing.rowCount > 0) {
+          skippedExisting += 1;
+          continue;
+        }
+
+        if (DRY_RUN) {
+          if (i < 3 || i === PER_COHORT - 1) {
+            console.log(`  [${hdIndex}] ${cohort.label.padEnd(20)} → ${walletAddr}`);
+          } else if (i === 3) {
+            console.log(`  ... (${PER_COHORT - 4} more)`);
+          }
+          continue;
+        }
+
+        // Insert tester (wallet_address = HD-derived pubkey base58).
         const tIns = await client.query(
           `INSERT INTO testers (wallet_address, display_name, profile, tests_done)
            VALUES ($1, $2, $3, 5)
            ON CONFLICT (wallet_address) DO NOTHING
            RETURNING wallet_address`,
           [
-            wallet,
+            walletAddr,
             displayName,
             {
               expertise:
@@ -197,37 +253,31 @@ async function main(): Promise<void> {
         );
         if (tIns.rowCount && tIns.rowCount > 0) testersCreated += 1;
 
-        const existing = await client.query(
-          `SELECT id FROM personas WHERE tester_addr = $1 LIMIT 1`,
-          [wallet]
-        );
-        if (existing.rowCount && existing.rowCount > 0) continue;
-
         const personaId = randomUUID();
         const vector = buildVectorForCohort(cohort);
 
         await client.query(
-          `INSERT INTO personas (id, tester_addr, vector, is_active)
-           VALUES ($1, $2, $3, true)`,
-          [personaId, wallet, vector]
+          `INSERT INTO personas (id, tester_addr, vector, hd_index, is_active)
+           VALUES ($1, $2, $3, $4, true)`,
+          [personaId, walletAddr, vector, hdIndex]
         );
 
         await client.query(
           `UPDATE testers SET persona_id = $1 WHERE wallet_address = $2`,
-          [personaId, wallet]
+          [personaId, walletAddr]
         );
 
         personasCreated += 1;
       }
+      const generated = (cohortIdx + 1) * PER_COHORT;
+      console.log(`  ${cohort.label.padEnd(22)} done (cumulative ${generated})`);
     }
 
-    console.log(`✓ testers created: ${testersCreated}`);
-    console.log(`✓ personas created: ${personasCreated}`);
-    console.log(
-      `✓ target: ${STANDARD_COHORTS.length} cohorts × ${STANDARD_COHORTS[0]!.target_n} = ${
-        STANDARD_COHORTS.length * STANDARD_COHORTS[0]!.target_n
-      }`
-    );
+    console.log('');
+    console.log(`✓ testers created:   ${testersCreated}`);
+    console.log(`✓ personas created:  ${personasCreated}`);
+    console.log(`↻ skipped existing:  ${skippedExisting}`);
+    console.log(`Σ pool target:       ${STANDARD_COHORTS.length * PER_COHORT}`);
   } finally {
     await client.end();
   }

@@ -1,7 +1,6 @@
 import { pool } from '../db/index.js';
 import { env } from '../config/env.js';
 
-const PERSONA_ENGINE_URL = env.PERSONA_ENGINE_URL;
 const SOLANA_RPC_URL = env.SOLANA_RPC_URL;
 const CHECK_TIMEOUT_MS = env.HEALTH_CHECK_TIMEOUT_MS;
 
@@ -47,13 +46,6 @@ export async function checkDatabase(): Promise<CheckResult> {
   });
 }
 
-export async function checkPersonaEngine(): Promise<CheckResult> {
-  return timed(async () => {
-    const res = await fetchWithTimeout(`${PERSONA_ENGINE_URL}/health`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  });
-}
-
 export async function checkSolanaRpc(): Promise<CheckResult> {
   return timed(async () => {
     const res = await fetchWithTimeout(SOLANA_RPC_URL, {
@@ -68,10 +60,9 @@ export async function checkSolanaRpc(): Promise<CheckResult> {
 }
 
 export async function runHealthChecks(): Promise<Record<string, CheckResult>> {
-  const [db, engine, rpc] = await Promise.all([
+  const [db, rpc] = await Promise.all([
     checkDatabase(),
-    checkPersonaEngine(),
     checkSolanaRpc(),
   ]);
-  return { db, personaEngine: engine, solanaRpc: rpc };
+  return { db, solanaRpc: rpc };
 }

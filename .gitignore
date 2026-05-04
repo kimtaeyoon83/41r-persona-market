@@ -13,6 +13,10 @@ target/
 .env.local
 .env.*.local
 
+# Secrets — local-only sensitive material (mnemonics, keypairs).
+# See BACKUP.md and apps/api/src/services/persona_wallets.ts.
+secrets/
+
 # IDE
 .idea/
 .vscode/
