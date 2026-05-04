@@ -15,7 +15,14 @@ import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
 import { useEffect, type ReactNode } from "react";
 import { setAuthTokenGetter } from "@/lib/api";
 
-const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+// Inline default — Privy app id is client-side public (every browser
+// DevTools shows it on first page load), so committing the constant
+// is no leak. Server-only secret is PRIVY_APP_SECRET (Railway env).
+// We previously tried Dockerfile ARG default + Railway service env;
+// neither reliably reached `next build`, leaving appId undefined and
+// the login modal as a no-op.
+const PRIVY_APP_ID =
+  process.env.NEXT_PUBLIC_PRIVY_APP_ID || "cmor17hr1005w0dl1nnqmhhsy";
 
 export function Providers({ children }: { children: ReactNode }) {
   if (!PRIVY_APP_ID) {
