@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter_Tight, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
@@ -28,6 +28,18 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "41R Persona Market",
   description: "AI Persona-Based Product Validation Marketplace on Solana",
+};
+
+// Without this Next 14 ships no viewport meta, so mobile Safari/Chrome
+// fall back to the 980px desktop viewport and the Privy login modal
+// renders at desktop size while the page is zoomed out — looks broken.
+// `width=device-width, initial-scale=1` is the standard fix; we keep
+// `viewportFit=cover` so the iOS notch / home-indicator zone doesn't
+// crop the layout.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
