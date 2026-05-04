@@ -18,8 +18,14 @@ COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
 COPY --from=deps /app/packages/solana-utils/node_modules ./packages/solana-utils/node_modules
 COPY . .
-ARG NEXT_PUBLIC_API_URL
-ARG NEXT_PUBLIC_PRIVY_APP_ID
+ARG NEXT_PUBLIC_API_URL=https://api-production-a4e7.up.railway.app
+# NEXT_PUBLIC_PRIVY_APP_ID is client-side public (visible in any
+# browser DevTools), so committing the default is harmless. The
+# server-only secret is PRIVY_APP_SECRET which stays on Railway env.
+# Hardcoding the default sidesteps Railway's inconsistent build-arg
+# pass-through behavior — service env vars sometimes don't reach
+# `docker build` even when declared as ARG.
+ARG NEXT_PUBLIC_PRIVY_APP_ID=cmor17hr1005w0dl1nnqmhhsy
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_PRIVY_APP_ID=${NEXT_PUBLIC_PRIVY_APP_ID}
 RUN pnpm --filter @41rpm/shared build && \
