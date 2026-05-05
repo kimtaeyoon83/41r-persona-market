@@ -569,6 +569,7 @@ export default function ValidatorReportPage() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn href="/validator/how-it-works">How it works →</Btn>
             <Btn href={`/validator/survey/${scanId}`}>Take baseline survey →</Btn>
             <Btn href="/validator/calibration">Calibration report →</Btn>
           </div>

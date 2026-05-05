@@ -358,7 +358,13 @@ function HomeInner() {
           }}
         >
           <span>41R · Devnet · Phase 4 Internal Testing</span>
-          <span style={{ display: "flex", gap: 16 }}>
+          <span style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <Link
+              href="/validator/how-it-works"
+              style={{ color: C.textDim, textDecoration: "none" }}
+            >
+              How it works →
+            </Link>
             {authenticated && (
               <Link
                 href="/me/analyses"
