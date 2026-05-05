@@ -61,9 +61,9 @@ export default function HowItWorks() {
 
         <Section n={1} title="Two analysis modes">
           <Row label="Discovery (Mode A)">
-            URL only. ~110 personas across <b>8 standard cohorts</b> react.
-            Output: a 4-component composite + cohort × dimension breakdown.
-            Use when you want to find <i>who</i> your audience is.
+            URL only. <b>112 personas across 8 standard cohorts</b> (14 each)
+            react. Output: a 4-component composite + cohort × dimension
+            breakdown. Use when you want to find <i>who</i> your audience is.
           </Row>
           <Row label="Verify audience (Mode B)">
             URL + audience text (e.g.{" "}
@@ -88,9 +88,20 @@ export default function HowItWorks() {
           </p>
           <DimRow
             name="Engagement"
-            input="Engagement band (low / medium / high)"
-            formula="ENGAGEMENT_BAND_TO_SCORE lookup → 25 / 55 / 85"
-          />
+            input="Engagement band (5 levels by predicted session length)"
+            formula="ENGAGEMENT_BAND_TO_SCORE lookup"
+          >
+            <BandTable
+              header={["Band", "Session", "Score"]}
+              rows={[
+                ["abandon", "< 15s", "10"],
+                ["skim", "< 1 min", "30"],
+                ["browse", "1 – 5 min", "55"],
+                ["engage", "5 – 15 min", "75"],
+                ["extended", "> 15 min", "90"],
+              ]}
+            />
+          </DimRow>
           <DimRow
             name="Task Success"
             input="completion_likelihood (0–1)"
@@ -108,9 +119,19 @@ export default function HowItWorks() {
           />
           <DimRow
             name="Retention D-7"
-            input="Retention band (drop / lapse / steady / sticky)"
-            formula="RETENTION_BAND_TO_DCURVE.d7 lookup"
-          />
+            input="Retention band (4 levels) — D-7 read off a deterministic D-curve"
+            formula="RETENTION_BAND_TO_DCURVE[band].d7"
+          >
+            <BandTable
+              header={["Band", "D-1", "D-3", "D-7", "D-30"]}
+              rows={[
+                ["no_return", "5", "1", "0", "0"],
+                ["weak", "40", "15", "5", "1"],
+                ["moderate", "70", "50", "30", "10"],
+                ["strong", "85", "70", "55", "30"],
+              ]}
+            />
+          </DimRow>
         </Section>
 
         <Section n={3} title="Cohort fit score (per cohort)">
@@ -163,6 +184,31 @@ export default function HowItWorks() {
               <Term>0.20</Term> · global_task_success +{" "}
               <Term>0.10</Term> · global_sentiment
             </FormulaBlock>
+            <ul
+              style={{
+                fontSize: 12,
+                color: C.textDim,
+                marginTop: 10,
+                paddingLeft: 18,
+                lineHeight: 1.55,
+              }}
+            >
+              <li>
+                <Mono>best_cohort</Mono> — highest cohort_fit among the 8
+              </li>
+              <li>
+                <Mono>median_cohort</Mono> — median of the 8 cohort_fit values
+                (4th–5th ranked, averaged when even)
+              </li>
+              <li>
+                <Mono>global_task_success</Mono> — arithmetic mean of every
+                non-flagged persona&apos;s task_success
+              </li>
+              <li>
+                <Mono>global_sentiment</Mono> — arithmetic mean of every
+                non-flagged persona&apos;s happiness
+              </li>
+            </ul>
             <p
               style={{
                 fontSize: 12,
@@ -173,7 +219,7 @@ export default function HowItWorks() {
             >
               Rewards finding any cohort that resonates strongly (best · 0.4)
               while keeping the rest of the audience honest via median + two
-              global signals (task completion + overall sentiment).
+              global signals.
             </p>
           </div>
           <div>
@@ -302,6 +348,19 @@ export default function HowItWorks() {
           <Stage label="Retention" rule="+ retention_d7 ≥ 30" />
           <Stage label="Referral" rule="+ happiness ≥ 60" />
           <Stage label="Revenue" rule="+ adoption ≥ 65" />
+          <p
+            style={{
+              fontSize: 12,
+              color: C.textFaint,
+              marginTop: 14,
+              lineHeight: 1.55,
+            }}
+          >
+            Threshold values (30 / 30 / 60 / 65) are <b>v1.0 heuristic
+            baselines</b> derived from spec §6 — not yet category-specific.
+            They will be re-tuned per site category as Track A/B/C
+            calibration data accrues. See <i>Calibration</i> below.
+          </p>
         </Section>
 
         <Section n={8} title="Friction clustering">
@@ -573,10 +632,12 @@ function DimRow({
   name,
   input,
   formula,
+  children,
 }: {
   name: string;
   input: string;
   formula: string;
+  children?: React.ReactNode;
 }) {
   return (
     <div
@@ -599,7 +660,65 @@ function DimRow({
           <span style={{ color: C.textFaint, fontFamily: FM }}>formula · </span>
           <Mono>{formula}</Mono>
         </div>
+        {children && <div style={{ marginTop: 8 }}>{children}</div>}
       </div>
+    </div>
+  );
+}
+
+function BandTable({
+  header,
+  rows,
+}: {
+  header: string[];
+  rows: string[][];
+}) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table
+        style={{
+          fontSize: 11,
+          borderCollapse: "collapse",
+          fontFamily: FM,
+          minWidth: 280,
+        }}
+      >
+        <thead>
+          <tr style={{ color: C.textFaint }}>
+            {header.map((h, i) => (
+              <th
+                key={h}
+                style={{
+                  textAlign: i === 0 ? "left" : "right",
+                  padding: "4px 10px 4px 0",
+                  fontWeight: 500,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r[0]} style={{ borderTop: `1px solid ${C.border}` }}>
+              {r.map((cell, i) => (
+                <td
+                  key={i}
+                  style={{
+                    textAlign: i === 0 ? "left" : "right",
+                    padding: "4px 10px 4px 0",
+                    color: i === 0 ? C.text : C.textDim,
+                  }}
+                >
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
