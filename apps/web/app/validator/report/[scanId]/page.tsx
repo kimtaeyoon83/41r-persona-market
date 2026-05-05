@@ -568,7 +568,10 @@ export default function ValidatorReportPage() {
               Analyzed with <b>{r.scan.weights_version ?? "v1.0"}</b> weights
             </div>
           </div>
-          <Btn href="/validator/calibration">Calibration report →</Btn>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn href={`/validator/survey/${scanId}`}>Take baseline survey →</Btn>
+            <Btn href="/validator/calibration">Calibration report →</Btn>
+          </div>
         </div>
       </div>
     </Frame>
