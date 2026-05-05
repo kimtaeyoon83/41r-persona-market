@@ -810,12 +810,12 @@ function ModeBVerdictBlock({
           marginBottom: 24,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
-          <div style={{ flex: 1 }}>
+        <div className="v-stack-sm" style={{ alignItems: "center", gap: 24 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 11, color: C.textFaint, fontFamily: FM, letterSpacing: "0.06em", marginBottom: 4 }}>
               TARGET AUDIENCE
             </div>
-            <div style={{ fontSize: 18, fontWeight: 600, color: C.text, marginBottom: 14 }}>
+            <div style={{ fontSize: "clamp(15px, 4vw, 18px)", fontWeight: 600, color: C.text, marginBottom: 14, wordBreak: "break-word" }}>
               &ldquo;{audience}&rdquo;
             </div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -840,7 +840,7 @@ function ModeBVerdictBlock({
               })}
             </div>
           </div>
-          <div style={{ textAlign: "right", minWidth: 220 }}>
+          <div style={{ textAlign: "right" }}>
             <div
               style={{
                 display: "inline-flex",
