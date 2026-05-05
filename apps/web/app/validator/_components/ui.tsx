@@ -7,6 +7,7 @@
 // pathname bypass and does NOT touch globals.css.
 
 import Link from "next/link";
+import { usePrivy } from "@privy-io/react-auth";
 import type { CSSProperties, ReactNode } from "react";
 
 // ─── Theme constants ──────────────────────────────────────────────
@@ -180,16 +181,21 @@ export function Btn({
   );
 }
 
+// Kept for backward-compat with existing `<Frame active="...">` call
+// sites. The active prop no longer drives a nav highlight (the nav is
+// gone), but Frame still accepts and ignores it so pages compile.
 type TopBarActive = "discovery" | "pro" | "report" | "calibration";
 
-export function TopBar({ active = "discovery" }: { active?: TopBarActive }) {
-  const items: { id: TopBarActive; label: string; href: string; dim?: boolean }[] =
-    [
-      { id: "discovery", label: "Discovery", href: "/validator" },
-      { id: "pro", label: "Pro mode", href: "/validator/pro" },
-      { id: "report", label: "Report", href: "/validator/report/demo" },
-      { id: "calibration", label: "Calibration", href: "/validator/calibration" },
-    ];
+export function TopBar() {
+  // Phase 4 IA cleanup — dropped Discovery / Pro mode / Report /
+  // Calibration nav items: Pro / Report were dead links (no page,
+  // and `/validator/report/demo` resolved a literal "demo" scanId);
+  // Discovery duplicated `/` (which is the real entry point); the
+  // Calibration view is reachable from the report screen footer
+  // for the audience that needs it. Result is a hairline header
+  // with just the brand mark + auth-aware actions on the right.
+  const { ready, authenticated, login, logout, user } = usePrivy();
+  const showAuthControls = ready;
   return (
     <div
       style={{
@@ -198,13 +204,13 @@ export function TopBar({ active = "discovery" }: { active?: TopBarActive }) {
         background: C.panel,
         display: "flex",
         alignItems: "center",
-        padding: "0 24px",
-        gap: 24,
+        padding: "0 clamp(14px, 4vw, 24px)",
+        gap: 16,
         flexShrink: 0,
       }}
     >
       <Link
-        href="/validator"
+        href="/"
         style={{
           display: "flex",
           alignItems: "center",
@@ -234,80 +240,79 @@ export function TopBar({ active = "discovery" }: { active?: TopBarActive }) {
           41R
         </div>
       </Link>
-      <div style={{ display: "flex", gap: 4, marginLeft: 16 }}>
-        {items.map((i) => (
-          <Link
-            key={i.id}
-            href={i.href}
-            // Keep Discovery (active landing tab) always visible on
-            // mobile; collapse Pro / Report / Calibration to free
-            // horizontal space so the TopBar fits in 390px.
-            className={i.id === "discovery" ? undefined : "hide-mobile"}
-            style={{
-              padding: "6px 12px",
-              fontSize: 13,
-              borderRadius: 6,
-              textDecoration: "none",
-              color:
-                active === i.id ? C.text : i.dim ? C.textFaint : C.textDim,
-              background: active === i.id ? "#f3f0e8" : "transparent",
-              fontWeight: active === i.id ? 500 : 400,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            {i.label}
-            {i.dim && (
-              <span
-                style={{
-                  fontSize: 9,
-                  fontFamily: FM,
-                  color: C.textFaint,
-                  padding: "1px 4px",
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 3,
-                }}
-              >
-                soon
-              </span>
-            )}
-          </Link>
-        ))}
-      </div>
       <div style={{ flex: 1 }} />
-      <div
-        className="hide-mobile"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          fontSize: 12,
-          color: C.textDim,
-        }}
-      >
-        <span>
-          Credits <b style={{ color: C.text }}>$48.20</b>
-        </span>
+      {showAuthControls && (
         <div
           style={{
-            width: 26,
-            height: 26,
-            borderRadius: 999,
-            background: "#e9e3d3",
-            border: `1px solid ${C.border}`,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            fontSize: 12,
+            color: C.textDim,
           }}
-        />
-      </div>
+        >
+          {authenticated ? (
+            <>
+              <Link
+                href="/me/analyses"
+                style={{
+                  color: C.textDim,
+                  textDecoration: "none",
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                }}
+              >
+                My Analyses
+              </Link>
+              <button
+                onClick={() => logout()}
+                title={user?.email?.address ?? user?.wallet?.address ?? "Sign out"}
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 999,
+                  padding: "5px 12px",
+                  fontSize: 12,
+                  color: C.textDim,
+                  cursor: "pointer",
+                  fontFamily: FS,
+                }}
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => login()}
+              style={{
+                background: C.text,
+                border: "none",
+                borderRadius: 999,
+                padding: "6px 14px",
+                fontSize: 12,
+                color: C.bg,
+                cursor: "pointer",
+                fontFamily: FS,
+                fontWeight: 500,
+              }}
+            >
+              Sign in
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 export function Frame({
   children,
-  active,
 }: {
   children: ReactNode;
+  /** No longer used — the TopBar no longer renders a nav highlight.
+   *  Kept in the type so existing call sites (`<Frame active="...">`)
+   *  keep compiling.
+   */
   active?: TopBarActive;
 }) {
   return (
@@ -322,7 +327,7 @@ export function Frame({
         flexDirection: "column",
       }}
     >
-      <TopBar active={active} />
+      <TopBar />
       <div style={{ flex: 1, width: "100%" }}>
         <div style={{ maxWidth: 1080, margin: "0 auto" }}>{children}</div>
       </div>

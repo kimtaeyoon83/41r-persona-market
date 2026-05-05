@@ -1,24 +1,43 @@
 "use client";
 
-// Public homepage — Phase 2 §8.1 / P2-4.
+// Public homepage — Phase 2 §8.1 / P2-4 + Phase 4 IA cleanup.
 //
-// Anyone (no login) lands here. Three feeds populate the page:
-//   - Recent Analyses (last 20 completed)
-//   - Top PMF leaderboard (10 by audience_fit_score)
-//   - Live Now (in-flight scans)
-// Hero: URL input → Analyze button → /validator/detail (Mode A).
+// Single entry point for both analysis modes (the legacy /validator
+// route now redirects here):
+//   Mode A (Discovery)    URL only       → /validator/detail (sharpening)
+//   Mode B (Verification) URL + audience → POST /api/scan → /validator/processing/<id>
+//
+// Three live feeds fill the body: Live Now / Top PMF / Recent.
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { usePrivy } from "@privy-io/react-auth";
 import { scanApi, type ScanSummary } from "@/lib/api";
 import { C, FM, FS, Frame, Pill } from "./validator/_components/ui";
 
+type AnalysisMode = "A" | "B";
+
 export default function HomePage() {
+  return (
+    <Suspense fallback={null}>
+      <HomeInner />
+    </Suspense>
+  );
+}
+
+function HomeInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { ready, authenticated, login } = usePrivy();
-  const [url, setUrl] = useState("yoursite.com");
+
+  // Initial mode honours `?mode=B` (used by the /validator redirect
+  // and any legacy "Verify Mode B" links).
+  const initialMode: AnalysisMode = searchParams.get("mode") === "B" ? "B" : "A";
+  const [mode, setMode] = useState<AnalysisMode>(initialMode);
+  const [url, setUrl] = useState("");
+  const [audience, setAudience] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [recent, setRecent] = useState<ScanSummary[]>([]);
@@ -42,18 +61,42 @@ export default function HomePage() {
     return () => { cancelled = true; };
   }, []);
 
-  const onAnalyze = () => {
-    if (!url.trim()) return;
+  const onAnalyze = async () => {
+    if (submitting) return;
     setError(null);
-    // Phase 4 §1 — gate Analyze on Privy login. Unauthenticated
-    // visitors see the modal; once authenticated they continue to
-    // /validator/detail (where the scan is actually started).
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) {
+      setError("Enter a URL to analyze");
+      return;
+    }
     if (!authenticated) {
-      if (!ready) return; // Privy still loading
+      if (!ready) return;
       login();
       return;
     }
-    router.push(`/validator/detail?url=${encodeURIComponent(url.trim())}`);
+    if (mode === "A") {
+      router.push(`/validator/detail?url=${encodeURIComponent(trimmedUrl)}`);
+      return;
+    }
+    const trimmedAudience = audience.trim();
+    if (!trimmedAudience) {
+      setError("Audience is required for Verify mode");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const { scanId } = await scanApi.createScan({
+        target_url: trimmedUrl,
+        mode: "B",
+        target_audience_text: trimmedAudience,
+      });
+      router.push(
+        `/validator/processing/${scanId}?url=${encodeURIComponent(trimmedUrl)}`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start verify");
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -91,19 +134,73 @@ export default function HomePage() {
               fontFamily: FS,
             }}
           >
-            Find your audience fit in <span style={{ color: C.accent }}>5 minutes</span>.
+            {mode === "A" ? (
+              <>
+                Find your audience fit in{" "}
+                <span style={{ color: C.accent }}>5 minutes</span>.
+              </>
+            ) : (
+              <>
+                Verify a <span style={{ color: C.accent }}>specific audience</span>.
+              </>
+            )}
           </h1>
           <div
             style={{
               fontSize: "clamp(13px, 3vw, 15px)",
               color: C.textDim,
-              marginBottom: 28,
+              marginBottom: 22,
               lineHeight: 1.55,
               padding: "0 8px",
             }}
           >
-            Drop a URL. 800 AI personas across 8 cohorts react. You get an audience-fit score,
-            cohort × dimension breakdown, and a friction map within minutes.
+            {mode === "A"
+              ? "Drop a URL. 800 AI personas across 8 cohorts react. You get an audience-fit score, cohort × dimension breakdown, and a friction map within minutes."
+              : "Tell us who you're targeting. ~50 personas matching that audience run a pass/fail verification on your URL."}
+          </div>
+
+          {/* Mode toggle */}
+          <div
+            style={{
+              display: "inline-flex",
+              gap: 4,
+              marginBottom: 22,
+              padding: 4,
+              background: "#f3f0e8",
+              borderRadius: 999,
+              border: `1px solid ${C.border}`,
+            }}
+          >
+            {(
+              [
+                { id: "A" as const, label: "Discovery" },
+                { id: "B" as const, label: "Verify audience" },
+              ]
+            ).map((m) => (
+              <button
+                key={m.id}
+                onClick={() => {
+                  setMode(m.id);
+                  setError(null);
+                }}
+                style={{
+                  padding: "6px 14px",
+                  fontSize: 12,
+                  borderRadius: 999,
+                  background: mode === m.id ? C.panel : "transparent",
+                  color: mode === m.id ? C.text : C.textDim,
+                  border:
+                    mode === m.id
+                      ? `1px solid ${C.borderStrong}`
+                      : "1px solid transparent",
+                  cursor: "pointer",
+                  fontFamily: FS,
+                  fontWeight: mode === m.id ? 600 : 400,
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
           </div>
 
           <div
@@ -137,21 +234,54 @@ export default function HomePage() {
             />
             <button
               onClick={onAnalyze}
-              disabled={!url.trim()}
+              disabled={submitting || !url.trim()}
               style={{
                 padding: "14px 24px",
                 fontSize: 13,
                 fontWeight: 600,
-                background: C.text,
+                background: submitting || !url.trim() ? C.textFaint : C.text,
                 color: C.bg,
                 border: "none",
-                cursor: "pointer",
+                cursor: submitting || !url.trim() ? "not-allowed" : "pointer",
                 fontFamily: FS,
+                whiteSpace: "nowrap",
               }}
             >
-              Analyze →
+              {submitting ? "Starting…" : mode === "A" ? "Analyze →" : "Verify →"}
             </button>
           </div>
+
+          {mode === "B" && (
+            <div
+              style={{
+                display: "flex",
+                maxWidth: 520,
+                margin: "10px auto 0",
+                border: `1.5px solid ${C.borderStrong}`,
+                borderRadius: 999,
+                overflow: "hidden",
+                background: C.panel,
+              }}
+            >
+              <input
+                type="text"
+                value={audience}
+                onChange={(e) => setAudience(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") onAnalyze(); }}
+                placeholder='Target audience — e.g. "30s DeFi expert mobile-first"'
+                style={{
+                  flex: 1,
+                  padding: "12px 22px",
+                  fontSize: 13,
+                  fontFamily: FS,
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  color: C.text,
+                }}
+              />
+            </div>
+          )}
 
           {error && (
             <div style={{ color: C.bad, fontSize: 12, marginTop: 12 }}>{error}</div>
@@ -165,7 +295,9 @@ export default function HomePage() {
               fontFamily: FM,
             }}
           >
-            Free during beta · No login · Public results
+            {mode === "A"
+              ? "Free during beta · ~6 min · 113 personas across 8 cohorts"
+              : "Free during beta · ~2 min · up to 50 personas matching audience"}
           </div>
         </div>
 
@@ -235,9 +367,6 @@ export default function HomePage() {
                 My Analyses →
               </Link>
             )}
-            <Link href="/validator" style={{ color: C.textDim, textDecoration: "none" }}>
-              Verify a specific audience (Mode B) →
-            </Link>
           </span>
         </div>
       </div>
