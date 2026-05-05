@@ -427,3 +427,17 @@ body::before {
   flex-wrap: wrap;
   gap: 6px;
 }
+/* Flex row that stacks vertically on phone — used by the report
+   header (title + actions) and the Audience-Fit panel (gauge +
+   verdict). Class drives `display`/`flex-direction`; call sites
+   only inline alignItems / gap so the media query wins. */
+.v-stack-sm {
+  display: flex;
+  align-items: flex-start;
+}
+@media (max-width: 640px) {
+  .v-stack-sm {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

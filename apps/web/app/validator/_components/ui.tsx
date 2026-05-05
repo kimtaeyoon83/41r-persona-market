@@ -392,7 +392,12 @@ export function PMFGauge({ value = 45 }: { value?: number }) {
   const ny = cy - (r - 4) * Math.sin(ang);
   const tone = value < 40 ? C.bad : value < 60 ? C.warn : C.ok;
   return (
-    <svg width={W} height={H}>
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      width={W}
+      height={H}
+      style={{ display: "block", maxWidth: "100%", height: "auto" }}
+    >
       <path
         d={arcPath(0, 40)}
         stroke={C.bad}

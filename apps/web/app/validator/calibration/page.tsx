@@ -81,11 +81,11 @@ export default function ValidatorCalibrationPage() {
     <Frame active="calibration">
       <div className="v-page-pad">
         <div
+          className="v-stack-sm"
           style={{
-            display: "flex",
             justifyContent: "space-between",
-            alignItems: "baseline",
             marginBottom: 18,
+            gap: 14,
           }}
         >
           <div>
@@ -94,10 +94,11 @@ export default function ValidatorCalibrationPage() {
             </Pill>
             <h1
               style={{
-                fontSize: 24,
+                fontSize: "clamp(20px, 5vw, 24px)",
                 fontWeight: 600,
                 margin: 0,
                 letterSpacing: "-0.01em",
+                wordBreak: "keep-all",
               }}
             >
               Calibration & Service Information
@@ -107,7 +108,7 @@ export default function ValidatorCalibrationPage() {
               {report.totalRecords.toLocaleString()} records
             </div>
           </div>
-          <div style={{ display: "flex", gap: 14 }}>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
             {report.tracks.map((t) => (
               <div key={t.key} style={{ textAlign: "right" }}>
                 <div

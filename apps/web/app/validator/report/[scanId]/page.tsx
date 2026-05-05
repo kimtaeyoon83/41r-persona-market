@@ -116,13 +116,11 @@ export default function ValidatorReportPage() {
     <Frame active="report">
       <div className="v-page-pad">
         <div
+          className="v-stack-sm"
           style={{
-            display: "flex",
             justifyContent: "space-between",
-            alignItems: "flex-start",
             marginBottom: 20,
             gap: 16,
-            flexWrap: "wrap",
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -142,7 +140,7 @@ export default function ValidatorReportPage() {
                 · {r.scan.personas_completed} personas · scan {r.scan.id.slice(0, 8)}
               </span>
             </div>
-            <h1 style={{ fontSize: 24, fontWeight: 600, margin: 0, letterSpacing: "-0.01em" }}>
+            <h1 style={{ fontSize: "clamp(18px, 5vw, 24px)", fontWeight: 600, margin: 0, letterSpacing: "-0.01em", wordBreak: "break-word", lineHeight: 1.25 }}>
               {r.scan.target_url} — Survival Report
             </h1>
             {r.scan.one_line_pitch && (
@@ -160,7 +158,7 @@ export default function ValidatorReportPage() {
               </div>
             )}
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <Btn>Re-run</Btn>
             <Btn>Export ↗</Btn>
             <Btn primary>Share report</Btn>
@@ -221,12 +219,12 @@ export default function ValidatorReportPage() {
           </div>
         )}
         {result && r.scan.mode === "A" && <div
+          className="v-stack-sm"
           style={{
             background: C.warnSoft,
             border: "1px solid #ecdcb4",
             borderRadius: 12,
             padding: 20,
-            display: "flex",
             alignItems: "center",
             gap: 24,
             marginBottom: 24,
