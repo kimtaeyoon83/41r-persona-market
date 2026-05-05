@@ -1052,6 +1052,54 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   prior "audiences in hypothesis text" plumbing is gone — the
   pipeline filters STANDARD_COHORTS by id when `target_cohorts` is
   set. The chips on Detail carry cohort ids for exactly this.
+- Restore `/validator` as a duplicate Mode A/B toggle entry point.
+  Phase 4 IA cleanup made `/` (`apps/web/app/page.tsx`) the single
+  entry — Mode toggle, hero, feeds, audience input all live there.
+  `apps/web/app/validator/page.tsx` is intentionally a `redirect("/")`
+  stub (8 lines) so bookmarks + legacy "Verify Mode B" links keep
+  working. Reintroducing the toggle on `/validator` brings back the
+  two-entry-point confusion that drove the consolidation.
+- Re-add Discovery / Pro mode / Report / Calibration nav items to
+  the validator TopBar. Pro/Report were dead links (no
+  `/validator/pro` page, `/validator/report/demo` resolved a literal
+  "demo" scanId), Discovery duplicated `/`, and Calibration is an
+  internal/dev surface the report footer link is enough for. Current
+  TopBar is `[41R logo → /]  [Sign in | My Analyses · Sign out]` —
+  keep it that minimal.
+- Restore the Weight Evolution chart on `/validator/calibration`.
+  It rendered hardcoded `DEFAULT_VERSIONS` from
+  `services/calibration/aggregator.ts` (spec §5.4 example values v1.0
+  → v1.3) that don't match the v1 weights `services/audience_fit.ts`
+  actually uses. The chart implied quarterly retraining had happened
+  when in fact every score still uses v1.0. Phase 2-C-2 retraining
+  cron + a real `calibration_versions` history table must land first.
+- Change the formulas / weights / thresholds on
+  `/validator/how-it-works` without updating
+  `services/audience_fit.ts` + `services/dimensions/llm.ts` +
+  `services/aarrr.ts` in the same commit. The methodology page is
+  the public source-of-truth contract — drift between page and code
+  breaks the "no black box" promise. The math invariants test suite
+  (`__tests__/audience_fit_helpers.test.ts`) is the lock; if a number
+  on the page doesn't appear in the code or the tests, it's stale.
+- Remove `.v-page-pad` / `.v-stack-sm` / `.v-grid-stack-sm` /
+  `.v-row-wrap` / `.hide-mobile` from `apps/web/app/globals.css`, or
+  the `html, body { max-width: 100%; overflow-x: hidden }` rule.
+  Every detail page (report, processing, persona, calibration,
+  survey, me/analyses, how-it-works) leans on these for phone
+  layout. Removing the overflow-x clip specifically re-breaks the
+  Privy login modal on mobile — the modal anchors to a viewport that
+  drifts horizontally when document width exceeds viewport.
+- Drop the `viewport` export from `apps/web/app/layout.tsx`. Next 14
+  ships no viewport meta without it, so iOS Safari / Android Chrome
+  fall back to the 980px desktop viewport and Privy's modal renders
+  at desktop scale on a phone screen. The export is required, not
+  cosmetic.
+- Hardcode KPI / cohort / persona feeds back into `apps/web/app/page.tsx`.
+  All Recent / Top / Live data must read from `scanApi.getRecent()`
+  / `getTop()` / `getLive()`. Mode A → `/validator/detail` and Mode
+  B → `POST /api/scan` flows live in `onAnalyze` — the `?mode=B`
+  query param flips the initial toggle so legacy "Verify Mode B"
+  links keep landing in the right state.
 
 ## Dev harness (`/api/dev/*`)
 
