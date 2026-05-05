@@ -9,7 +9,6 @@ import {
   FM,
   Frame,
   Pill,
-  WeightChart,
 } from "../_components/ui";
 
 // Screen 7: Calibration deep view. Maps to ScreenCalibrationV21 in
@@ -258,18 +257,11 @@ export default function ValidatorCalibrationPage() {
           })}
         </Card>
 
-        <Card padding={18}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-            Weight evolution {report.versions[0]?.v} →{" "}
-            {report.versions[report.versions.length - 1]?.v}
-          </div>
-          <div style={{ fontSize: 12, color: C.textDim, marginBottom: 18 }}>
-            Dimensions with stronger validation gain weight automatically.
-            Phase 2-C-2 will derive these from per-quarter calibration runs
-            instead of the hardcoded sequence.
-          </div>
-          <WeightChart versions={report.versions} />
-        </Card>
+        {/* Weight evolution chart removed — was driven by hardcoded
+            placeholder versions in services/calibration/aggregator.ts
+            (DEFAULT_VERSIONS) that don't match what scoring actually
+            uses. Restore once Phase 2-C-2 retraining cron writes a
+            real calibration_versions history. */}
       </div>
     </Frame>
   );
