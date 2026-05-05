@@ -407,3 +407,23 @@ body::before {
 @media (max-width: 640px) {
   .hide-mobile { display: none !important; }
 }
+
+/* Validator detail pages (report/processing/persona/calibration/
+   survey/me-analyses) mix inline styles with these utility hooks to
+   get phone-first behavior without rewriting every grid. */
+.v-page-pad {
+  padding: clamp(16px, 4vw, 24px) clamp(14px, 4vw, 32px) clamp(40px, 8vw, 80px);
+}
+.v-grid-stack-sm {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 640px) {
+  .v-grid-stack-sm { grid-template-columns: 1fr; }
+}
+.v-row-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

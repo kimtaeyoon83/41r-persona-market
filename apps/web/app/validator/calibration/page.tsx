@@ -79,7 +79,7 @@ export default function ValidatorCalibrationPage() {
 
   return (
     <Frame active="calibration">
-      <div style={{ padding: "24px 32px 32px" }}>
+      <div className="v-page-pad">
         <div
           style={{
             display: "flex",

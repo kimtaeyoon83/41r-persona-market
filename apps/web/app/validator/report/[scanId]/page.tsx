@@ -114,7 +114,7 @@ export default function ValidatorReportPage() {
 
   return (
     <Frame active="report">
-      <div style={{ padding: "24px 32px 36px" }}>
+      <div className="v-page-pad">
         <div
           style={{
             display: "flex",
@@ -122,6 +122,7 @@ export default function ValidatorReportPage() {
             alignItems: "flex-start",
             marginBottom: 20,
             gap: 16,
+            flexWrap: "wrap",
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -261,7 +262,7 @@ export default function ValidatorReportPage() {
               Median across cohorts is{" "}
               <b style={{ color: C.text }}>{Math.round(result.median_score)}</b>.
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
               {kpis.map((s) => (
                 <div
                   key={s.l}
@@ -368,14 +369,7 @@ export default function ValidatorReportPage() {
 
         {/* ② Engagement */}
         <SectionLabel n={2} label="Engagement" sub="First-session flow in plain terms" />
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1.1fr 1fr",
-            gap: 14,
-            marginBottom: 14,
-          }}
-        >
+        <div className="v-grid-stack-sm" style={{ marginBottom: 14 }}>
           <Card padding={18}>
             <div
               style={{
@@ -527,14 +521,7 @@ export default function ValidatorReportPage() {
           label="Persona Resonance"
           sub="Who used it how — click a card for drill-down"
         />
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 14,
-            marginBottom: 24,
-          }}
-        >
+        <div className="v-grid-stack-sm" style={{ marginBottom: 24 }}>
           <PersonaBoard
             tone="ok"
             label="Fit personas"

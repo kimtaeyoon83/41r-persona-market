@@ -109,7 +109,7 @@ export default function SurveyPage() {
   if (success) {
     return (
       <Frame active="discovery">
-        <div style={{ padding: "60px 32px", maxWidth: 640, margin: "0 auto" }}>
+        <div className="v-page-pad" style={{ maxWidth: 640, margin: "0 auto" }}>
           <h1 style={{ fontSize: 28, fontWeight: 600, fontFamily: FS, marginBottom: 14 }}>
             ✓ Thanks — your response was recorded.
           </h1>
@@ -148,7 +148,7 @@ export default function SurveyPage() {
 
   return (
     <Frame active="discovery">
-      <div style={{ padding: "40px 32px 80px", maxWidth: 720, margin: "0 auto" }}>
+      <div className="v-page-pad" style={{ maxWidth: 720, margin: "0 auto" }}>
         <div style={{ marginBottom: 28 }}>
           <Link href="/" style={{ fontSize: 12, color: C.textFaint, fontFamily: FM, textDecoration: "none" }}>
             ← Home

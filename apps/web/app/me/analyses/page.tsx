@@ -83,7 +83,7 @@ export default function MyAnalysesPage() {
 
   return (
     <Frame active="discovery">
-      <div style={{ padding: "40px 32px 80px", maxWidth: 1080, margin: "0 auto" }}>
+      <div className="v-page-pad" style={{ maxWidth: 1080, margin: "0 auto" }}>
         <div style={{ marginBottom: 28 }}>
           <Link
             href="/"

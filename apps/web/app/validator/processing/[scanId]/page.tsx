@@ -119,7 +119,7 @@ function ProcessingInner() {
 
   return (
     <Frame active="discovery">
-      <div style={{ padding: "24px 32px" }}>
+      <div className="v-page-pad">
         <div
           style={{
             display: "flex",
