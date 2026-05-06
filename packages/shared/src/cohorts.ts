@@ -38,6 +38,20 @@ export type CohortDef = {
   target_n: number;
 };
 
+// Strict union of the 8 STANDARD_COHORTS ids — used by acquisition
+// priors and any other code that needs full per-cohort coverage at
+// compile time. Renaming a cohort id requires updating both this
+// type and the data migration on scan_cohort_results.cohort_id.
+export type CohortId =
+  | 'crypto_native'
+  | 'defi_beginner'
+  | 'designer_20s'
+  | 'senior'
+  | 'teen_newcomer'
+  | 'mobile_power'
+  | 'web3_pro'
+  | 'non_tech_30s';
+
 // Total 8 × 14 = 112 personas (≈ "113 personas" in the design prototype).
 // If a cohort under-quotas (n_completed < target_n), the report card
 // labels it "n=8/14 (under-quota)" so users see the gap explicitly
