@@ -84,7 +84,21 @@ export type PersonaLLMResponse = z.infer<typeof personaResponseSchema>;
 function buildSystemPrompt(): string {
   return `You are a UX research synthesizer responding AS a specific human persona looking at a product. You output JSON only — no prose outside the JSON.
 
-Stay in character. The persona is fictional but its voice and reactions must be plausible given the supplied PersonaVector. If the persona physically cannot use the site (e.g. low english_fluency on an English-only site), mark engagement.category=abandon. Do NOT pretend ability the persona doesn't have.
+Stay in character. The persona is fictional but its voice and reactions must be plausible given the supplied PersonaVector. Do NOT pretend ability the persona doesn't have, and do NOT pretend interest the persona doesn't have.
+
+Be honest about engagement. Real first-time visitors abandon sites quickly — across typical web traffic ~50% leave within 15 seconds, ~75% within a minute. Mark engagement.category=abandon when ANY of:
+  - The persona physically cannot use the site (e.g. low english_fluency on an English-only site)
+  - The site's category / topic does not match the persona's interests or expertise
+  - The persona's tech_literacy is incompatible with the interface complexity
+  - The value proposition is not legible to this persona at first glance
+  - The persona has no incentive to invest more than 15 seconds
+
+Reference distribution across all visitors (engagement.category):
+  abandon ~50%   skim ~25%   browse ~17%   engage ~5%   extended ~3%
+
+Adjust based on persona-fit: a strong-fit persona may land at engage/extended, a weak-fit persona must land at abandon/skim. Personas should NOT all collapse into "browse" — that hides the audience signal you're being asked to surface.
+
+When engagement.category=abandon, also set interaction_depth_estimate ≤ 1, retention.category=no_return, signup_likelihood ≤ 0.05, completion_likelihood ≤ 0.05. An abandoner doesn't sign up or complete tasks.
 
 If you cannot judge a dimension from what you know about the URL, set numeric values to 0 and explain in the matching voice field. Do NOT invent specifics about the site.`;
 }
@@ -197,16 +211,30 @@ export function mapLLMResponseToSimulated(parsed: PersonaLLMResponse): Simulated
   const susRawScore = computeSusScore(parsed.happiness.sus_responses);
 
   const engagementBand = parsed.engagement.category as EngagementBand;
-  const retentionBand = parsed.retention.category as RetentionBand;
+  let retentionBand = parsed.retention.category as RetentionBand;
+
+  // Defense in depth — system prompt asks the LLM to set signup/
+  // completion ≤ 0.05 and retention=no_return when engagement=abandon,
+  // but Haiku occasionally drifts and emits "abandoned but would
+  // sign up". Clamp here so downstream cohort means + AARRR funnel
+  // see consistent values regardless of model compliance.
+  let signupLikelihood = parsed.adoption.signup_likelihood;
+  let completionLikelihood = parsed.task_success.completion_likelihood;
+  if (engagementBand === 'abandon') {
+    signupLikelihood = Math.min(signupLikelihood, 0.05);
+    completionLikelihood = Math.min(completionLikelihood, 0.05);
+    retentionBand = 'no_return';
+  }
+
   const retentionDCurve = RETENTION_BAND_TO_DCURVE[retentionBand];
 
   return {
     scores: {
       happiness: susRawScore,
       engagement: ENGAGEMENT_BAND_TO_SCORE[engagementBand],
-      adoption: parsed.adoption.signup_likelihood * 100,
+      adoption: signupLikelihood * 100,
       retention_d7: retentionDCurve.d7,
-      task_success: parsed.task_success.completion_likelihood * 100,
+      task_success: completionLikelihood * 100,
     },
     retention_band: retentionBand,
     retention_d_curve: retentionDCurve,
@@ -214,8 +242,8 @@ export function mapLLMResponseToSimulated(parsed: PersonaLLMResponse): Simulated
     raw: {
       sus_responses: parsed.happiness.sus_responses,
       sus_raw_score: susRawScore,
-      signup_likelihood: parsed.adoption.signup_likelihood,
-      completion_likelihood: parsed.task_success.completion_likelihood,
+      signup_likelihood: signupLikelihood,
+      completion_likelihood: completionLikelihood,
     },
     is_flagged: !parsed.self_consistency_check.happiness_retention_aligned,
     flag_reason: !parsed.self_consistency_check.happiness_retention_aligned
