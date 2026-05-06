@@ -237,6 +237,22 @@ export function computeAarrrWeightedFromRows(
     return (wsum / totalArrival) * 100;
   };
 
+  // Intent-action multipliers (Phase B-followup, 2026-05-06).
+  // Personas predict INTENT ("would I do X?"). GA4 measures ACTION
+  // ("did X happen?"). The intent-action gap is well-known in
+  // consumer research and grows with each stage of the funnel:
+  // signing up is harder than browsing; converting is harder than
+  // signing up. These factors collapse persona intent toward
+  // action-realistic rates. Acquisition stays at 100% (baseline).
+  // Calibrated against Merch Store GA4 (n=1) — Phase B-followup
+  // step 3 will validate generalization to other categories.
+  const INTENT_ACTION = {
+    activation: 0.50,
+    retention: 0.20,
+    referral: 0.10,
+    revenue: 0.05,
+  } as const;
+
   const totalPersonas = valid.length;
   const stages: AarrrStage[] = [
     {
@@ -250,7 +266,7 @@ export function computeAarrrWeightedFromRows(
     {
       key: 'activation',
       label: 'Activation',
-      score: weightedPct('activationRate'),
+      score: weightedPct('activationRate') * INTENT_ACTION.activation,
       n_passing: 0, // weighted view has no meaningful integer count
       total: totalPersonas,
       threshold: THRESHOLDS.activation,
@@ -258,7 +274,7 @@ export function computeAarrrWeightedFromRows(
     {
       key: 'retention',
       label: 'Retention',
-      score: weightedPct('retentionRate'),
+      score: weightedPct('retentionRate') * INTENT_ACTION.retention,
       n_passing: 0,
       total: totalPersonas,
       threshold: THRESHOLDS.retention,
@@ -266,7 +282,7 @@ export function computeAarrrWeightedFromRows(
     {
       key: 'referral',
       label: 'Referral',
-      score: weightedPct('referralRate'),
+      score: weightedPct('referralRate') * INTENT_ACTION.referral,
       n_passing: 0,
       total: totalPersonas,
       threshold: THRESHOLDS.referral,
@@ -274,7 +290,7 @@ export function computeAarrrWeightedFromRows(
     {
       key: 'revenue',
       label: 'Revenue',
-      score: weightedPct('revenueRate'),
+      score: weightedPct('revenueRate') * INTENT_ACTION.revenue,
       n_passing: 0,
       total: totalPersonas,
       threshold: THRESHOLDS.revenue,

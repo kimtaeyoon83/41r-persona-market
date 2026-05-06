@@ -185,8 +185,11 @@ describe('computeAarrrWeightedFromRows', () => {
     expect(w).not.toBeNull();
     expect(w!.stages[0]!.key).toBe('acquisition');
     expect(w!.stages[0]!.score).toBe(100);
-    expect(w!.stages[1]!.score).toBeLessThan(80);
-    expect(w!.stages[1]!.score).toBeGreaterThan(50);
+    // Phase B-followup: weighted activation now also × INTENT_ACTION
+    // factor (0.5 for activation), so the previous 50-80 range halves
+    // to ~25-40. Still well below the 100% panel baseline.
+    expect(w!.stages[1]!.score).toBeLessThan(40);
+    expect(w!.stages[1]!.score).toBeGreaterThan(25);
   });
 
   it('weighted funnel monotonic non-increasing', () => {
