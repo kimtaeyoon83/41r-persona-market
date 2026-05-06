@@ -162,9 +162,12 @@ export default function HowItWorks() {
               lineHeight: 1.55,
             }}
           >
-            An <b>Acquisition Layer</b> (v1.1) is in progress to weight cohorts
-            by site-realistic arrival shares, narrowing the gap with traffic
-            reality. Until then, all numbers are persona-conditional.
+            <b style={{ color: C.text }}>Acquisition Layer v1.1 — live.</b>{" "}
+            The report page now ships a toggle between the research-panel
+            view (persona-conditional) and the visitor-weighted view
+            (priors-weighted by 12 site categories × 8 cohorts). Numerical
+            calibration n=1 baseline against Google Merch Store: AARRR
+            activation gap halved, 95% → 49% (GA4 reality 23%).
           </p>
         </Section>
 

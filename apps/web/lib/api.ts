@@ -324,6 +324,30 @@ export type ScanReport = {
     median_score: number;
     global_task_success_avg: number;
     global_sentiment_avg: number;
+    /** Acquisition Layer v1.1 — visitor-weighted parallel view.
+     *  Mode A only; null when no cohort data or Mode B. */
+    weighted?: {
+      audience_fit_score: number;
+      best: {
+        cohort_id: string;
+        cohort_label: string;
+        cohort_fit_score: number;
+        arrival_share: number;
+        abandon_rate: number;
+      };
+      worst: {
+        cohort_id: string;
+        cohort_label: string;
+        cohort_fit_score: number;
+        arrival_share: number;
+        abandon_rate: number;
+      };
+      median_score: number;
+      global_task_success_avg: number;
+      global_sentiment_avg: number;
+      priors_source: string;
+      priors_confidence: number;
+    } | null;
   } | null;
   cohorts: unknown[] | null;
   fit_personas: ScanPersonaCard[] | null;
@@ -336,6 +360,18 @@ export type ScanReport = {
   formula_rows: { d: string; s: number; w: number; c: number }[] | null;
   kpis: { l: string; v: string; sub: string; tone: string }[] | null;
   aarrr: {
+    total_personas: number;
+    stages: {
+      key: 'acquisition' | 'activation' | 'retention' | 'referral' | 'revenue';
+      label: string;
+      score: number;
+      n_passing: number;
+      total: number;
+      threshold: string;
+    }[];
+  } | null;
+  /** Acquisition Layer v1.1 — visitor-weighted AARRR. Mode A only. */
+  aarrr_weighted?: {
     total_personas: number;
     stages: {
       key: 'acquisition' | 'activation' | 'retention' | 'referral' | 'revenue';

@@ -211,24 +211,31 @@ export default function ValidatorCalibrationPage() {
               }}
             >
               <div style={{ fontSize: 11, fontFamily: FM, color: C.warn, fontWeight: 600, letterSpacing: "0.06em", marginBottom: 6 }}>
-                ⚠ KNOWN GAP (3/7)
+                ⚠ NARROWED GAP (post v1.1)
               </div>
               <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.6, color: C.text }}>
-                <li>Engagement: 41R 0% abandon vs GA4 51%</li>
-                <li>Task success: 67/100 vs 1.64% (intent ≠ action)</li>
-                <li>AARRR activation: 95% vs 23% (no acq layer)</li>
+                <li>
+                  AARRR activation: <b style={{ color: C.text }}>95% → 49%</b>{" "}
+                  (GA4 23%) — gap halved
+                </li>
+                <li>
+                  Engagement abandon: 0% in panel view (priors-weighted in
+                  visitor view)
+                </li>
+                <li>Task success vs purchase rate: ~10× intent-action gap remains (fundamental)</li>
               </ul>
             </div>
           </div>
 
           <p style={{ fontSize: 11, color: C.textFaint, lineHeight: 1.55, margin: 0 }}>
-            <b style={{ color: C.text }}>Why the gaps:</b> 41R simulates
-            engaged-audience reactions, not visitor traffic distribution. The
-            abandon population (~50% of real users) is not modeled. The{" "}
-            <b style={{ color: C.text }}>Acquisition Layer (v1.1)</b> in
-            development will weight cohorts by site-realistic arrival shares
-            to narrow the engagement / activation gaps. Intent-action gap
-            (~10×) is fundamental to persona-conditional measurement.
+            <b style={{ color: C.text }}>Acquisition Layer v1.1 — LIVE.</b>{" "}
+            Stage 1 (persona simulation) measures engaged-audience reactions;
+            Stage 2 (acquisition priors, 12 categories × 8 cohorts) weights
+            cohorts by site-realistic arrival shares + abandon rates. The
+            visitor-weighted view on the report page reflects the combined
+            output. Activation gap halved (95% → 49% vs GA4 23%); the
+            intent-action gap (~10×) is fundamental to persona-conditional
+            measurement and not addressed by acquisition weighting.
           </p>
         </Card>
 

@@ -42,6 +42,11 @@ export default function ValidatorReportPage() {
   const [report, setReport] = useState<ScanReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Acquisition Layer v1.1 — toggle between research-panel view
+  // (Stage 1, persona-conditional) and visitor-weighted view
+  // (Stage 1 × Stage 2 acquisition priors). Default: panel, since
+  // the weighted view depends on heuristic priors that are still v1.0.
+  const [view, setView] = useState<"panel" | "visitor">("panel");
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +118,23 @@ export default function ValidatorReportPage() {
   const dimensionBreakdown = r.dimension_breakdown ?? [];
   const kpis = r.kpis ?? [];
 
+  // Acquisition Layer v1.1 — derive the effective top-line based on
+  // toggle. When weighted is null (Mode B / no data / pre-deploy
+  // scans) we silently fall back to panel so the UI never breaks.
+  const weighted = result?.weighted ?? null;
+  const visitorAvailable = view === "visitor" && weighted != null;
+  const effectiveResult = visitorAvailable
+    ? {
+        audience_fit_score: weighted!.audience_fit_score,
+        best: weighted!.best,
+        worst: weighted!.worst,
+        median_score: weighted!.median_score,
+        global_task_success_avg: weighted!.global_task_success_avg,
+        global_sentiment_avg: weighted!.global_sentiment_avg,
+      }
+    : result;
+  const effectiveAarrr = visitorAvailable ? r.aarrr_weighted : r.aarrr;
+
   return (
     <Frame active="report">
       <div className="v-page-pad">
@@ -158,6 +180,51 @@ export default function ValidatorReportPage() {
                 &ldquo;{r.scan.one_line_pitch}&rdquo;
               </div>
             )}
+            {/* Acquisition Layer v1.1 — view toggle. Only shown when the
+                weighted view is available (Mode A + post-Stage-3 scans). */}
+            {weighted && (
+              <div
+                style={{
+                  marginTop: 12,
+                  display: "inline-flex",
+                  gap: 0,
+                  background: "#f3f0e8",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 999,
+                  padding: 3,
+                  fontSize: 11,
+                  fontFamily: FM,
+                }}
+              >
+                {(
+                  [
+                    { id: "panel" as const, label: "Research panel", sub: "engaged audience" },
+                    { id: "visitor" as const, label: "Visitor-weighted", sub: "v1.1 priors" },
+                  ]
+                ).map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setView(m.id)}
+                    title={m.sub}
+                    style={{
+                      padding: "5px 12px",
+                      borderRadius: 999,
+                      background: view === m.id ? C.panel : "transparent",
+                      color: view === m.id ? C.text : C.textDim,
+                      border:
+                        view === m.id
+                          ? `1px solid ${C.borderStrong}`
+                          : "1px solid transparent",
+                      cursor: "pointer",
+                      fontFamily: FM,
+                      fontWeight: view === m.id ? 600 : 400,
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <Btn>Re-run</Btn>
@@ -171,7 +238,7 @@ export default function ValidatorReportPage() {
         {r.scan.mode === "B" && (
           <ModeBVerdictBlock
             verdict={r.scan.mode_b_verdict}
-            score={result?.audience_fit_score ?? null}
+            score={effectiveResult?.audience_fit_score ?? null}
             audience={r.scan.target_audience_text ?? ""}
             parsedSelector={r.scan.mode_b_parsed_selector}
             personasCompleted={r.scan.personas_completed}
@@ -231,7 +298,7 @@ export default function ValidatorReportPage() {
             marginBottom: 24,
           }}
         >
-          <PMFGauge value={Math.round(result.audience_fit_score)} />
+          <PMFGauge value={Math.round(effectiveResult!.audience_fit_score)} />
           <div style={{ flex: 1 }}>
             <div
               style={{
@@ -240,26 +307,26 @@ export default function ValidatorReportPage() {
                 gap: 6,
                 padding: "4px 10px",
                 background: "#fff",
-                border: `1px solid ${verdictBorder(result.audience_fit_score)}`,
+                border: `1px solid ${verdictBorder(effectiveResult!.audience_fit_score)}`,
                 borderRadius: 999,
                 fontSize: 11,
                 fontWeight: 600,
-                color: verdictBorder(result.audience_fit_score),
+                color: verdictBorder(effectiveResult!.audience_fit_score),
                 marginBottom: 10,
               }}
             >
-              {verdictLabel(result.audience_fit_score)}
+              {verdictLabel(effectiveResult!.audience_fit_score)}
             </div>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Verdict</div>
             <div style={{ fontSize: 13, color: C.textDim, lineHeight: 1.6, marginBottom: 14 }}>
               Best-fit cohort{" "}
-              <b style={{ color: C.text }}>{result.best.cohort_label}</b> scores{" "}
-              <b style={{ color: C.text }}>{Math.round(result.best.cohort_fit_score)}</b>;
+              <b style={{ color: C.text }}>{effectiveResult!.best.cohort_label}</b> scores{" "}
+              <b style={{ color: C.text }}>{Math.round(effectiveResult!.best.cohort_fit_score)}</b>;
               the worst{" "}
-              <b style={{ color: C.text }}>{result.worst.cohort_label}</b> sits at{" "}
-              <b style={{ color: C.text }}>{Math.round(result.worst.cohort_fit_score)}</b>.
+              <b style={{ color: C.text }}>{effectiveResult!.worst.cohort_label}</b> sits at{" "}
+              <b style={{ color: C.text }}>{Math.round(effectiveResult!.worst.cohort_fit_score)}</b>.
               Median across cohorts is{" "}
-              <b style={{ color: C.text }}>{Math.round(result.median_score)}</b>.
+              <b style={{ color: C.text }}>{Math.round(effectiveResult!.median_score)}</b>.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
               {kpis.map((s) => (
@@ -538,7 +605,7 @@ export default function ValidatorReportPage() {
         {/* ⑤ AARRR funnel — Mode A only (Mode B audience is already
             narrow and "funnel" semantics don't apply). Free feature
             on the main report after the Pro tier was retired (D8). */}
-        {r.aarrr && (
+        {effectiveAarrr && (
           <>
             <div
               style={{
@@ -573,7 +640,7 @@ export default function ValidatorReportPage() {
                 why
               </Link>
             </div>
-            <AarrrFunnelBlock funnel={r.aarrr} />
+            <AarrrFunnelBlock funnel={effectiveAarrr} />
           </>
         )}
 
