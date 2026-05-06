@@ -108,6 +108,11 @@ function DetailInner() {
           const { signedTransaction } = await signTransaction({
             transaction: txBytes,
             wallet,
+            // Privy default chain is solana:mainnet; we run on devnet,
+            // so explicit override is required — otherwise the
+            // embedded wallet refuses to sign against the devnet
+            // blockhash and surfaces a "screen error" mid-flow.
+            chain: 'solana:devnet',
           });
           setSubmitStage("broadcasting");
           await scanApi.confirmPayment(scanId, bytesToBase64(signedTransaction));

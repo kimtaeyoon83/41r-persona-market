@@ -128,6 +128,8 @@ export default function WalletPage() {
       const { signedTransaction } = await signTransaction({
         transaction: txBytes,
         wallet,
+        // Privy default chain is solana:mainnet; we run on devnet.
+        chain: 'solana:devnet',
       });
       const sig = await conn.sendRawTransaction(signedTransaction);
       await conn.confirmTransaction(sig, "confirmed");
