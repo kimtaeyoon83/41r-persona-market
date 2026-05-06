@@ -13,15 +13,22 @@
 import { Router, type Router as RouterType } from 'express';
 import { and, eq, asc, desc, sql, isNotNull, inArray } from 'drizzle-orm';
 import { z } from 'zod';
-import { COHORT_BY_ID } from '@41rpm/shared';
+import { COHORT_BY_ID, getAcquisitionPriorsFor } from '@41rpm/shared';
 import { db, schema } from '../db/index.js';
 import {
   AUDIENCE_FIT_WEIGHTS,
   DIMENSION_WEIGHTS_V1,
+  applyAcquisitionWeights,
+  computeWeightedAudienceFit,
+  type CohortFit,
 } from '../services/audience_fit.js';
 import { startScanWorker } from '../services/scan_pipeline.js';
 import { getCategoryBenchmark } from '../services/benchmark.js';
-import { computeAarrr } from '../services/aarrr.js';
+import {
+  computeAarrr,
+  computeAarrrWeightedFromRows,
+  type AarrrWeightedInputRow,
+} from '../services/aarrr.js';
 import { requirePrivyAuth, optionalPrivyAuth } from '../middleware/privy_auth.js';
 import {
   buildSponsoredZeroTx,
@@ -327,6 +334,34 @@ router.get('/:id/report', async (req, res) => {
     scanShape.personas_attempted = livePersonasCompleted;
   }
 
+  // Acquisition Layer (Phase B1 v1.1) — compute weighted view alongside
+  // the cached "research panel" view. Both surfaces are exposed; the
+  // UI toggles between them. Mode A only — Mode B's single-bucket
+  // doesn't have inter-cohort acquisition dynamics to weight.
+  let weightedView: ReturnType<typeof computeWeightedAudienceFit> | null = null;
+  if (completed && scan.mode === 'A' && cohortRows.length > 0) {
+    const priors = getAcquisitionPriorsFor(
+      scan.category,
+      scan.categoryConfidence,
+    );
+    const cohortFits: CohortFit[] = cohortRows.map((c) => ({
+      cohort_id: c.cohortId,
+      cohort_label: c.cohortLabel,
+      n_completed: c.nCompleted,
+      dimension_means: {
+        happiness: c.happinessMean ?? 0,
+        engagement: c.engagementMean ?? 0,
+        adoption: c.adoptionMean ?? 0,
+        retention_d7: c.retentionMean ?? 0,
+        task_success: c.taskSuccessMean ?? 0,
+      },
+      cohort_fit_score: c.cohortFitScore ?? 0,
+    }));
+    weightedView = computeWeightedAudienceFit(
+      applyAcquisitionWeights(cohortFits, priors),
+    );
+  }
+
   res.json({
     scan: scanShape,
     result: completed
@@ -349,6 +384,32 @@ router.get('/:id/report', async (req, res) => {
           global_sentiment_avg: scan.globalSentimentAvg ?? 0,
           weights_used: AUDIENCE_FIT_WEIGHTS,
           dimension_weights: DIMENSION_WEIGHTS_V1,
+          // Acquisition Layer v1.1 — visitor-weighted parallel view.
+          // Null on Mode B / no cohorts. Same `dimension_weights` apply.
+          weighted: weightedView
+            ? {
+                audience_fit_score: weightedView.audience_fit_score_weighted,
+                best: {
+                  cohort_id: weightedView.best_weighted.cohort_id,
+                  cohort_label: weightedView.best_weighted.cohort_label,
+                  cohort_fit_score: weightedView.best_weighted.weighted_cohort_fit_score,
+                  arrival_share: weightedView.best_weighted.arrival_share,
+                  abandon_rate: weightedView.best_weighted.abandon_rate,
+                },
+                worst: {
+                  cohort_id: weightedView.worst_weighted.cohort_id,
+                  cohort_label: weightedView.worst_weighted.cohort_label,
+                  cohort_fit_score: weightedView.worst_weighted.weighted_cohort_fit_score,
+                  arrival_share: weightedView.worst_weighted.arrival_share,
+                  abandon_rate: weightedView.worst_weighted.abandon_rate,
+                },
+                median_score: weightedView.median_score_weighted,
+                global_task_success_avg: weightedView.global_task_success_weighted,
+                global_sentiment_avg: weightedView.global_sentiment_weighted,
+                priors_source: scan.category ?? 'Other',
+                priors_confidence: scan.categoryConfidence ?? 0,
+              }
+            : null,
         }
       : null,
     cohorts: cohortRows.map(shapeCohort),
@@ -367,8 +428,38 @@ router.get('/:id/report', async (req, res) => {
     cohort_progress: shapeCohortProgress(cohortProgressRows),
     // Pro tier: AARRR funnel — Mode A only (Mode B is single-audience).
     aarrr: completed && scan.mode === 'A' ? await computeAarrr(id) : null,
+    // Acquisition Layer v1.1 — weighted (visitor-level) AARRR. Same
+    // gating as `aarrr` above. Computed inline; persona rows joined
+    // with cohort_id so the per-cohort pass rates can be priors-weighted.
+    aarrr_weighted:
+      completed && scan.mode === 'A'
+        ? await computeWeightedAarrrFor(id, scan.category, scan.categoryConfidence)
+        : null,
   });
 });
+
+// Helper — fetch persona rows + cohortId for the weighted AARRR
+// compute. Lifted out of the route handler so the inline call site
+// stays readable; the handler is already 130+ lines.
+async function computeWeightedAarrrFor(
+  scanId: string,
+  category: string | null,
+  confidence: number | null,
+): Promise<ReturnType<typeof computeAarrrWeightedFromRows>> {
+  const priors = getAcquisitionPriorsFor(category, confidence);
+  const rows: AarrrWeightedInputRow[] = await db
+    .select({
+      cohortId: schema.scanPersonaResponses.cohortId,
+      isFlagged: schema.scanPersonaResponses.isFlagged,
+      happiness: schema.scanPersonaResponses.happinessScore,
+      taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
+      adoption: schema.scanPersonaResponses.adoptionScore,
+      retentionD7: schema.scanPersonaResponses.retentionD7,
+    })
+    .from(schema.scanPersonaResponses)
+    .where(eq(schema.scanPersonaResponses.scanId, scanId));
+  return computeAarrrWeightedFromRows(rows, priors);
+}
 
 // ─── GET /api/scan/:scanId/persona/:personaId ─────────────────────
 // Persona drill-down endpoint — returns the persona's vector +
