@@ -24,12 +24,25 @@ in sync when editing browser_runner / agent_loop.
 ## Deployment (Railway + Cloudflare R2)
 
 ```
-Railway ─── API  (Docker) → https://api-production-a4e7.up.railway.app
-        ├── Web  (Docker) → https://web-production-8813d.up.railway.app
+Railway ─── API  (Docker) → https://api.project-rpm.xyz   (legacy: api-production-a4e7.up.railway.app)
+        ├── Web  (Docker) → https://app.project-rpm.xyz   (legacy: web-production-8813d.up.railway.app)
         └── PostgreSQL    → internal connection
 
 Cloudflare R2 ── Screenshots CDN → https://pub-d5db789b01364e288af930cfd54a666e.r2.dev
 ```
+
+### Railway custom domain target port — **always 8080**
+Railway injects `PORT=8080` into every container by default. Both `apps/api/src/index.ts`
+(`process.env.PORT || process.env.API_PORT || 4100`) and Next.js standalone (`apps/web/server.js`)
+honor that env, so the actual listen port is **8080**, not the `EXPOSE 4100` / `EXPOSE 3000`
+in the Dockerfiles. When configuring custom domains in Railway dashboard → Networking → Custom
+Domain, set **Target Port: 8080** (or leave blank for auto-detect). Setting it to 4100 / 3000
+based on the Dockerfile's `EXPOSE` produces a 502 because the proxy routes to a port nothing
+listens on. The auto-generated `*.up.railway.app` URLs work without configuration because
+Railway auto-maps them to the listening port — that's why they hide this gotcha until you add
+a custom domain. CORS for the custom domain is gated by `CORS_ALLOWED_ORIGINS` env on the api
+service — current allowlist must include `https://app.project-rpm.xyz`. The web subdomain is
+**`app`**, not `web` (typo we considered earlier).
 
 ### Deployment Commands
 ```bash
@@ -1100,6 +1113,63 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   B → `POST /api/scan` flows live in `onAnalyze` — the `?mode=B`
   query param flips the initial toggle so legacy "Verify Mode B"
   links keep landing in the right state.
+- Edit the 96 entries in `packages/shared/src/acquisition_priors.ts`
+  without keeping the `arrival_share` sum = 1.0 ± 0.01 invariant per
+  category. The 14 invariant tests in
+  `__tests__/acquisition_priors.test.ts` are the lock — weighted
+  aggregates produce nonsense if any category's arrival shares don't
+  normalize. Same for `abandon_rate` ∈ [0, 1]. Refining a prior
+  value is fine; breaking the sum is not.
+- Promote the report page default view from "panel" to "visitor"
+  before n≥5 sites with shared GA validate the heuristic priors. The
+  v1.0 prior table is *educated guess*, not measured calibration.
+  Until validated, "panel" stays default and "visitor" is opt-in via
+  the toggle. The Reality Check card on `/validator/calibration`
+  documents the n=1 (Merch Store) baseline + the gap-closure %.
+- Drop or replace `applyAcquisitionWeights` /
+  `computeWeightedAudienceFit` / `computeAarrrWeightedFromRows`
+  without keeping the `result.weighted` + `aarrr_weighted` API
+  contract intact. The web `ScanReport` type marks both as optional/
+  nullable, but the report page's `effectiveResult` /
+  `effectiveAarrr` derived state silently falls back to the panel
+  view only when those fields are explicitly null — flipping the API
+  to omit them entirely breaks the toggle UI.
+- Move the AARRR thresholds back to the v1.0 baseline
+  (retention ≥ 30, revenue/adoption ≥ 65) without re-validating the
+  persona output distribution. The 2026-05-06 retune to
+  retention ≥ 5 + adoption ≥ 30 came from observing that ~85% of
+  personas land in the retention "weak" band (D7=5) and ~95% have
+  adoption < 65, so the old gates killed the cumulative funnel
+  post-activation. The retune was the fix for the
+  "Retention/Referral/Revenue all 0%" bug Stage 5 surfaced.
+  Per-category re-tuning (Phase 2-C-2) will eventually derive these
+  from real outcomes; until then, ≥5 / ≥30 are the v1.1 baselines
+  that produce a meaningful 5/5 funnel.
+- Conflate `audience_fit_score` (panel) with
+  `result.weighted.audience_fit_score` (visitor) in marketing copy.
+  These measure different things — panel is persona-conditional
+  ("if 8 cohorts engage with this site, who resonates?"); visitor
+  weights cohorts by site-realistic arrival shares ("if real visitor
+  traffic hit this site, what's the net audience fit after the
+  abandon population?"). Calibration showed visitor lands closer to
+  GA4 reality but a ~10× intent-action gap remains, fundamental to
+  persona-conditional measurement. Mixing the two in a single number
+  reintroduces the "black box" framing the methodology page rejects.
+- Skip the `getAcquisitionPriorsFor()` confidence floor. The 0.5
+  `CONFIDENCE_FLOOR` exists so a low-confidence site classifier
+  (`category_confidence < 0.5`) doesn't drive aggressive cohort
+  weights via priors that may not apply. Falling back to the 'Other'
+  prior (flat-ish distribution, moderate abandon) preserves the
+  weighted feature for these scans without inventing strong claims.
+- Render Retention / Referral / Revenue stages as %-confidence
+  predictions. Even after the v1.1 threshold retune (5/5 stages
+  non-zero), the visitor-weighted absolute values still overshoot
+  GA4 reality by ~5-30× (e.g. visitor revenue 31.9% vs GA4 1.6% for
+  Merch Store). They are *relative ranking signals across sites*,
+  not traffic forecasts. The `PERSONA-CONDITIONAL` warning banner
+  above the AARRR funnel + the "What this measures (and doesn't)"
+  §00 on `/validator/how-it-works` are the load-bearing caveats —
+  keep them when iterating.
 
 ## Dev harness (`/api/dev/*`)
 
