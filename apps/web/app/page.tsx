@@ -136,8 +136,8 @@ function HomeInner() {
           >
             {mode === "A" ? (
               <>
-                Find your audience fit in{" "}
-                <span style={{ color: C.accent }}>5 minutes</span>.
+                See how your audience{" "}
+                <span style={{ color: C.accent }}>actually reacts</span>.
               </>
             ) : (
               <>
@@ -149,14 +149,28 @@ function HomeInner() {
             style={{
               fontSize: "clamp(13px, 3vw, 15px)",
               color: C.textDim,
-              marginBottom: 22,
+              marginBottom: 8,
               lineHeight: 1.55,
               padding: "0 8px",
             }}
           >
             {mode === "A"
-              ? "Drop a URL. 800 AI personas across 8 cohorts react. You get an audience-fit score, cohort × dimension breakdown, and a friction map within minutes."
-              : "Tell us who you're targeting. ~50 personas matching that audience run a pass/fail verification on your URL."}
+              ? "112 representative personas across 8 cohorts react to your site. Cohort fit · 5-dimension breakdown · friction map · cohort × dimension matrix."
+              : "Tell us who you're targeting. ~50 matching personas run a pass/conditional/fail check."}
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              color: C.textFaint,
+              marginBottom: 22,
+              lineHeight: 1.55,
+              padding: "0 8px",
+              fontFamily: FM,
+            }}
+          >
+            {mode === "A"
+              ? "Audience research panel — not a traffic predictor."
+              : ""}
           </div>
 
           {/* Mode toggle */}

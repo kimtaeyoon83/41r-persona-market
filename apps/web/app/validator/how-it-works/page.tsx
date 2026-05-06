@@ -59,6 +59,115 @@ export default function HowItWorks() {
           responses below, that&apos;s a bug.
         </p>
 
+        <Section n={0} title="What this measures (and doesn't)">
+          <p
+            style={{
+              fontSize: 13,
+              color: C.textDim,
+              marginBottom: 12,
+              lineHeight: 1.6,
+            }}
+          >
+            41R is an <b>audience research panel</b> — 8 cohorts × 14 personas
+            evaluate your site and report a structured reaction. It is{" "}
+            <b>not a traffic predictor</b>. Read scores as a relative ranking
+            tool, not a forecast of how many real visitors will convert.
+          </p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: 12,
+              marginTop: 12,
+            }}
+          >
+            <div
+              style={{
+                padding: 14,
+                border: `1px solid ${C.ok}33`,
+                background: C.okSoft,
+                borderRadius: 8,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  fontFamily: FM,
+                  color: C.ok,
+                  fontWeight: 600,
+                  letterSpacing: "0.06em",
+                  marginBottom: 8,
+                }}
+              >
+                ✓ MEASURES
+              </div>
+              <ul
+                style={{
+                  paddingLeft: 18,
+                  margin: 0,
+                  fontSize: 12,
+                  lineHeight: 1.65,
+                  color: C.text,
+                }}
+              >
+                <li>Engaged-audience reactions per cohort</li>
+                <li>Cohort fit ranking (which audience resonates)</li>
+                <li>Friction quality + voice quotes</li>
+                <li>5-dimension breakdown per cohort</li>
+                <li>Relative comparison across sites</li>
+              </ul>
+            </div>
+            <div
+              style={{
+                padding: 14,
+                border: `1px solid ${C.bad}33`,
+                background: C.badSoft,
+                borderRadius: 8,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  fontFamily: FM,
+                  color: C.bad,
+                  fontWeight: 600,
+                  letterSpacing: "0.06em",
+                  marginBottom: 8,
+                }}
+              >
+                ✗ DOES NOT MEASURE
+              </div>
+              <ul
+                style={{
+                  paddingLeft: 18,
+                  margin: 0,
+                  fontSize: 12,
+                  lineHeight: 1.65,
+                  color: C.text,
+                }}
+              >
+                <li>Traffic acquisition / bounce rate</li>
+                <li>Real conversion rate (intent ≠ action; ~10× gap)</li>
+                <li>Visitor-level AARRR funnel numbers</li>
+                <li>What % of all visitors will abandon</li>
+                <li>Channel attribution / SEO performance</li>
+              </ul>
+            </div>
+          </div>
+          <p
+            style={{
+              fontSize: 12,
+              color: C.textFaint,
+              marginTop: 12,
+              lineHeight: 1.55,
+            }}
+          >
+            An <b>Acquisition Layer</b> (v1.1) is in progress to weight cohorts
+            by site-realistic arrival shares, narrowing the gap with traffic
+            reality. Until then, all numbers are persona-conditional.
+          </p>
+        </Section>
+
         <Section n={1} title="Two analysis modes">
           <Row label="Discovery (Mode A)">
             URL only. <b>112 personas across 8 standard cohorts</b> (14 each)
@@ -361,6 +470,37 @@ export default function HowItWorks() {
             They will be re-tuned per site category as Track A/B/C
             calibration data accrues. See <i>Calibration</i> below.
           </p>
+          <div
+            style={{
+              padding: "12px 14px",
+              background: C.warnSoft,
+              border: `1px solid ${C.warn}33`,
+              borderRadius: 8,
+              marginTop: 14,
+              fontSize: 12,
+              color: C.text,
+              lineHeight: 1.6,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontFamily: FM,
+                color: C.warn,
+                fontWeight: 600,
+                letterSpacing: "0.06em",
+                marginBottom: 4,
+              }}
+            >
+              ⚠ NOT A REAL VISITOR FUNNEL
+            </div>
+            These percentages reflect <b>persona-conditional behavior</b> —
+            i.e. <i>&ldquo;IF this persona reaches the site AND engages,
+            what % pass each gate?&rdquo;</i>. Real visitor-level AARRR
+            (with the abandon population included) requires the Acquisition
+            Layer (v1.1, in progress). Until then, treat absolute % as
+            relative ranking signal between sites, not a traffic forecast.
+          </div>
         </Section>
 
         <Section n={8} title="Friction clustering">

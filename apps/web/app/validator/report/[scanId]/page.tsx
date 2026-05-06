@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { scanApi, type ScanReport } from "@/lib/api";
@@ -537,7 +538,44 @@ export default function ValidatorReportPage() {
         {/* ⑤ AARRR funnel — Mode A only (Mode B audience is already
             narrow and "funnel" semantics don't apply). Free feature
             on the main report after the Pro tier was retired (D8). */}
-        {r.aarrr && <AarrrFunnelBlock funnel={r.aarrr} />}
+        {r.aarrr && (
+          <>
+            <div
+              style={{
+                padding: "10px 14px",
+                background: C.warnSoft,
+                border: `1px solid ${C.warn}33`,
+                borderRadius: 8,
+                marginBottom: 10,
+                fontSize: 11,
+                color: C.text,
+                lineHeight: 1.55,
+                fontFamily: FS,
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: FM,
+                  color: C.warn,
+                  fontWeight: 600,
+                  letterSpacing: "0.06em",
+                  marginRight: 6,
+                }}
+              >
+                PERSONA-CONDITIONAL
+              </span>
+              These % reflect engaged-persona behavior, not visitor traffic.
+              Compare across sites; do not read as absolute conversion.{" "}
+              <Link
+                href="/validator/how-it-works"
+                style={{ color: C.accent, textDecoration: "underline" }}
+              >
+                why
+              </Link>
+            </div>
+            <AarrrFunnelBlock funnel={r.aarrr} />
+          </>
+        )}
 
         <div
           style={{

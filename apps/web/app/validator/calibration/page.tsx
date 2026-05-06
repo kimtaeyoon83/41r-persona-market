@@ -134,6 +134,104 @@ export default function ValidatorCalibrationPage() {
           </div>
         </div>
 
+        {/* Reality check — n=1 sanity baseline against Google Merchandise
+            Store via GA4 BigQuery. Frozen from 2026-05-06 verification run.
+            Update when re-running against new sites or after Acquisition
+            Layer (v1.1) ships. */}
+        <Card padding={20} style={{ marginBottom: 14 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              justifyContent: "space-between",
+              marginBottom: 6,
+              flexWrap: "wrap",
+              gap: 8,
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 600 }}>
+              Reality Check · n=1 baseline
+            </div>
+            <div style={{ fontSize: 11, fontFamily: FM, color: C.textFaint }}>
+              Google Merch Store · GA4 2020-21 · 270K users
+            </div>
+          </div>
+          <p style={{ fontSize: 12, color: C.textDim, lineHeight: 1.6, margin: "0 0 12px" }}>
+            Single-site sanity check (not a statistical calibration). 41R
+            Mode A inference compared against real GA4 data via 7 pre-defined
+            plausibility hypotheses.
+          </p>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: 10,
+              marginBottom: 12,
+            }}
+          >
+            <div
+              style={{
+                padding: 12,
+                background: C.okSoft,
+                border: `1px solid ${C.ok}33`,
+                borderRadius: 8,
+              }}
+            >
+              <div style={{ fontSize: 11, fontFamily: FM, color: C.ok, fontWeight: 600, letterSpacing: "0.06em", marginBottom: 6 }}>
+                ✓ NUMERICAL MATCH (2/7)
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.6, color: C.text }}>
+                <li>Site classifier: E-commerce 0.98 ✓</li>
+                <li>Retention D-7: 41R 5.1 vs GA4 7.67 (1.5× gap)</li>
+              </ul>
+            </div>
+            <div
+              style={{
+                padding: 12,
+                background: "#f3f0e8",
+                border: `1px solid ${C.border}`,
+                borderRadius: 8,
+              }}
+            >
+              <div style={{ fontSize: 11, fontFamily: FM, color: C.textDim, fontWeight: 600, letterSpacing: "0.06em", marginBottom: 6 }}>
+                ≈ DIRECTIONAL MATCH (2/7)
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.6, color: C.text }}>
+                <li>Cohort discrimination: niche cohort lowest ✓</li>
+                <li>Friction surface: account creation, hidden costs ✓</li>
+              </ul>
+            </div>
+            <div
+              style={{
+                padding: 12,
+                background: C.warnSoft,
+                border: `1px solid ${C.warn}33`,
+                borderRadius: 8,
+              }}
+            >
+              <div style={{ fontSize: 11, fontFamily: FM, color: C.warn, fontWeight: 600, letterSpacing: "0.06em", marginBottom: 6 }}>
+                ⚠ KNOWN GAP (3/7)
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.6, color: C.text }}>
+                <li>Engagement: 41R 0% abandon vs GA4 51%</li>
+                <li>Task success: 67/100 vs 1.64% (intent ≠ action)</li>
+                <li>AARRR activation: 95% vs 23% (no acq layer)</li>
+              </ul>
+            </div>
+          </div>
+
+          <p style={{ fontSize: 11, color: C.textFaint, lineHeight: 1.55, margin: 0 }}>
+            <b style={{ color: C.text }}>Why the gaps:</b> 41R simulates
+            engaged-audience reactions, not visitor traffic distribution. The
+            abandon population (~50% of real users) is not modeled. The{" "}
+            <b style={{ color: C.text }}>Acquisition Layer (v1.1)</b> in
+            development will weight cohorts by site-realistic arrival shares
+            to narrow the engagement / activation gaps. Intent-action gap
+            (~10×) is fundamental to persona-conditional measurement.
+          </p>
+        </Card>
+
         {report.totalRecords === 0 && (
           <Card padding={24} style={{ marginBottom: 14 }}>
             <div
