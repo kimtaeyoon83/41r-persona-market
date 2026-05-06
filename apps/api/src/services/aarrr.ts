@@ -42,10 +42,20 @@ export type AarrrFunnel = {
 const THRESHOLDS = {
   acquisition: 'Reached the URL (baseline)',
   activation: '+ task_success ≥ 30',
-  retention: '+ retention_d7 ≥ 30',
+  retention: '+ retention_d7 ≥ 5',
   referral: '+ happiness ≥ 60',
-  revenue: '+ adoption ≥ 65',
+  revenue: '+ adoption ≥ 30',
 } as const;
+
+// v1.1 threshold tuning (2026-05-06):
+//   retention 30 → 5 — observed persona distribution puts ~85% in
+//                       weak band (D7=5), only ~3% in moderate (≥30),
+//                       so the old gate killed the funnel post-activation.
+//                       Lowered to ≥5 = "any return signal at all"
+//                       (no_return still excluded).
+//   revenue 65 → 30  — observed adoption distribution is mostly 0-50;
+//                       65 was unreachable. 30 = "meaningful purchase
+//                       intent", still strict enough to drop the funnel.
 
 export type AarrrInputRow = {
   isFlagged: boolean;
@@ -72,9 +82,9 @@ export function computeAarrrFromRows(
   // shapes like 100→28→25→27→28 where Referral exceeded Activation.
   const acqSet = valid;
   const activationSet = acqSet.filter((r) => (r.taskSuccess ?? 0) >= 30);
-  const retentionSet = activationSet.filter((r) => (r.retentionD7 ?? 0) >= 30);
+  const retentionSet = activationSet.filter((r) => (r.retentionD7 ?? 0) >= 5);
   const referralSet = retentionSet.filter((r) => (r.happiness ?? 0) >= 60);
-  const revenueSet = referralSet.filter((r) => (r.adoption ?? 0) >= 65);
+  const revenueSet = referralSet.filter((r) => (r.adoption ?? 0) >= 30);
 
   const stages: AarrrStage[] = [
     {
@@ -194,13 +204,13 @@ export function computeAarrrWeightedFromRows(
       (r) => (r.taskSuccess ?? 0) >= 30,
     );
     const retentionSet = activationSet.filter(
-      (r) => (r.retentionD7 ?? 0) >= 30,
+      (r) => (r.retentionD7 ?? 0) >= 5,
     );
     const referralSet = retentionSet.filter(
       (r) => (r.happiness ?? 0) >= 60,
     );
     const revenueSet = referralSet.filter(
-      (r) => (r.adoption ?? 0) >= 65,
+      (r) => (r.adoption ?? 0) >= 30,
     );
     const p = priors[cohortId as CohortIdType];
     const arrival_share = p?.arrival_share ?? 0;
