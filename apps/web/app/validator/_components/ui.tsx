@@ -240,7 +240,6 @@ export function TopBar() {
             <>
               <Link
                 href="/me/wallet"
-                className="hide-mobile"
                 style={{
                   color: C.textDim,
                   textDecoration: "none",
