@@ -457,9 +457,9 @@ export default function HowItWorks() {
           </p>
           <Stage label="Acquisition" rule="Reached the URL (baseline = 100%)" />
           <Stage label="Activation" rule="+ task_success ≥ 30" />
-          <Stage label="Retention" rule="+ retention_d7 ≥ 30" />
+          <Stage label="Retention" rule="+ retention_d7 ≥ 5" />
           <Stage label="Referral" rule="+ happiness ≥ 60" />
-          <Stage label="Revenue" rule="+ adoption ≥ 65" />
+          <Stage label="Revenue" rule="+ adoption ≥ 30" />
           <p
             style={{
               fontSize: 12,
@@ -468,10 +468,14 @@ export default function HowItWorks() {
               lineHeight: 1.55,
             }}
           >
-            Threshold values (30 / 30 / 60 / 65) are <b>v1.0 heuristic
-            baselines</b> derived from spec §6 — not yet category-specific.
-            They will be re-tuned per site category as Track A/B/C
-            calibration data accrues. See <i>Calibration</i> below.
+            Threshold values (30 / 5 / 60 / 30) are <b>v1.1 baselines</b> —
+            re-tuned 2026-05-06 from the original v1.0 (30 / 30 / 60 / 65)
+            after observing the persona output distribution: ~85% of
+            personas land in the &ldquo;weak&rdquo; retention band (D7=5),
+            so the old retention ≥30 gate killed the funnel post-activation.
+            Lowered retention to ≥5 (excludes only no_return) and revenue
+            to ≥30 (matches realistic intent distribution). Per-category
+            re-tuning still planned as Track A/B/C calibration data accrues.
           </p>
           <div
             style={{
