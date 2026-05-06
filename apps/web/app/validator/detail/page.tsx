@@ -98,28 +98,52 @@ function DetailInner() {
       //    Only attempt if a Privy Solana wallet is available. This
       //    runs in parallel with the worker that already started
       //    server-side; on failure we still proceed to the processing
-      //    screen (the scan itself doesn't gate on payment yet).
+      //    screen (the scan itself doesn't gate on payment yet) but
+      //    we surface the error so the user knows why no Solscan
+      //    receipt appears.
       const wallet = solanaWallets[0];
       if (authenticated && wallet) {
         try {
           setSubmitStage("signing");
           const build = await scanApi.getPaymentTx(scanId);
           const txBytes = base64ToBytes(build.txBase64);
-          const { signedTransaction } = await signTransaction({
+          // eslint-disable-next-line no-console
+          console.log("[payment] requesting sign", {
+            txBytesLen: txBytes.length,
+            walletAddress: wallet.address,
+          });
+          const signResult = await signTransaction({
             transaction: txBytes,
             wallet,
             // Privy default chain is solana:mainnet; we run on devnet,
-            // so explicit override is required — otherwise the
-            // embedded wallet refuses to sign against the devnet
-            // blockhash and surfaces a "screen error" mid-flow.
+            // so explicit override is required.
             chain: 'solana:devnet',
           });
+          // eslint-disable-next-line no-console
+          console.log("[payment] sign result", {
+            keys: Object.keys(signResult ?? {}),
+            type: signResult?.signedTransaction?.constructor?.name,
+            isUint8Array: signResult?.signedTransaction instanceof Uint8Array,
+            length: signResult?.signedTransaction?.length,
+          });
+          const signedBytes = signResult?.signedTransaction;
+          if (!(signedBytes instanceof Uint8Array)) {
+            throw new Error(
+              `Privy returned unexpected sign result shape: ${JSON.stringify(
+                Object.keys(signResult ?? {}),
+              )}`,
+            );
+          }
           setSubmitStage("broadcasting");
-          await scanApi.confirmPayment(scanId, bytesToBase64(signedTransaction));
+          await scanApi.confirmPayment(scanId, bytesToBase64(signedBytes));
         } catch (payErr) {
-          // Payment failure is non-fatal — log and continue. Scan
-          // still runs; user just doesn't get a Solscan receipt.
-          console.warn("[payment]", payErr);
+          // Surface to user so they know why payment didn't go through.
+          // The scan itself still runs (anonymous), so we don't abort.
+          const msg =
+            payErr instanceof Error ? payErr.message : String(payErr);
+          // eslint-disable-next-line no-console
+          console.error("[payment] failed", payErr);
+          setError(`Payment skipped: ${msg}`);
         }
       }
 
