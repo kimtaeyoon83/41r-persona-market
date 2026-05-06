@@ -239,6 +239,18 @@ export function TopBar() {
           {authenticated ? (
             <>
               <Link
+                href="/me/wallet"
+                className="hide-mobile"
+                style={{
+                  color: C.textDim,
+                  textDecoration: "none",
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                }}
+              >
+                Wallet
+              </Link>
+              <Link
                 href="/me/analyses"
                 style={{
                   color: C.textDim,
