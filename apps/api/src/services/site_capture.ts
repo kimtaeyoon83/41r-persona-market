@@ -39,6 +39,16 @@ function captureKey(url: string): string {
   return `site-captures/${hash}_${dateBucket()}.png`;
 }
 
+// Classifier-bound key — viewport-only crop (1280 × 1024) of the same
+// page. Anthropic's vision API rejects images > 8000px on either axis,
+// so very tall landing pages (e.g. linear.app at 10314px) fail the
+// classifier when given the full-page capture. The viewport snapshot
+// gives the classifier the hero region — enough to identify category.
+function captureClassifierKey(url: string): string {
+  const hash = createHash('sha256').update(url).digest('hex').slice(0, 16);
+  return `site-captures/${hash}_${dateBucket()}_view.png`;
+}
+
 function localPathFor(key: string): string {
   return path.join(LOCAL_DIR, path.basename(key));
 }
@@ -51,14 +61,27 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
 
   const key = captureKey(normalised);
   const localPath = localPathFor(key);
+  const viewKey = captureClassifierKey(normalised);
+  const viewLocalPath = localPathFor(viewKey);
 
   if (fs.existsSync(localPath)) {
-    const url = isR2Configured()
+    const fullUrl = isR2Configured()
       ? `${process.env.R2_PUBLIC_URL ?? ''}/${key}`
       : `/${key}`;
+    // Cached scans before viewport-clip support won't have the _view
+    // file. We still return cached even without it; the classifier
+    // then falls back to the full URL (which may exceed Anthropic's
+    // 8000px limit and fail to placeholder, matching pre-fix behavior).
+    const urls = [fullUrl];
+    if (fs.existsSync(viewLocalPath)) {
+      const viewUrl = isR2Configured()
+        ? `${process.env.R2_PUBLIC_URL ?? ''}/${viewKey}`
+        : `/${viewKey}`;
+      urls.push(viewUrl);
+    }
     log.info({ targetUrl: normalised, key }, 'using cached capture');
     return {
-      urls: [url],
+      urls,
       capturedAt: fs.statSync(localPath).mtime,
       fromCache: true,
     };
@@ -72,7 +95,8 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
     // dev falls back to Playwright's bundled chromium.
     executablePath: process.env.CHROMIUM_PATH || undefined,
   });
-  let buf: Buffer;
+  let bufFull: Buffer;
+  let bufView: Buffer;
   try {
     const ctx = await browser.newContext({
       viewport: VIEWPORT,
@@ -85,7 +109,13 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
       timeout: NAV_TIMEOUT_MS,
     });
     await page.waitForTimeout(500);
-    buf = await page.screenshot({ fullPage: true, type: 'png' });
+    // Full-page capture for personas (existing behavior).
+    bufFull = await page.screenshot({ fullPage: true, type: 'png' });
+    // Viewport crop for classifier (avoids Anthropic 8000px limit).
+    bufView = await page.screenshot({
+      type: 'png',
+      clip: { x: 0, y: 0, width: VIEWPORT.width, height: VIEWPORT.height },
+    });
     await ctx.close();
   } finally {
     await browser.close();
@@ -95,21 +125,25 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
   // the cache. R2 upload then returns either the public R2 URL or
   // the bare key (when R2 isn't configured) per uploadToR2's
   // existing fallback contract.
-  fs.writeFileSync(localPath, buf);
+  fs.writeFileSync(localPath, bufFull);
+  fs.writeFileSync(viewLocalPath, bufView);
   log.info(
-    { targetUrl: normalised, key, bytes: buf.length },
+    { targetUrl: normalised, key, bytesFull: bufFull.length, bytesView: bufView.length },
     'capture written',
   );
 
   let publicUrl: string;
+  let viewPublicUrl: string;
   if (isR2Configured()) {
-    publicUrl = await uploadToR2(key, buf, 'image/png');
+    publicUrl = await uploadToR2(key, bufFull, 'image/png');
+    viewPublicUrl = await uploadToR2(viewKey, bufView, 'image/png');
   } else {
     publicUrl = `/${key}`;
+    viewPublicUrl = `/${viewKey}`;
   }
 
   return {
-    urls: [publicUrl],
+    urls: [publicUrl, viewPublicUrl],
     capturedAt: new Date(),
     fromCache: false,
   };

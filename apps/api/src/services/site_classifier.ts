@@ -90,14 +90,18 @@ export async function classifySite(
   targetUrl: string,
   screenshotUrls: readonly string[],
 ): Promise<SiteClassification | null> {
-  const first = screenshotUrls[0];
-  if (!first) {
+  // Prefer the viewport-cropped capture (urls[1] from captureSite,
+  // typically <hash>_<date>_view.png). Falls back to urls[0] (full
+  // page) for legacy 1-element arrays — but Anthropic vision rejects
+  // images > 8000px on either axis, so very tall pages then fail.
+  const preferred = screenshotUrls[1] ?? screenshotUrls[0];
+  if (!preferred) {
     log.warn({ targetUrl }, 'classifySite: no screenshot — skipping');
     return null;
   }
-  const imageBlock = buildImageBlock(first);
+  const imageBlock = buildImageBlock(preferred);
   if (!imageBlock) {
-    log.warn({ targetUrl, first }, 'classifySite: image block unreadable');
+    log.warn({ targetUrl, preferred }, 'classifySite: image block unreadable');
     return null;
   }
 
