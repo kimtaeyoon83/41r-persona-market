@@ -259,3 +259,127 @@ export function computeAudienceFit(cohorts: readonly CohortFit[]): AudienceFitRe
     weights_used: AUDIENCE_FIT_WEIGHTS,
   };
 }
+
+// ─── Acquisition Layer (Phase B1 v1.1) ────────────────────────────
+// Stage 2 weighted aggregates. Stage 1 (persona simulation) measures
+// engaged-audience reactions; Stage 2 weights those by site-realistic
+// arrival_share + abandon_rate priors so the top-line approximates
+// what real visitor traffic would produce.
+//
+// Math:
+//   weighted_dimension = engaged_dimension × (1 - abandon_rate)
+//     // abandoners contribute 0 to every dimension
+//   weighted_cohort_fit = computeCohortFitScore(weighted_dimensions)
+//   global_* aggregates use arrival_share weighting (not n_completed)
+//
+// Existing computeAudienceFit() output is preserved as the
+// "research panel" view; this function adds a parallel "visitor
+// estimate" view.
+
+export type WeightedCohortFit = CohortFit & {
+  arrival_share: number;
+  abandon_rate: number;
+  weighted_dimension_means: PersonaDimensionScores;
+  weighted_cohort_fit_score: number;
+};
+
+export type WeightedAudienceFitResult = {
+  audience_fit_score_weighted: number;
+  best_weighted: WeightedCohortFit;
+  worst_weighted: WeightedCohortFit;
+  median_score_weighted: number;
+  global_task_success_weighted: number;
+  global_sentiment_weighted: number;
+  cohorts_weighted: readonly WeightedCohortFit[];
+  weights_used: typeof AUDIENCE_FIT_WEIGHTS;
+};
+
+// Apply (arrival_share, abandon_rate) priors to each cohort,
+// producing parallel weighted dimension means + weighted cohort_fit.
+// Cohorts whose id isn't in the prior table fall back to neutral
+// (zero arrival, 0.5 abandon) — defensive only; Stage 1 invariant
+// tests guarantee all 8 ids are populated per category.
+export function applyAcquisitionWeights(
+  cohorts: readonly CohortFit[],
+  priors: CategoryPriorsType,
+): readonly WeightedCohortFit[] {
+  return cohorts.map((c) => {
+    const p = priors[c.cohort_id as CohortIdType];
+    const arrival_share = p?.arrival_share ?? 0;
+    const abandon_rate = p?.abandon_rate ?? 0.5;
+    const survival = 1 - abandon_rate;
+    const wm: PersonaDimensionScores = {
+      happiness: c.dimension_means.happiness * survival,
+      engagement: c.dimension_means.engagement * survival,
+      adoption: c.dimension_means.adoption * survival,
+      retention_d7: c.dimension_means.retention_d7 * survival,
+      task_success: c.dimension_means.task_success * survival,
+    };
+    return {
+      ...c,
+      arrival_share,
+      abandon_rate,
+      weighted_dimension_means: wm,
+      weighted_cohort_fit_score: computeCohortFitScore(wm),
+    };
+  });
+}
+
+// Top-line synthesis on the weighted side. Mirrors computeAudienceFit
+// but uses arrival_share for global aggregates (visitor-traffic
+// share) and weighted_cohort_fit_score for best/median/worst ordering.
+//
+// Throws on empty input (caller guards on no-completion).
+export function computeWeightedAudienceFit(
+  weighted: readonly WeightedCohortFit[],
+): WeightedAudienceFitResult {
+  if (weighted.length === 0) {
+    throw new Error('computeWeightedAudienceFit: no cohorts to aggregate');
+  }
+  const sorted = [...weighted].sort(
+    (a, b) => b.weighted_cohort_fit_score - a.weighted_cohort_fit_score,
+  );
+  const best = sorted[0]!;
+  const worst = sorted[sorted.length - 1]!;
+  const median_score_weighted = median(
+    weighted.map((c) => c.weighted_cohort_fit_score),
+  );
+
+  const totalArrival =
+    weighted.reduce((s, c) => s + c.arrival_share, 0) || 1;
+  const global_task_success_weighted =
+    weighted.reduce(
+      (s, c) =>
+        s + c.weighted_dimension_means.task_success * c.arrival_share,
+      0,
+    ) / totalArrival;
+  const global_sentiment_weighted =
+    weighted.reduce(
+      (s, c) =>
+        s + c.weighted_dimension_means.happiness * c.arrival_share,
+      0,
+    ) / totalArrival;
+
+  const audience_fit_score_weighted =
+    AUDIENCE_FIT_WEIGHTS.best * best.weighted_cohort_fit_score +
+    AUDIENCE_FIT_WEIGHTS.median * median_score_weighted +
+    AUDIENCE_FIT_WEIGHTS.task_success_global * global_task_success_weighted +
+    AUDIENCE_FIT_WEIGHTS.sentiment_global * global_sentiment_weighted;
+
+  return {
+    audience_fit_score_weighted,
+    best_weighted: best,
+    worst_weighted: worst,
+    median_score_weighted,
+    global_task_success_weighted,
+    global_sentiment_weighted,
+    cohorts_weighted: weighted,
+    weights_used: AUDIENCE_FIT_WEIGHTS,
+  };
+}
+
+// Local type aliases — imported from @41rpm/shared at the top of
+// this trailing block to avoid disturbing the existing import order.
+type CategoryPriorsType =
+  import('@41rpm/shared').CategoryPriors;
+type CohortIdType = import('@41rpm/shared').CohortId;

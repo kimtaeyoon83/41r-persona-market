@@ -137,3 +137,139 @@ export async function computeAarrr(scanId: string): Promise<AarrrFunnel | null> 
     .where(eq(schema.scanPersonaResponses.scanId, scanId));
   return computeAarrrFromRows(rows);
 }
+
+// ─── Acquisition Layer (Phase B1 v1.1) — weighted AARRR ──────────
+// Stage 2 weighted funnel. Each persona row carries cohort_id; the
+// priors map (CategoryPriors from @41rpm/shared) gives per-cohort
+// arrival_share + abandon_rate.
+//
+// Math (per stage X != acquisition):
+//   pct_X_weighted = Σ_cohorts( arrival_share × (1 - abandon_rate)
+//                              × within_cohort_pass_rate_X )
+//
+// Acquisition stage stays at 100% (baseline = "reached the URL");
+// the abandon mass is deducted starting at Activation. This produces
+// a real visitor-level funnel shape vs the persona-conditional one.
+//
+// Returns null on empty / all-flagged input (matches unweighted).
+
+export type AarrrWeightedInputRow = AarrrInputRow & {
+  cohortId: string;
+};
+
+type CategoryPriorsType = import('@41rpm/shared').CategoryPriors;
+type CohortIdType = import('@41rpm/shared').CohortId;
+
+export function computeAarrrWeightedFromRows(
+  rows: readonly AarrrWeightedInputRow[],
+  priors: CategoryPriorsType,
+): AarrrFunnel | null {
+  const valid = rows.filter((r) => !r.isFlagged);
+  if (valid.length === 0) return null;
+
+  // Group rows by cohort_id so we can compute within-cohort pass
+  // rates before applying acquisition weights.
+  const byCohort = new Map<string, AarrrWeightedInputRow[]>();
+  for (const r of valid) {
+    const list = byCohort.get(r.cohortId) ?? [];
+    list.push(r);
+    byCohort.set(r.cohortId, list);
+  }
+
+  type CohortPassRates = {
+    cohortId: string;
+    n: number;
+    arrival_share: number;
+    survival: number; // = 1 - abandon_rate
+    activationRate: number;
+    retentionRate: number;
+    referralRate: number;
+    revenueRate: number;
+  };
+  const perCohort: CohortPassRates[] = [];
+  for (const [cohortId, cohortRows] of byCohort) {
+    const n = cohortRows.length;
+    const acqSet = cohortRows;
+    const activationSet = acqSet.filter(
+      (r) => (r.taskSuccess ?? 0) >= 30,
+    );
+    const retentionSet = activationSet.filter(
+      (r) => (r.retentionD7 ?? 0) >= 30,
+    );
+    const referralSet = retentionSet.filter(
+      (r) => (r.happiness ?? 0) >= 60,
+    );
+    const revenueSet = referralSet.filter(
+      (r) => (r.adoption ?? 0) >= 65,
+    );
+    const p = priors[cohortId as CohortIdType];
+    const arrival_share = p?.arrival_share ?? 0;
+    const survival = 1 - (p?.abandon_rate ?? 0.5);
+    perCohort.push({
+      cohortId,
+      n,
+      arrival_share,
+      survival,
+      activationRate: activationSet.length / n,
+      retentionRate: retentionSet.length / n,
+      referralRate: referralSet.length / n,
+      revenueRate: revenueSet.length / n,
+    });
+  }
+
+  const totalArrival =
+    perCohort.reduce((s, c) => s + c.arrival_share, 0) || 1;
+  const weightedPct = (rateKey: keyof CohortPassRates): number => {
+    const wsum = perCohort.reduce((s, c) => {
+      const rate = c[rateKey] as number;
+      return s + c.arrival_share * c.survival * rate;
+    }, 0);
+    return (wsum / totalArrival) * 100;
+  };
+
+  const totalPersonas = valid.length;
+  const stages: AarrrStage[] = [
+    {
+      key: 'acquisition',
+      label: 'Acquisition',
+      score: 100,
+      n_passing: totalPersonas,
+      total: totalPersonas,
+      threshold: THRESHOLDS.acquisition,
+    },
+    {
+      key: 'activation',
+      label: 'Activation',
+      score: weightedPct('activationRate'),
+      n_passing: 0, // weighted view has no meaningful integer count
+      total: totalPersonas,
+      threshold: THRESHOLDS.activation,
+    },
+    {
+      key: 'retention',
+      label: 'Retention',
+      score: weightedPct('retentionRate'),
+      n_passing: 0,
+      total: totalPersonas,
+      threshold: THRESHOLDS.retention,
+    },
+    {
+      key: 'referral',
+      label: 'Referral',
+      score: weightedPct('referralRate'),
+      n_passing: 0,
+      total: totalPersonas,
+      threshold: THRESHOLDS.referral,
+    },
+    {
+      key: 'revenue',
+      label: 'Revenue',
+      score: weightedPct('revenueRate'),
+      n_passing: 0,
+      total: totalPersonas,
+      threshold: THRESHOLDS.revenue,
+    },
+  ];
+
+  return { stages, total_personas: totalPersonas };
+}
