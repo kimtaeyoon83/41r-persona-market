@@ -214,31 +214,16 @@ export function TopBar() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 8,
           textDecoration: "none",
           color: C.text,
         }}
       >
-        <div
-          style={{
-            width: 22,
-            height: 22,
-            borderRadius: 6,
-            background: C.text,
-            color: C.bg,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 11,
-            fontFamily: FM,
-            fontWeight: 600,
-          }}
-        >
-          41
-        </div>
-        <div style={{ fontWeight: 600, fontSize: 14, letterSpacing: "-0.01em" }}>
-          41R
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo/rpm_black_horizontal.png"
+          alt="41R"
+          style={{ height: 22, width: "auto", display: "block" }}
+        />
       </Link>
       <div style={{ flex: 1 }} />
       {showAuthControls && (

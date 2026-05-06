@@ -28,6 +28,13 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "41R Persona Market",
   description: "AI Persona-Based Product Validation Marketplace on Solana",
+  icons: {
+    icon: [
+      { url: "/favicon.png", type: "image/png" },
+      { url: "/logo/rpm_black_vertical.png", type: "image/png", sizes: "any" },
+    ],
+    apple: "/logo/rpm_black_vertical.png",
+  },
 };
 
 // Without this Next 14 ships no viewport meta, so mobile Safari/Chrome
