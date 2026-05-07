@@ -430,7 +430,9 @@ export function HelpTip({
               position: "fixed",
               inset: 0,
               zIndex: 50,
-              background: "transparent",
+              background: "rgba(20, 18, 14, 0.35)",
+              backdropFilter: "blur(2px)",
+              WebkitBackdropFilter: "blur(2px)",
             }}
           />
           <div
