@@ -198,8 +198,8 @@ export default function ValidatorReportPage() {
               >
                 {(
                   [
-                    { id: "panel" as const, label: "Research panel", sub: "engaged audience" },
-                    { id: "visitor" as const, label: "Visitor-weighted", sub: "v1.1 priors" },
+                    { id: "panel" as const, label: "Research panel", sub: "engaged audience — recommended for cross-site comparison" },
+                    { id: "visitor" as const, label: "Visitor-weighted", sub: "experimental — directional only, not a traffic forecast" },
                   ]
                 ).map((m) => (
                   <button
@@ -629,10 +629,11 @@ export default function ValidatorReportPage() {
                   marginRight: 6,
                 }}
               >
-                PERSONA-CONDITIONAL
+                {visitorAvailable ? "EXPERIMENTAL · DIRECTIONAL ONLY" : "PERSONA-CONDITIONAL"}
               </span>
-              These % reflect engaged-persona behavior, not visitor traffic.
-              Compare across sites; do not read as absolute conversion.{" "}
+              {visitorAvailable
+                ? "Visitor-weighted absolute values are calibrated against limited GA4 data (n=1) and overshoot reality by 5-30×. Use for relative ranking only — not as a conversion forecast. Switch to Research panel for honest cross-site comparison."
+                : "These % reflect engaged-persona behavior, not visitor traffic. Compare across sites; do not read as absolute conversion."}{" "}
               <Link
                 href="/validator/how-it-works"
                 style={{ color: C.accent, textDecoration: "underline" }}
@@ -708,6 +709,27 @@ function AarrrFunnelBlock({
 }: {
   funnel: NonNullable<ScanReport['aarrr']>;
 }) {
+  // Compute stage-to-stage dropoff (in score percentage points). The
+  // 2026-05-07 user feedback was that absolute % numbers look too
+  // similar across sites — and they do, especially in weighted view.
+  // Surfacing the biggest drop reframes the funnel from "predict
+  // conversion" to "diagnose where you leak", which is the actual
+  // marketing-actionable signal a persona-conditional tool can give.
+  const dropoffs = funnel.stages.map((s, i) => {
+    if (i === 0) return 0;
+    const prev = funnel.stages[i - 1]!.score;
+    return Math.max(0, prev - s.score);
+  });
+  // Find the biggest drop (excluding Acquisition → Activation in
+  // weighted view where the structural traffic-weighting drop always
+  // dominates and is not a product issue per se). For panel view the
+  // biggest drop genuinely indicates the bottleneck.
+  let biggestDropIdx = 1;
+  for (let i = 2; i < dropoffs.length; i++) {
+    if (dropoffs[i]! > dropoffs[biggestDropIdx]!) biggestDropIdx = i;
+  }
+  const biggestDrop = dropoffs[biggestDropIdx]!;
+  const biggestDropStage = funnel.stages[biggestDropIdx]!;
   return (
     <>
       <SectionLabel
@@ -716,10 +738,42 @@ function AarrrFunnelBlock({
         sub={`Acquisition → Activation → Retention → Referral → Revenue · n=${funnel.total_personas}`}
       />
       <Card padding={20} style={{ marginBottom: 24 }}>
+        {biggestDrop >= 5 && (
+          <div
+            style={{
+              marginBottom: 14,
+              padding: "10px 14px",
+              background: C.warnSoft,
+              border: `1px solid ${C.warn}55`,
+              borderRadius: 8,
+              fontSize: 12,
+              fontFamily: FS,
+              color: C.text,
+              lineHeight: 1.5,
+            }}
+          >
+            <span
+              style={{
+                fontFamily: FM,
+                color: C.warn,
+                fontWeight: 600,
+                letterSpacing: "0.06em",
+                marginRight: 6,
+              }}
+            >
+              BIGGEST LEAK
+            </span>
+            <strong>{biggestDropStage.label}</strong> — {biggestDrop.toFixed(0)} pt
+            drop from previous stage. This is where your audience is
+            losing intent the most. Fix this stage first.
+          </div>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {funnel.stages.map((s, i) => {
             const color = AARRR_COLORS[i] ?? C.accent;
             const widthPct = Math.max(2, s.score);
+            const drop = dropoffs[i] ?? 0;
+            const isBiggest = i === biggestDropIdx && biggestDrop >= 5;
             return (
               <div
                 key={s.key}
@@ -796,6 +850,19 @@ function AarrrFunnelBlock({
                 >
                   {s.threshold}
                 </div>
+                <div
+                  style={{
+                    width: 70,
+                    fontSize: 11,
+                    fontFamily: FM,
+                    color: drop > 0 ? (isBiggest ? C.warn : C.textDim) : "transparent",
+                    fontWeight: isBiggest ? 700 : 500,
+                    textAlign: "right",
+                  }}
+                  title={drop > 0 ? `Drop from ${funnel.stages[i - 1]!.label}` : undefined}
+                >
+                  {i === 0 ? "" : `▼ ${drop.toFixed(0)} pt`}
+                </div>
               </div>
             );
           })}
@@ -811,8 +878,11 @@ function AarrrFunnelBlock({
             lineHeight: 1.5,
           }}
         >
-          ⓘ Derived from per-persona dimension scores. Custom thresholds
-          + daily-monitoring deltas planned for a later phase.
+          ⓘ The drop column shows the bottleneck: how many percentage
+          points your audience loses moving to the next stage. Use it
+          to prioritise which stage to fix first. Absolute % is a
+          relative signal — compare across your iterations, not as a
+          conversion forecast.
         </div>
       </Card>
     </>
