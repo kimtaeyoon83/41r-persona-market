@@ -14,6 +14,8 @@ marked **⚠️**.
 > **Audited:** 2026-05-07. Test suite at this audit: 199 vitest
 > cases passing.
 
+> Korean translation: [`docs/HOW-IT-WORKS.ko.md`](./HOW-IT-WORKS.ko.md)
+
 ---
 
 ## 1. The product in one paragraph
