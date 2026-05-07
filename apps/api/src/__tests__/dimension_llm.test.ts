@@ -3,18 +3,23 @@
 // mapLLMResponseToSimulated produces the right PersonaDimensionScores
 // for known fixtures, extractVoiceQuotes pulls the 4 columns.
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  buildUserPrompt,
   extractVoiceQuotes,
   mapLLMResponseToSimulated,
   personaResponseSchema,
   type PersonaLLMResponse,
+  type SiteContext,
 } from '../services/dimensions/llm';
 import {
   ENGAGEMENT_BAND_TO_SCORE,
   RETENTION_BAND_TO_DCURVE,
   computeSusScore,
 } from '../services/audience_fit';
+import type { PersonaRow } from '../services/cohort_selection';
 
 const VALID: PersonaLLMResponse = {
   happiness: {
@@ -178,5 +183,177 @@ describe('extractVoiceQuotes', () => {
     expect(v.voiceFirstImpression).toBeNull();
     expect(v.voiceBiggestFriction).toBeNull();
     expect(v.voiceWouldReturnBecause).toBeNull();
+  });
+});
+
+// ─── Q2 regression lock — site context threading (2026-05-07) ────
+// Locks the fix that surfaces classifier output (category, pitch,
+// confidence) inside the persona prompt. Without this block, crypto-
+// tilted personas hallucinate wallet/DeFi features on non-crypto
+// sites (Google Merch case: long-tail bucket quote "지갑 연결이
+// 필수인데..." on a plain e-commerce site).
+
+function makePersonaForPrompt(): PersonaRow {
+  return {
+    id: 'p-test',
+    testerAddr: 'wallet_p-test',
+    isActive: true,
+    sasAttestId: null,
+    hdIndex: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+    vector: {
+      test_style: { thoroughness: 0.6, speed: 0.6, ux_focus: 0.5, bug_detection: 0.5, creativity: 0.4 },
+      expertise: { defi: 0.8, nft: 0.4, gaming: 0.2, ai_tools: 0.4, general_web: 0.6 },
+      feedback_pattern: {
+        ui_critical: 0.5,
+        security_aware: 0.7,
+        performance_sensitive: 0.5,
+        accessibility_focus: 0.3,
+        detail_oriented: 0.6,
+      },
+      reliability: { quality_score: 0.8, consistency: 0.8, response_rate: 0.9 },
+      demographics: {
+        age_group: 'adult',
+        tech_literacy: 0.8,
+        crypto_experience: 0.85,
+        design_sensitivity: 0.5,
+        patience_level: 0.6,
+      },
+      ux_preferences: {
+        visual_style: 'professional',
+        font_size_preference: 0.5,
+        information_density: 0.6,
+        animation_tolerance: 0.4,
+        color_contrast_need: 0.5,
+        mobile_first: false,
+      },
+      voice_sample: 'I evaluate products on speed, transparency, and control.',
+    },
+  };
+}
+
+describe('buildUserPrompt · Q2 site-context threading', () => {
+  const persona = makePersonaForPrompt();
+
+  it('omits the Site context block when siteContext is undefined (legacy / no-classification path)', () => {
+    const prompt = buildUserPrompt(persona, 'https://example.com');
+    expect(prompt).not.toContain('Site context');
+    expect(prompt).not.toContain('Anchor your reaction');
+    // Ensure the basic structure still works.
+    expect(prompt).toContain('Target URL: https://example.com');
+    expect(prompt).toContain('Persona profile:');
+  });
+
+  it('renders the Site context block + anti-projection guard when siteContext is provided', () => {
+    const ctx: SiteContext = {
+      category: 'E-commerce',
+      categoryConfidence: 0.98,
+      oneLinePitch: 'Official Google merchandise store offering branded apparel.',
+    };
+    const prompt = buildUserPrompt(persona, 'https://shop.googlemerchandisestore.com', undefined, ctx);
+    expect(prompt).toContain('Site context');
+    expect(prompt).toContain('category: E-commerce (confidence: 0.98)');
+    expect(prompt).toContain('description: Official Google merchandise store offering branded apparel.');
+    // The anti-projection guard is the load-bearing line that stops
+    // crypto-tilted personas from inventing wallet/DeFi features on
+    // a non-crypto site. Don't relax this assertion.
+    expect(prompt).toContain('Anchor your reaction to THIS category');
+    expect(prompt).toContain('Do not project features (wallet, signing, on-chain UX, etc.)');
+  });
+
+  it('flags low classifier confidence (<0.5) so the persona does not anchor on a misclassification', () => {
+    const ctx: SiteContext = {
+      category: 'Marketplace',
+      categoryConfidence: 0.42,
+      oneLinePitch: null,
+    };
+    const prompt = buildUserPrompt(persona, 'https://ambiguous.example', undefined, ctx);
+    expect(prompt).toContain('confidence: 0.42 — category may be unclear');
+  });
+
+  it('still includes the persona voice_sample so tone signal survives', () => {
+    const prompt = buildUserPrompt(persona, 'https://example.com', undefined, {
+      category: 'SaaS',
+      categoryConfidence: 0.9,
+      oneLinePitch: 'Generic SaaS app.',
+    });
+    expect(prompt).toContain('I evaluate products on speed, transparency, and control.');
+  });
+});
+
+// ─── Q3 P1 regression lock — voice_sample cleanup (2026-05-07) ────
+// Locks the cleanup that rewrote crypto_native / web3_pro /
+// defi_beginner voice_samples to be category-agnostic. Reading the
+// seed script as text (not import) avoids triggering its top-level
+// DB connection. If anyone reintroduces "slippage", "MEV", "multi-
+// chain", "gas-aware", "wallet" etc. in those three cohort entries,
+// these tests fail.
+
+// Crypto-specific vocabulary the post-2026-05-07 voice rewrite
+// removed from crypto_native / web3_pro / defi_beginner. Only terms
+// that are unambiguously crypto-domain — "CSV export" alone is fine
+// because power users in any domain need it; "multi-chain ops" is
+// crypto-specific and was dropped.
+const FORBIDDEN_VOCAB = [
+  'slippage',
+  'MEV',
+  'multi-chain',
+  'gas-aware',
+  'gas estimation',
+  'on-chain',
+  'mobile wallets',
+  'signing UX',
+];
+
+function readSeedScript(): string {
+  // Resolve from the test file's location to the repo root scripts/.
+  // dimension_llm.test.ts lives at apps/api/src/__tests__/, so
+  // scripts/ is 4 levels up.
+  const path = resolve(__dirname, '../../../../scripts/seed-validator-cohorts.ts');
+  return readFileSync(path, 'utf8');
+}
+
+function extractCohortVoiceBlock(seedSrc: string, cohortId: string): string {
+  // Locate `<cohortId>: [` and capture lines until matching `]`.
+  const start = seedSrc.indexOf(`${cohortId}: [`);
+  if (start < 0) return '';
+  const close = seedSrc.indexOf('],', start);
+  return seedSrc.slice(start, close + 1);
+}
+
+describe('VOICE_BY_COHORT — voice cleanup regression lock', () => {
+  const seed = readSeedScript();
+
+  it('seed script is readable + still defines the three crypto-leaning cohort voice arrays', () => {
+    expect(seed).toContain('crypto_native: [');
+    expect(seed).toContain('web3_pro: [');
+    expect(seed).toContain('defi_beginner: [');
+  });
+
+  for (const cohort of ['crypto_native', 'web3_pro', 'defi_beginner']) {
+    it(`${cohort} voice_sample array contains no forbidden crypto-specific vocab`, () => {
+      const block = extractCohortVoiceBlock(seed, cohort);
+      expect(block.length).toBeGreaterThan(0);
+      for (const term of FORBIDDEN_VOCAB) {
+        const re = new RegExp(term, 'i');
+        expect(block, `forbidden term "${term}" reappeared in ${cohort} voice array`).not.toMatch(re);
+      }
+    });
+  }
+
+  it('crypto_native voice array still expresses the underlying traits in neutral language', () => {
+    const block = extractCohortVoiceBlock(seed, 'crypto_native');
+    // At least one of the rewritten phrases should be present so we
+    // know the post-2026-05-07 voice survives. If someone replaces
+    // them with crypto vocab, both this and the forbidden-vocab check
+    // above fail.
+    const neutralMarkers = [
+      /speed,\s*transparency,\s*and control/i,
+      /security model is unclear/i,
+      /power-user shortcuts/i,
+    ];
+    const matched = neutralMarkers.some((re) => re.test(block));
+    expect(matched).toBe(true);
   });
 });

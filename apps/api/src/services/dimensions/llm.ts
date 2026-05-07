@@ -179,7 +179,12 @@ RULES:
 - Replace every "Replace with..." placeholder string with the persona's actual content.
 - Output ONLY the JSON object, no markdown fences, no commentary.`;
 
-function buildUserPrompt(
+// Exported for the dimension_llm.test.ts contract suite — locks the
+// 2026-05-07 Q2 fix that threads classifier output (category, pitch,
+// confidence) into the persona prompt. Regression here means crypto-
+// tilted personas hallucinate wallet/DeFi features on non-crypto
+// sites again.
+export function buildUserPrompt(
   persona: PersonaRow,
   targetUrl: string,
   hypothesis?: string,
