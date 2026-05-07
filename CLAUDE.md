@@ -1324,3 +1324,161 @@ breaks if a company reads a persona-only pain point as a real product
 defect — the `both` / `human-only` / `persona-only` split is how we
 prevent that failure mode, and the semantic clustering pass is what
 makes that split meaningful.
+
+## Known Limitations / Follow-ups (post-2026-05-07 hardening)
+
+Open items the 2026-05-07 validator hardening surfaced but did NOT
+fix in-scope. Listed in dependency order — earlier items unblock
+later ones. Each entry: symptom · root cause · what unblocks the fix
+· estimated cost.
+
+### 1. Cohort pool is crypto-tilted (Phase 2)
+
+**Symptom:** On non-crypto sites the rank-1 friction cluster is
+often **"Wrong audience entirely"** with 30-40% of personas bowing
+out (Linear 2026-05-07: n=40/111). Real product frictions get
+demoted to rank-2/3.
+
+**Root cause:** `packages/shared/src/cohorts.ts` defines 8
+STANDARD_COHORTS, of which 3 (`crypto_native`, `defi_beginner`,
+`web3_pro`) are explicitly crypto. That's 37.5% of the pool. The
+voice cleanup (Q3 P1) stopped them from *fabricating* crypto
+features but they still correctly identify themselves as wrong
+audience for non-crypto sites — which is honest behavior, not a
+bug, but it dominates the friction list.
+
+**Unblock:** Split the pool into general 8 (age × tech_literacy
+× mobile/desktop × design axes, domain-neutral) + crypto add-on
+3 (only run when `scan.category ∈ {DeFi, NFT, Crypto Wallet}`).
+Requires DB migration on `personas` (cohort_id column or
+selector versioning), re-seed of the persona pool, and
+category-aware cohort selection in `scan_pipeline.ts::sampling`
+step. UI also needs cohort cards to render the active set.
+
+**Cost:** ~1-2 sprints. Not a one-line change.
+
+### 2. INTENT_ACTION multipliers are universal (visitor-view collapse)
+
+**Symptom:** The 5-site 2026-05-07 multi-category test showed the
+visitor-weighted AARRR view collapses to nearly identical absolute
+%s across very different categories: Activation spread = 13pt,
+Revenue spread = 1.3pt across E-commerce / Productivity / Media /
+AI / DeFi.
+
+**Root cause:** `services/aarrr.ts::INTENT_ACTION` is a single
+universal constant (`{activation: 0.50, retention: 0.20,
+referral: 0.10, revenue: 0.05}`) calibrated against Merch GA4
+n=1. Multiplied stage-by-stage, the constants dominate the
+formula and compress site differences toward the calibration
+target.
+
+**Mitigation already shipped:** UI reframed the visitor view as
+**experimental — directional only** with a `BIGGEST LEAK`
+callout that names the largest stage-to-stage drop instead of
+leading with absolute %s. See the `## Do NOT` entry on AARRR
+framing.
+
+**Unblock:** Per-category INTENT_ACTION (e.g. DeFi activation
+0.30 to reflect wallet-connect barrier, SaaS activation 0.40,
+E-commerce 0.50). Requires GA4 reference data per category — see
+item 3.
+
+**Cost:** ~1 sprint for the per-category routing + tests, but
+blocked on real data.
+
+### 3. GA4 reference set is n=1
+
+**Symptom:** Calibration confidence on the visitor view rests on
+a single site (Google Merch Store). Item 2 cannot be unblocked
+without more.
+
+**Unblock:** Beta partnership / outreach to 5+ companies per
+category willing to share aggregate GA4 conversion-by-cohort data
+read-only. Phase B-followup step 3 in the original validator
+spec. Until then, "experimental — directional only" labeling on
+the visitor view is load-bearing — see Do-NOT entry.
+
+**Cost:** Sales/BD effort, not engineering. Once data lands,
+~half-sprint to wire per-category multipliers.
+
+### 4. Q4 hallucination-guard observation period
+
+**Status:** No hard guard added at the prompt level (intentional
+— context-starvation was the root cause and Q2+Q3 P1 fixed that).
+2026-05-07 5-site post-fix test recorded **0 site fabrications**
+on 4 non-crypto sites; the 2 residual crypto-vocab matches were
+honest persona self-identification (`"I'm a crypto person…"`),
+not invented site features.
+
+**Unblock:** Run 5-10 more non-crypto scans across diverse
+categories (Marketplace, Gaming, Social, etc.). If contamination
+stays at 0 site fabrications, decision is permanent: no
+prompt-level guard needed. If even 1 fabrication recurs, add the
+explicit `"If a feature you describe is not visible in the
+screenshot or implied by the site's stated category, do not
+mention it as a friction"` rule to the buildSystemPrompt body.
+
+**Cost:** Trivial — runs in the normal scan workflow.
+
+### 5. Cross-scan QA script (Layer 2 detection)
+
+**Status:** Not built. The proposed `scripts/qa-validator-scans.ts`
+would pull the last N scans and flag (a) non-crypto scans with
+crypto vocabulary in friction quotes, (b) "Wrong audience" rank-1
+clusters representing >30% of personas, (c) weighted-view
+n_passing collapsing to all zeros (would catch the n_passing=0
+regression).
+
+**Unblock:** ~1 hour engineering. Useful before Phase 2 ship to
+build before/after comparisons across all historic scans.
+
+**Cost:** ~1 hour.
+
+### 6. UI auto-flag for domain mismatch (Layer 1 detection)
+
+**Status:** Not built. Would render an inline warning badge on
+the report page when a friction cluster's quote contains
+crypto-domain vocabulary on a non-crypto-classified site, or
+when rank-1 cluster represents >30% of personas with
+"audience misalignment" semantics.
+
+**Unblock:** ~3 hours engineering. Best deferred until Phase 2
+(item 1) lands — Phase 2 will reduce the rank-1 audience-misfit
+pattern significantly, so the flag's signal-to-noise ratio
+shifts.
+
+**Cost:** ~3 hours, but better timed after Phase 2.
+
+### 7. Friction clustering input filter (alternative to Phase 2)
+
+**Status:** Considered, not adopted. `clusterFrictions()` reads
+ALL `voice_biggest_friction` strings including those from
+`engagement.category=abandon` personas — whose "friction" is
+inherently "I shouldn't be here", not a product issue.
+
+**Trade-off:** Filtering `engagement!='abandon'` from the
+clustering input removes the audience-misfit cluster from rank-1
+but also throws away a real signal. Phase 2 (item 1) is the
+cleaner fix because it prevents the wrong cohorts from being
+sampled in the first place rather than masking them after the
+fact.
+
+**Cost:** ~30 min if we decide to do it as a stopgap before
+Phase 2, but Phase 2 is the structurally correct path.
+
+### 8. Synthetic-persona pool ceiling
+
+**Status:** Documented, not yet hit. The current 808 persona
+pool is procedurally generated from 8 cohort selectors. Voice
+samples are picked from a fixed 24-string `VOICE_BY_COHORT`
+table. Diversity has a hard ceiling.
+
+**Unblock:** Onboard real testers (the 41R Persona Market is
+designed for this — testers complete tests → earn USDC → AI
+Persona generated from their behavior). Real personas have
+unique voice samples and behavioral patterns that procedural
+seeds cannot match.
+
+**Cost:** Product/marketplace effort, not engineering. Once real
+testers > N (~50) per cohort, the synthetic seeds can be marked
+as fallback-only.
