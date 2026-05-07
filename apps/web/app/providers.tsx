@@ -12,6 +12,7 @@
 // a Client Component. This file is the boundary.
 
 import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
+import { defaultSolanaRpcsPlugin } from "@privy-io/react-auth/solana";
 import { useEffect, type ReactNode } from "react";
 import { setAuthTokenGetter } from "@/lib/api";
 
@@ -53,10 +54,12 @@ export function Providers({ children }: { children: ReactNode }) {
           ethereum: { createOnLogin: "off" },
           solana: { createOnLogin: "users-without-wallets" },
         },
-        // Solana cluster pinning (devnet) is done in the Phase 4
-        // sponsored-tx flow when constructing the Connection, not at
-        // the provider level. Privy's embedded Solana wallet itself
-        // is cluster-agnostic — it just signs.
+        // Register Privy's default Solana RPC config (mainnet +
+        // devnet endpoints from solana-{cluster}.rpc.privy.systems).
+        // Without this plugin, useSignTransaction throws
+        // "No RPC configuration found for chain solana:devnet" when
+        // we pass chain='solana:devnet' for the sponsored 0 USDC tx.
+        plugins: [defaultSolanaRpcsPlugin()],
         appearance: {
           theme: "light",
           accentColor: "#14F195", // Solana / 41R green
