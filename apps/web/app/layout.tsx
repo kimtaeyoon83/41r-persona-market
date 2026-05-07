@@ -26,8 +26,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "41R Persona Market",
-  description: "AI Persona-Based Product Validation Marketplace on Solana",
+  title: "Project RPM",
+  description: "Find Your Product-Market Fit by AI Persona",
   icons: {
     icon: [
       { url: "/favicon.png", type: "image/png" },
