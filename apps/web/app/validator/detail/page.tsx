@@ -9,6 +9,7 @@ import {
   useWallets as useSolanaWallets,
 } from "@privy-io/react-auth/solana";
 import { scanApi } from "@/lib/api";
+import { performSponsoredPayment } from "@/lib/sponsored-payment";
 import { Btn, C, Card, FM, Frame } from "../_components/ui";
 
 // Screen 2: Discovery detail — sharpening questions.
@@ -94,57 +95,26 @@ function DetailInner() {
         target_cohorts: cohorts.length > 0 ? cohorts : undefined,
       });
 
-      // 2. Sponsored 0 USDC tx — Phase 4 D6.
-      //    Only attempt if a Privy Solana wallet is available. This
-      //    runs in parallel with the worker that already started
-      //    server-side; on failure we still proceed to the processing
-      //    screen (the scan itself doesn't gate on payment yet) but
-      //    we surface the error so the user knows why no Solscan
-      //    receipt appears.
-      const wallet = solanaWallets[0];
-      if (authenticated && wallet) {
-        try {
-          setSubmitStage("signing");
-          const build = await scanApi.getPaymentTx(scanId);
-          const txBytes = base64ToBytes(build.txBase64);
-          // eslint-disable-next-line no-console
-          console.log("[payment] requesting sign", {
-            txBytesLen: txBytes.length,
-            walletAddress: wallet.address,
-          });
-          const signResult = await signTransaction({
-            transaction: txBytes,
-            wallet,
-            // Privy default chain is solana:mainnet; we run on devnet,
-            // so explicit override is required.
-            chain: 'solana:devnet',
-          });
-          // eslint-disable-next-line no-console
-          console.log("[payment] sign result", {
-            keys: Object.keys(signResult ?? {}),
-            type: signResult?.signedTransaction?.constructor?.name,
-            isUint8Array: signResult?.signedTransaction instanceof Uint8Array,
-            length: signResult?.signedTransaction?.length,
-          });
-          const signedBytes = signResult?.signedTransaction;
-          if (!(signedBytes instanceof Uint8Array)) {
-            throw new Error(
-              `Privy returned unexpected sign result shape: ${JSON.stringify(
-                Object.keys(signResult ?? {}),
-              )}`,
-            );
+      // 2. Sponsored 0 USDC tx — Phase 4 D6, via the shared helper at
+      //    lib/sponsored-payment.ts. Returns ok / skipped / error so
+      //    we surface a friendly message but never abort the scan
+      //    (server-side worker is decoupled from payment).
+      const result = await performSponsoredPayment({
+        scanId,
+        authenticated,
+        wallet: solanaWallets[0],
+        signTransaction,
+        // Map helper stages to the local submitStage union. Helper's
+        // "done" is the terminal success — we transition straight to
+        // "redirecting" below, so no setSubmitStage is needed for it.
+        onStage: (stage) => {
+          if (stage === "signing" || stage === "broadcasting") {
+            setSubmitStage(stage);
           }
-          setSubmitStage("broadcasting");
-          await scanApi.confirmPayment(scanId, bytesToBase64(signedBytes));
-        } catch (payErr) {
-          // Surface to user so they know why payment didn't go through.
-          // The scan itself still runs (anonymous), so we don't abort.
-          const msg =
-            payErr instanceof Error ? payErr.message : String(payErr);
-          // eslint-disable-next-line no-console
-          console.error("[payment] failed", payErr);
-          setError(`Payment skipped: ${msg}`);
-        }
+        },
+      });
+      if (result.kind === "error") {
+        setError(`Payment skipped: ${result.message}`);
       }
 
       setSubmitStage("redirecting");
@@ -456,18 +426,3 @@ export default function ValidatorDiscoveryDetailPage() {
   );
 }
 
-// Browser-safe base64 ↔ Uint8Array helpers. Avoids Node Buffer in the
-// client bundle (Next.js polyfills exist but tree-shaking quirks hit
-// us during the Privy 3.23 + @solana/kit transitive-dep mess).
-function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
-  return btoa(bin);
-}
