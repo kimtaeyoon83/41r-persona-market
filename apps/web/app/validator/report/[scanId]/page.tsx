@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { scanApi, type ScanReport } from "@/lib/api";
+import { API_BASE, scanApi, type ScanReport } from "@/lib/api";
 import {
   Bar,
   Btn,
@@ -180,6 +180,9 @@ export default function ValidatorReportPage() {
                 &ldquo;{r.scan.one_line_pitch}&rdquo;
               </div>
             )}
+            <div style={{ marginTop: 12 }}>
+              <ShareWithAi scanId={r.scan.id} />
+            </div>
             {/* Acquisition Layer v1.1 — view toggle. Only shown when the
                 weighted view is available (Mode A + post-Stage-3 scans). */}
             {weighted && (
@@ -1697,6 +1700,320 @@ function ModeBVerdictBlock({
           </div>
         </div>
       </div>
+    </>
+  );
+}
+
+// ─── Share with AI ────────────────────────────────────────────
+// Generates a public markdown URL the user can paste into ChatGPT
+// or Claude. Both LLMs auto-fetch URLs in the prompt and read the
+// markdown directly — much cleaner than copy-pasting the entire
+// report into a chat. Backend renders the doc at
+// /api/scan/:id/report.md (server-side, no JS, no auth).
+
+function ShareWithAi({ scanId }: { scanId: string }) {
+  const [open, setOpen] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const url = `${API_BASE}/api/scan/${scanId}/report.md`;
+  const suggestedPrompt =
+    `Read the audience-fit report at ${url} and answer:\n` +
+    `1. Which friction cluster should we fix first, and why?\n` +
+    `2. What does the cohort breakdown tell us about who this product is for?\n` +
+    `3. If we could change one thing on the site to lift the score, what would it be?\n` +
+    `\n` +
+    `Note: this report measures persona INTENT, not measured action. ` +
+    `Don't treat absolute %s as conversion forecasts — use them for relative ranking.`;
+
+  const copy = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      window.setTimeout(() => setCopiedKey((c) => (c === key ? null : c)), 1500);
+    } catch {
+      setCopiedKey("error");
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 12px",
+          fontSize: 12,
+          fontFamily: FM,
+          fontWeight: 500,
+          color: C.text,
+          background: C.panel,
+          border: `1px solid ${C.borderStrong}`,
+          borderRadius: 999,
+          cursor: "pointer",
+        }}
+      >
+        <span aria-hidden="true">🤖</span> Share with AI
+      </button>
+
+      {open && (
+        <>
+          <div
+            onClick={() => setOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 50,
+              background: "rgba(20, 18, 14, 0.35)",
+              backdropFilter: "blur(2px)",
+              WebkitBackdropFilter: "blur(2px)",
+            }}
+          />
+          <div
+            role="dialog"
+            aria-label="Share this report with an AI"
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              zIndex: 51,
+              width: 560,
+              maxWidth: "calc(100vw - 32px)",
+              maxHeight: "80vh",
+              overflowY: "auto",
+              padding: "18px 20px",
+              background: C.panel,
+              border: `1px solid ${C.borderStrong}`,
+              borderRadius: 10,
+              boxShadow: "0 24px 64px rgba(0,0,0,0.18)",
+              fontFamily: FS,
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: C.text,
+              textAlign: "left",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 10,
+                paddingBottom: 10,
+                borderBottom: `1px solid ${C.border}`,
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: FM,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: C.textDim,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Share with AI
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Close"
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: 999,
+                  border: "none",
+                  background: "transparent",
+                  color: C.textDim,
+                  fontSize: 18,
+                  lineHeight: 1,
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <p style={{ margin: "0 0 14px", color: C.textDim }}>
+              Paste this <strong>public link</strong> into ChatGPT or Claude.
+              Both LLMs will auto-fetch it and read the report — no need to
+              copy-paste the data itself.
+            </p>
+
+            {/* Public report URL */}
+            <div style={{ marginBottom: 14 }}>
+              <div
+                style={{
+                  fontFamily: FM,
+                  fontSize: 10,
+                  color: C.textFaint,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  marginBottom: 6,
+                }}
+              >
+                Report URL
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                <code
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    padding: "10px 12px",
+                    background: "#f3f0e8",
+                    borderRadius: 8,
+                    fontSize: 11.5,
+                    fontFamily: FM,
+                    color: C.text,
+                    wordBreak: "break-all",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {url}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => copy(url, "url")}
+                  style={{
+                    padding: "0 14px",
+                    border: `1px solid ${C.borderStrong}`,
+                    background: copiedKey === "url" ? C.text : C.panel,
+                    color: copiedKey === "url" ? C.bg : C.text,
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontFamily: FM,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {copiedKey === "url" ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
+
+            {/* Suggested prompt */}
+            <div style={{ marginBottom: 14 }}>
+              <div
+                style={{
+                  fontFamily: FM,
+                  fontSize: 10,
+                  color: C.textFaint,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  marginBottom: 6,
+                }}
+              >
+                Suggested prompt
+              </div>
+              <pre
+                style={{
+                  margin: 0,
+                  padding: "12px",
+                  background: "#f3f0e8",
+                  borderRadius: 8,
+                  fontSize: 11.5,
+                  fontFamily: FM,
+                  color: C.text,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  lineHeight: 1.55,
+                  marginBottom: 8,
+                }}
+              >
+                {suggestedPrompt}
+              </pre>
+              <button
+                type="button"
+                onClick={() => copy(suggestedPrompt, "prompt")}
+                style={{
+                  padding: "8px 14px",
+                  border: `1px solid ${C.borderStrong}`,
+                  background: copiedKey === "prompt" ? C.text : C.panel,
+                  color: copiedKey === "prompt" ? C.bg : C.text,
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontFamily: FM,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                {copiedKey === "prompt" ? "Copied" : "Copy prompt"}
+              </button>
+            </div>
+
+            {/* Quick-launch links */}
+            <div>
+              <div
+                style={{
+                  fontFamily: FM,
+                  fontSize: 10,
+                  color: C.textFaint,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  marginBottom: 6,
+                }}
+              >
+                Open directly
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <a
+                  href={`https://claude.ai/new?q=${encodeURIComponent(suggestedPrompt)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    padding: "8px 14px",
+                    border: `1px solid ${C.borderStrong}`,
+                    background: C.panel,
+                    color: C.text,
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontFamily: FM,
+                    fontWeight: 500,
+                    textDecoration: "none",
+                  }}
+                >
+                  Open in Claude →
+                </a>
+                <a
+                  href={`https://chat.openai.com/?q=${encodeURIComponent(suggestedPrompt)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    padding: "8px 14px",
+                    border: `1px solid ${C.borderStrong}`,
+                    background: C.panel,
+                    color: C.text,
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontFamily: FM,
+                    fontWeight: 500,
+                    textDecoration: "none",
+                  }}
+                >
+                  Open in ChatGPT →
+                </a>
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: C.textFaint,
+                  marginTop: 10,
+                  lineHeight: 1.5,
+                }}
+              >
+                The new chat opens with the prompt pre-filled. Paste the URL
+                above if the LLM doesn&apos;t fetch it automatically (some
+                ChatGPT plans require browsing to be enabled).
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }

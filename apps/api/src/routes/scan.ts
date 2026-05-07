@@ -438,6 +438,297 @@ router.get('/:id/report', async (req, res) => {
   });
 });
 
+// GET /api/scan/:id/report.md
+//
+// Plain-markdown export of the scan report so an LLM (ChatGPT,
+// Claude, etc.) can fetch a single URL and analyse the run without
+// the user pasting a giant blob. The validator/report page is
+// client-rendered Next.js, so a direct fetch by an external LLM
+// would only see a "Loading…" stub — this endpoint solves that by
+// emitting fully-rendered markdown server-side.
+//
+// Public, no auth — same access posture as the JSON /report
+// endpoint above. Caching headers favour LLM re-fetches.
+router.get('/:id/report.md', async (req, res) => {
+  const { id } = req.params;
+  if (!UUID_RE.test(id ?? '')) {
+    res.status(404).type('text/plain').send('scan not found');
+    return;
+  }
+
+  const [scan] = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(eq(schema.audienceFitScans.id, id));
+  if (!scan) {
+    res.status(404).type('text/plain').send('scan not found');
+    return;
+  }
+
+  const cohortRows = await db
+    .select()
+    .from(schema.scanCohortResults)
+    .where(eq(schema.scanCohortResults.scanId, id));
+
+  // Top voice quotes — pull a handful of the strongest responses so
+  // the LLM can see actual persona language, not just aggregates.
+  const voiceRows = await db
+    .select({
+      cohortId: schema.scanPersonaResponses.cohortId,
+      voiceFirstImpression: schema.scanPersonaResponses.voiceFirstImpression,
+      voiceBiggestFriction: schema.scanPersonaResponses.voiceBiggestFriction,
+      voiceWouldReturnBecause: schema.scanPersonaResponses.voiceWouldReturnBecause,
+      happiness: schema.scanPersonaResponses.happinessScore,
+    })
+    .from(schema.scanPersonaResponses)
+    .where(
+      and(
+        eq(schema.scanPersonaResponses.scanId, id),
+        eq(schema.scanPersonaResponses.isFlagged, false),
+        isNotNull(schema.scanPersonaResponses.voiceBiggestFriction),
+      ),
+    )
+    .orderBy(desc(schema.scanPersonaResponses.happinessScore))
+    .limit(12);
+
+  const completed = scan.status === 'completed';
+  const aarrr =
+    completed && scan.mode === 'A' ? await computeAarrr(id) : null;
+
+  const md = renderReportMarkdown({ scan, cohortRows, voiceRows, aarrr });
+  res
+    .status(200)
+    .type('text/markdown; charset=utf-8')
+    .setHeader('Cache-Control', 'public, max-age=60')
+    .send(md);
+});
+
+// Pure render. No DB / network. Takes the rows the route handler
+// already fetched and produces a chat-friendly markdown document.
+function renderReportMarkdown(args: {
+  scan: typeof schema.audienceFitScans.$inferSelect;
+  cohortRows: Array<typeof schema.scanCohortResults.$inferSelect>;
+  voiceRows: Array<{
+    cohortId: string;
+    voiceFirstImpression: string | null;
+    voiceBiggestFriction: string | null;
+    voiceWouldReturnBecause: string | null;
+    happiness: number | null;
+  }>;
+  aarrr: Awaited<ReturnType<typeof computeAarrr>>;
+}): string {
+  const { scan, cohortRows, voiceRows, aarrr } = args;
+  const completed = scan.status === 'completed';
+  const lines: string[] = [];
+
+  const fmt = (n: number | null | undefined, digits = 1): string =>
+    n == null || !Number.isFinite(n) ? '—' : n.toFixed(digits);
+
+  // Header
+  lines.push(`# Audience-Fit Report — ${scan.targetUrl}`);
+  lines.push('');
+  lines.push(`> Scan ID: \`${scan.id}\``);
+  lines.push(`> Mode: **${scan.mode}** (${scan.mode === 'A' ? 'Discovery' : 'Verify'})`);
+  lines.push(`> Status: \`${scan.status}\``);
+  lines.push(
+    `> Personas: ${scan.personasCompleted}/${scan.personasAttempted} valid` +
+      (scan.personasFlagged > 0 ? ` · ${scan.personasFlagged} flagged` : ''),
+  );
+  lines.push(`> Created: ${scan.createdAt.toISOString()}`);
+  if (scan.completedAt) {
+    lines.push(`> Completed: ${scan.completedAt.toISOString()}`);
+  }
+  lines.push('');
+
+  // How to read this
+  lines.push('## How to read this report');
+  lines.push('');
+  lines.push(
+    'This is a **synthetic-persona-based audience-fit analysis**.',
+  );
+  lines.push(
+    `~${scan.personasCompleted} simulated personas reacted to a screenshot of ${scan.targetUrl}. ` +
+      'The numbers measure **intent** ("would I sign up / stay / come back"), NOT real conversion. ' +
+      'Treat absolute %s as relative ranking signals across sites — they overshoot real GA4 ' +
+      'reality by ~5-30× because that intent-action gap is fundamental to persona simulation. ' +
+      'Use the friction list + AARRR drop-offs for diagnosis, not as forecasts.',
+  );
+  lines.push('');
+  lines.push(
+    'Methodology: https://app.project-rpm.xyz/validator/how-it-works',
+  );
+  lines.push('');
+
+  // Site classification
+  if (scan.category) {
+    lines.push('## Site classification');
+    lines.push('');
+    lines.push(
+      `- Category: **${scan.category}** (confidence ${fmt(scan.categoryConfidence, 2)})`,
+    );
+    if (scan.oneLinePitch) {
+      lines.push(`- One-line pitch: ${scan.oneLinePitch}`);
+    }
+    lines.push('');
+  }
+
+  // Headline (Mode A)
+  if (completed && scan.mode === 'A') {
+    const best = cohortRows.find((c) => c.cohortId === scan.bestCohortId);
+    const worst = cohortRows.find((c) => c.cohortId === scan.worstCohortId);
+    lines.push('## Headline (Mode A composite)');
+    lines.push('');
+    lines.push('| Metric | Value |');
+    lines.push('|---|---|');
+    lines.push(`| Audience-Fit Score | **${fmt(scan.audienceFitScore)} / 100** |`);
+    lines.push(
+      `| Best cohort | ${best?.cohortLabel ?? '—'} · ${fmt(scan.bestCohortScore)} |`,
+    );
+    lines.push(`| Median cohort | ${fmt(scan.medianCohortScore)} |`);
+    lines.push(
+      `| Worst cohort | ${worst?.cohortLabel ?? '—'} · ${fmt(scan.worstCohortScore)} |`,
+    );
+    lines.push(
+      `| Global task-success | ${fmt(scan.globalTaskSuccessAvg)} |`,
+    );
+    lines.push(
+      `| Global sentiment | ${fmt(scan.globalSentimentAvg)} |`,
+    );
+    lines.push('');
+    lines.push(
+      '> Formula: `0.40 × best_cohort_fit + 0.30 × median_cohort_fit + 0.20 × global_task_success + 0.10 × global_sentiment`',
+    );
+    lines.push('');
+  }
+
+  // Mode B verdict
+  if (scan.mode === 'B') {
+    lines.push('## Verification verdict (Mode B)');
+    lines.push('');
+    if (scan.targetAudienceText) {
+      lines.push(`- Audience: "${scan.targetAudienceText}"`);
+    }
+    if (scan.modeBVerdict) {
+      lines.push(`- Verdict: **${scan.modeBVerdict.toUpperCase()}**`);
+    }
+    if (completed) {
+      lines.push(`- Score: ${fmt(scan.audienceFitScore)} / 100`);
+      lines.push('  - ≥60 Pass · 40-60 Conditional · <40 Fail');
+    }
+    lines.push('');
+  }
+
+  // Cohorts
+  if (cohortRows.length > 0) {
+    lines.push('## Cohort breakdown');
+    lines.push('');
+    lines.push(
+      '| Cohort | n | Fit | Engagement | Task | Happiness | Adoption | Retention D-7 |',
+    );
+    lines.push('|---|---|---|---|---|---|---|---|');
+    const sorted = [...cohortRows].sort(
+      (a, b) => (b.cohortFitScore ?? 0) - (a.cohortFitScore ?? 0),
+    );
+    for (const c of sorted) {
+      lines.push(
+        `| ${c.cohortLabel} | ${c.nCompleted} | **${fmt(c.cohortFitScore)}** | ` +
+          `${fmt(c.engagementMean)} | ${fmt(c.taskSuccessMean)} | ` +
+          `${fmt(c.happinessMean)} | ${fmt(c.adoptionMean)} | ${fmt(c.retentionMean)} |`,
+      );
+    }
+    lines.push('');
+  }
+
+  // AARRR funnel
+  if (aarrr) {
+    lines.push('## AARRR funnel (panel view — engaged-persona intent)');
+    lines.push('');
+    lines.push('| Stage | Score | Passing | Threshold |');
+    lines.push('|---|---|---|---|');
+    for (const s of aarrr.stages) {
+      lines.push(
+        `| ${s.label} | ${fmt(s.score)}% | ${s.n_passing} / ${s.total} | ${s.threshold} |`,
+      );
+    }
+    lines.push('');
+    let biggestDropIdx = 1;
+    let biggestDrop = 0;
+    for (let i = 1; i < aarrr.stages.length; i++) {
+      const drop = aarrr.stages[i - 1]!.score - aarrr.stages[i]!.score;
+      if (drop > biggestDrop) {
+        biggestDrop = drop;
+        biggestDropIdx = i;
+      }
+    }
+    if (biggestDrop >= 5) {
+      lines.push(
+        `> **Biggest leak**: ${aarrr.stages[biggestDropIdx]!.label} — ${biggestDrop.toFixed(0)}pt drop from previous stage. Fix this stage first.`,
+      );
+      lines.push('');
+    }
+  }
+
+  // Friction clusters
+  const frictions = (scan.frictionsJson ?? []) as Array<{
+    rank: number;
+    title: string;
+    summary?: string;
+    where: string;
+    impact: string;
+    quote: string;
+    n: number;
+  }>;
+  if (frictions.length > 0) {
+    lines.push('## Friction & bottleneck clusters');
+    lines.push('');
+    for (const f of frictions) {
+      lines.push(`### #${f.rank} — ${f.title}`);
+      lines.push('');
+      lines.push(`- **Severity**: ${f.n} personas · ${f.impact}`);
+      lines.push(`- **Where**: ${f.where}`);
+      if (f.summary) {
+        lines.push(`- **Detail**: ${f.summary}`);
+      }
+      lines.push(`- **Persona voice**: "${f.quote}"`);
+      lines.push('');
+    }
+  }
+
+  // Persona voice samples
+  if (voiceRows.length > 0) {
+    lines.push('## Persona voice samples (top by happiness)');
+    lines.push('');
+    for (const v of voiceRows.slice(0, 8)) {
+      const cohort = COHORT_BY_ID[v.cohortId]?.label ?? v.cohortId;
+      lines.push(`**${cohort}** (happiness ${fmt(v.happiness)})`);
+      if (v.voiceFirstImpression) {
+        lines.push(`- First impression: "${v.voiceFirstImpression}"`);
+      }
+      if (v.voiceBiggestFriction) {
+        lines.push(`- Biggest friction: "${v.voiceBiggestFriction}"`);
+      }
+      if (v.voiceWouldReturnBecause) {
+        lines.push(`- Would return because: "${v.voiceWouldReturnBecause}"`);
+      }
+      lines.push('');
+    }
+  }
+
+  // Suggested questions
+  lines.push('## Suggested questions to ask the AI');
+  lines.push('');
+  lines.push('1. Which friction cluster is the most actionable for our team to address first?');
+  lines.push('2. Are there contradictions between the persona voice samples and the aggregate scores?');
+  lines.push('3. Which cohort gap (best vs worst) is most surprising and what does it suggest?');
+  lines.push('4. If we could change one thing on the site to lift the score, what would have the highest leverage?');
+  lines.push('5. What signals here would warrant deeper qualitative research with real users?');
+  lines.push('');
+  lines.push('---');
+  lines.push(`Generated: ${new Date().toISOString()}`);
+
+  return lines.join('\n');
+}
+
 // Helper — fetch persona rows + cohortId for the weighted AARRR
 // compute. Lifted out of the route handler so the inline call site
 // stays readable; the handler is already 130+ lines.
