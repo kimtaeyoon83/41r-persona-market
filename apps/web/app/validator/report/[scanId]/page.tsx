@@ -809,6 +809,213 @@ strong      85   70   55   30`}
           ))}
         </Card>
 
+        {/* Improvement priority table — derived from the same friction
+            data, reformatted as an action checklist. Excludes the
+            long-tail bucket (not a single actionable item). */}
+        {(() => {
+          const actionable = frictions.filter(
+            (f) =>
+              !f.title.toLowerCase().includes("long-tail") &&
+              f.where !== "Various",
+          );
+          if (actionable.length === 0) return null;
+          const total = r.scan.personas_completed || 1;
+          return (
+            <>
+              <SectionLabel
+                n="A"
+                label="Improvement priority"
+                sub="Action checklist — sorted by impact"
+                help={{
+                  title: "How to read this priority table",
+                  body: (
+                    <>
+                      <p style={{ margin: "0 0 10px" }}>
+                        <strong>What it is</strong>: the same friction
+                        clusters as above, reformatted as an action
+                        checklist. Each row is one thing to fix, in priority
+                        order (top = biggest leverage).
+                      </p>
+                      <p style={{ margin: "0 0 10px" }}>
+                        <strong>Columns</strong>:
+                      </p>
+                      <ul style={{ margin: "0 0 10px", paddingLeft: 18 }}>
+                        <li>
+                          <strong>What to fix</strong> — the cluster title
+                          + LLM-generated detail line (one sentence
+                          describing the problem in actionable terms)
+                        </li>
+                        <li>
+                          <strong>Where</strong> — the page / step the
+                          friction surfaces on
+                        </li>
+                        <li>
+                          <strong>Affected</strong> — N personas out of
+                          the total who raised this; higher N means a
+                          broader audience hits this
+                        </li>
+                        <li>
+                          <strong>Impact</strong> — rough fit-cost
+                          estimate (
+                          <code>+round(n / total × 30)</code>): how much
+                          the audience-fit score might lift if this
+                          friction is resolved. Indicator, not a measured
+                          uplift.
+                        </li>
+                      </ul>
+                      <p style={{ margin: 0 }}>
+                        <strong>Excluded</strong>: the &quot;Other /
+                        long-tail&quot; bucket. Long-tail aggregates
+                        unassigned outlier frictions and isn&apos;t a
+                        single actionable item.
+                      </p>
+                    </>
+                  ),
+                }}
+              />
+              <Card padding={0} style={{ marginBottom: 24, overflow: "hidden" }}>
+                <div style={{ overflowX: "auto" }}>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      fontSize: 12.5,
+                    }}
+                  >
+                    <thead>
+                      <tr
+                        style={{
+                          background: "#f7f4ec",
+                          textAlign: "left",
+                          color: C.textDim,
+                          fontFamily: FM,
+                          fontSize: 11,
+                          letterSpacing: "0.04em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        <th style={{ padding: "12px 14px", width: 48 }}>#</th>
+                        <th style={{ padding: "12px 14px" }}>What to fix</th>
+                        <th style={{ padding: "12px 14px", width: 180 }}>
+                          Where
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px 14px",
+                            width: 110,
+                            textAlign: "right",
+                          }}
+                        >
+                          Affected
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px 14px",
+                            width: 100,
+                            textAlign: "right",
+                          }}
+                        >
+                          Impact
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {actionable.map((f, i) => {
+                        const tone =
+                          i === 0 ? C.bad : i === 1 ? C.warn : C.text;
+                        return (
+                          <tr
+                            key={f.rank}
+                            style={{
+                              borderTop: `1px solid ${C.border}`,
+                              verticalAlign: "top",
+                            }}
+                          >
+                            <td
+                              style={{
+                                padding: "14px",
+                                color: tone,
+                                fontFamily: FM,
+                                fontWeight: 600,
+                              }}
+                            >
+                              {f.rank}
+                            </td>
+                            <td style={{ padding: "14px" }}>
+                              <div
+                                style={{ fontWeight: 600, marginBottom: 4 }}
+                              >
+                                {f.title}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: 12,
+                                  color: C.textDim,
+                                  lineHeight: 1.55,
+                                }}
+                              >
+                                {f.detail}
+                              </div>
+                            </td>
+                            <td
+                              style={{
+                                padding: "14px",
+                                fontSize: 11,
+                                color: C.textDim,
+                                fontFamily: FM,
+                              }}
+                            >
+                              {f.where}
+                            </td>
+                            <td
+                              style={{
+                                padding: "14px",
+                                fontFamily: FM,
+                                color: C.textDim,
+                                fontSize: 12,
+                                textAlign: "right",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {f.n} / {total}
+                            </td>
+                            <td
+                              style={{
+                                padding: "14px",
+                                textAlign: "right",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  padding: "3px 8px",
+                                  borderRadius: 999,
+                                  fontFamily: FM,
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  background: tone === C.bad
+                                    ? "#fde7e1"
+                                    : tone === C.warn
+                                      ? "#fff1d9"
+                                      : "#eee9da",
+                                  color: tone,
+                                }}
+                              >
+                                {f.impact}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </>
+          );
+        })()}
+
         {/* ④ Persona Resonance */}
         <SectionLabel
           n={4}
