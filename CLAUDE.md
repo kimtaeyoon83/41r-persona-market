@@ -1170,6 +1170,62 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   above the AARRR funnel + the "What this measures (and doesn't)"
   §00 on `/validator/how-it-works` are the load-bearing caveats —
   keep them when iterating.
+- Drop the `siteContext` parameter from `runPersonaResponseLLM` /
+  `buildUserPrompt` (`apps/api/src/services/dimensions/llm.ts`).
+  Without it, persona prompts only see the raw URL string + their
+  own crypto-tilted voice_sample and routinely hallucinate wallet/
+  DeFi features on non-crypto sites — the Google Merch case
+  2026-05-07 had a Korean long-tail bucket quote "지갑 연결이
+  필수인데 초보자한테는 진입 장벽이 너무 높아요" on a plain
+  e-commerce site. `scan_pipeline.ts` threads
+  `{category, categoryConfidence, oneLinePitch}` from the scan row
+  into both Mode A and Mode B persona handlers; classifier output
+  must reach the persona, not just the report header.
+- Reintroduce crypto-specific vocabulary in `VOICE_BY_COHORT`
+  (`scripts/seed-validator-cohorts.ts`). The 2026-05-07 cleanup
+  rewrote crypto_native / web3_pro / defi_beginner voice_samples
+  to be category-agnostic (security_aware, detail_oriented,
+  fast-mover traits survive; "slippage / MEV / multi-chain / gas /
+  signing" vocabulary doesn't). Voice is the dominant tone signal
+  the persona LLM picks up — putting "Slippage and MEV signaling
+  matter most" back means crypto cohorts will parrot crypto framing
+  on non-crypto sites again. If you re-seed, also run
+  `scripts/update-validator-voice-samples.ts` to update existing
+  persona rows in place (the seed script is `ON CONFLICT DO
+  NOTHING` — it skips existing rows).
+- Set `n_passing: 0` literally for visitor-weighted AARRR stages
+  in `services/aarrr.ts::computeAarrrWeightedFromRows`. Previously
+  the comment "weighted view has no meaningful integer count"
+  justified zero, but the UI rendered "0 / 111" next to the score%
+  and made the funnel look broken (2026-05-07 user report).
+  `n_passing` is now derived as `Math.round((score/100) ×
+  totalPersonas)` — an explicit *visitor-equivalent estimate* —
+  so panel and visitor cards read with the same "X of Y" pattern.
+  Score values unchanged.
+- Reintroduce additional `<link rel="icon">` PNG entries in
+  `apps/web/app/layout.tsx::metadata.icons.icon`. The 2026-05-07
+  favicon fix dropped the redundant `/favicon.png` and
+  `/logo/rpm_black_vertical.png` entries. The vertical wordmark
+  was a 500×500 file shared with `public/favicon.png` (verified
+  identical via `diff -q`); its `sizes="any"` hint won the 16×16
+  tab slot, downscaling to an illegible black bar. Next.js
+  auto-detects `app/favicon.ico` (multi-size 16/32/48/256) and
+  emits the correct single `<link rel="icon">`. Keep
+  `metadata.icons.apple` only — iOS home-screen icons render large
+  enough to display the vertical wordmark legibly.
+- Frame the AARRR funnel as a conversion forecast in UI copy or
+  marketing. The 5-site 2026-05-07 multi-category test showed the
+  visitor-weighted view collapses to nearly identical absolute %s
+  (Activation spread 13pt, Revenue spread 1.3pt) across very
+  different categories — a structural limit of the universal
+  `INTENT_ACTION` multipliers (0.50/0.20/0.10/0.05) calibrated on
+  Merch n=1. The report page now leads with a **"BIGGEST LEAK"**
+  callout that names the largest stage-to-stage drop, and renders
+  per-stage `▼ X pt` chips so the bottleneck is visually obvious.
+  The visitor-toggle sub is `"experimental — directional only,
+  not a traffic forecast"`. Don't soften that copy or restore the
+  earlier `"v1.1 priors"` label — the honest framing protects the
+  product against being misread as a GA4 substitute.
 
 ## Dev harness (`/api/dev/*`)
 
