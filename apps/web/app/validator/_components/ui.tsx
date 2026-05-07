@@ -441,46 +441,68 @@ export function HelpTip({
               top: size + 6,
               left: 0,
               zIndex: 51,
-              width: 320,
+              width: 520,
               maxWidth: "calc(100vw - 32px)",
-              padding: "14px 16px",
+              maxHeight: "70vh",
+              overflowY: "auto",
+              padding: "16px 18px",
               background: C.panel,
               border: `1px solid ${C.borderStrong}`,
               borderRadius: 10,
               boxShadow: "0 12px 32px rgba(0,0,0,0.12)",
               fontFamily: FS,
-              fontSize: 12,
-              lineHeight: 1.55,
+              fontSize: 12.5,
+              lineHeight: 1.65,
               color: C.text,
               textAlign: "left",
             }}
           >
             <div
               style={{
-                fontFamily: FM,
-                fontSize: 11,
-                fontWeight: 600,
-                color: C.textDim,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                marginBottom: 6,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 10,
+                paddingBottom: 10,
+                borderBottom: `1px solid ${C.border}`,
               }}
             >
-              {title}
+              <div
+                style={{
+                  fontFamily: FM,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: C.textDim,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                }}
+              >
+                {title}
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Close"
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 999,
+                  border: "none",
+                  background: "transparent",
+                  color: C.textDim,
+                  fontSize: 16,
+                  lineHeight: 1,
+                  cursor: "pointer",
+                  padding: 0,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                ×
+              </button>
             </div>
-            <div style={{ marginBottom: 10 }}>{children}</div>
-            <Link
-              href="/validator/how-it-works"
-              style={{
-                fontSize: 11,
-                fontFamily: FM,
-                color: C.accent,
-                textDecoration: "underline",
-              }}
-              onClick={() => setOpen(false)}
-            >
-              methodology →
-            </Link>
+            <div>{children}</div>
           </div>
         </>
       )}
