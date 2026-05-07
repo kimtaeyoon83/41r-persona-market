@@ -116,9 +116,12 @@ cd apps/persona-engine
 - Next.js 14 App Router, all pages in `app/`
 - Shared API URL: `import { API_BASE } from '@/lib/api'` — never hardcode localhost
 - API client: `lib/api.ts` exports `testApi`, `reportApi`, `personaApi`,
-  `testerApi`, `autoTestApi`, `dashboardApi` (landing KPIs / activity)
-- Loading: use `<LoadingSpinner>` or `<Loading>` from `components/loading.tsx`
-- Errors: use `<ErrorDisplay message={...} onRetry={...}>` from `components/error-display.tsx`
+  `testerApi`, `autoTestApi`, `dashboardApi` (landing KPIs / activity).
+  Validator uses `scanApi` for /api/scan/* routes.
+- Loading / error UI: validator pages render their own inline patterns
+  (small text + retry button). The previous shared `<Loading>` /
+  `<ErrorDisplay>` components were autotest-era and were removed in
+  the 2026-05-07 dead-code cleanup.
 - Design system: Hi-Fi dark theme built on OKLCH neutrals + Solana brand accent
   (sol-green #14F195, sol-purple #9945FF, sol-blue #00C2FF). All primitives and
   tokens are defined in `app/globals.css` — do not introduce one-off styles
@@ -832,9 +835,13 @@ a new pipeline.
 - **CORS allowlist** — `config/cors.ts`. Defaults allow localhost:3000/3001,
   127.0.0.1:3000/3001, the Railway web URL. Override via
   `CORS_ALLOWED_ORIGINS` (comma-separated).
-- **Rate limiting** — `middleware/rate-limit.ts` keys by wallet (signedWallet
-  → route params → body wallet → IP). Autotest 2/min, reportSubmit 5/min,
-  LLM-generation routes 10/min.
+- **Rate limiting** — REMOVED in the 2026-05-07 autotest pivot
+  cleanup. The previous `middleware/rate-limit.ts` exposed
+  `autotestRunLimiter` / `reportSubmitLimiter` / `llmGenerateLimiter`,
+  but all three target routes were removed by the validator pivot.
+  Validator routes (`/api/auth`, `/api/scan`, `/api/calibration`,
+  `/api/benchmark`) currently have NO rate limiting — see Known
+  Limitations §9 below.
 - **Zod body validation** — `schemas/index.ts` + `validateBody()`. Every
   signed POST has a schema, applied right after `requireSignedRequest`.
 - **Env flag safety** — `config/env.ts` forces `SKIP_PAYMENT_VERIFY=false`
@@ -956,12 +963,6 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   || persona.count === 0`. They either silently show "0%" (reads as
   "perfect agreement") or plot the zero bucket as a tall bar. The
   single-side banner + hidden sections is the contract.
-- Leave `DEV_TEST_KEY` set on the production API longer than the
-  window needed to run the dev harness. `/api/dev/*` bypasses payment
-  verification and signed-request auth; the key must be rotated/removed
-  as soon as validation is done. `railway variable delete DEV_TEST_KEY
-  --service api && railway redeploy -y --service api` flips the routes
-  back to 404 (dev_auth.ts gate).
 - Remove the empty-session guards in `scoring/report.ts` /
   `scoring/checklist.ts`. They short-circuit the LLM call when
   `outcome=error && turns≤1`; reverting to the LLM path means Haiku /
@@ -990,20 +991,6 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   personas sharing one testerAddr, and inlining the loop loses the
   in-batch dedup that prevents the wasted-compute symptom (full
   run + scoring → unique-constraint throw on insert).
-- Mutate / unset `DEV_TEST_KEY` while a stagehand chain is in flight.
-  `routes/dev.ts` runs personas sequentially via in-process
-  `chain.then()`; setting or removing the env var triggers a Railway
-  redeploy that kills the current process and drops every queued
-  persona's run on the floor. Workflow: poll `/api/dev/snapshot/:id`
-  until `reports_by_mode.stagehand_hybrid` reaches the expected count
-  before deleting the key.
-- Assume `enable_auto_test=true` (or `/api/dev/autotest/trigger`)
-  produces a final diagnosis report. The autotest queue lands the
-  raw reports only — `diagnosisMd` stays null until you explicitly
-  call `POST /api/dev/diagnosis/generate` (or the signed
-  `POST /api/test/:id/diagnosis`). The aitmpl ee2ad897 walkthrough
-  hit this gap; if a UX flow needs a diagnosis at the end, chain the
-  call yourself.
 - Reorder or hide sections in the Company Test Dashboard
   (`/company/test/[id]`) without explicit need. The 8-section spec
   (Hero KPIs → Why Users Drop → Persona Insights → Funnel → Advanced
@@ -1227,80 +1214,6 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   earlier `"v1.1 priors"` label — the honest framing protects the
   product against being misread as a GA4 substitute.
 
-## Dev harness (`/api/dev/*`)
-
-One-shot endpoints for driving the full pipeline without the wallet-
-signing loop. Entire router is mounted only when `DEV_TEST_KEY` is set
-(≥12 chars) — absent env ⇒ 404 via `middleware/dev_auth.ts`, which
-**loads `.env` at module init** (ESM imports run before `index.ts`'s
-`dotenv.config`, so without that early load the key-gate never fires
-in local dev).
-
-Routes:
-- `POST /tester` — create a tester wallet + profile (idempotent)
-- `POST /test` — create a test + auto-generate test cases via LLM
-  (long-running, ~90s on fresh target — use timeout ≥ 180s from clients)
-- `POST /report/manual` — submit a human report, runs quality scoring
-  + bumps `testsDone`
-- `POST /persona/recompute` — run `recomputePersona` (requires
-  testsDone ≥ 3). Returns `{personaId, versionNum, ...}` — note
-  **camelCase**, not snake_case; earlier E2E scripts missed the key
-  and silently got `id=undefined`.
-- `POST /autotest/trigger` — queue stagehand_hybrid + text runs for
-  matching personas (or a specific `persona_id`). Fire-and-forget:
-  the chain resolves in background, poll `/snapshot/:test_id` to see
-  `reports_by_mode: {stagehand_hybrid, text, manual}` increment.
-- `POST /diagnosis/generate` — full `generateAndStoreDiagnosis` pass
-- `POST /flow/full` — one-shot orchestration: company + test + test
-  cases + queue persona runs + create manual tester wallets (does not
-  submit manual reports; caller runs `/report/manual` per wallet).
-
-Key: sent via `x-dev-key` header on every call. The sentinel `204`
-test-count + `diagnosis.test.ts` verify the router is gated when the
-env var is absent.
-
-### End-to-end run via dev harness (canonical workflow)
-
-When kicking off a full test on prod for verification, this is the
-sequence that worked for the aitmpl ee2ad897 walkthrough — keep it
-in mind as the reference flow:
-
-```bash
-# 1. Set temporary key + wait for redeploy
-DEV_KEY=$(openssl rand -hex 16)
-railway variable set "DEV_TEST_KEY=$DEV_KEY" --service api
-until [ "$(curl -s -o /dev/null -w "%{http_code}" \
-    -X POST https://api.../api/dev/tester \
-    -H "x-dev-key: $DEV_KEY" -d '{}')" = "200" ]; do sleep 8; done
-
-# 2. Register test with auto-trigger (returns test_id, queued personas)
-curl -X POST .../api/dev/test -H "x-dev-key: $DEV_KEY" \
-    --max-time 180 \
-    -d '{"target_url":"...","requirements":"...","enable_auto_test":true}'
-
-# 3. Poll until expected stagehand_hybrid count lands
-#    (3 personas → ~15-30 min total wall time, sequential chain)
-until [ "$(curl ... | jq '.reports_by_mode.stagehand_hybrid')" -ge "3" ]; do
-    sleep 60
-done
-
-# 4. Verify R2 video URLs (per report, parse _session_video sentinel)
-# 5. Generate diagnosis EXPLICITLY (autotest queue does not chain it)
-curl -X POST .../api/dev/diagnosis/generate -H "x-dev-key: $DEV_KEY" \
-    -d '{"test_id":"..."}'
-
-# 6. Remove key + verify 404
-railway variable delete DEV_TEST_KEY --service api
-until [ "$(curl ... -o /dev/null -w "%{http_code}")" = "404" ]; do sleep 8; done
-```
-
-Two quirks worth memorizing:
-- Step 3's wall time is ~5-10 min per persona because the
-  stagehand_hybrid chain is sequential (text mode runs in parallel,
-  so its 3 reports land in the first ~3 min).
-- Step 5 is what's missing if a UX flow shows reports but the
-  diagnosis tab is empty. The "최종리포트가 없는데" failure case.
-
 ## Investor Dashboard Narrative
 
 The "persona ≈ human" claim only holds **within matched demographic cohorts**.
@@ -1482,3 +1395,34 @@ seeds cannot match.
 **Cost:** Product/marketplace effort, not engineering. Once real
 testers > N (~50) per cohort, the synthetic seeds can be marked
 as fallback-only.
+
+### 9. Validator API routes have no rate limiting
+
+**Symptom:** `/api/auth/*`, `/api/scan/*`, `/api/calibration/*`,
+`/api/benchmark/*` accept unlimited requests per IP/wallet. A
+single misbehaving client (or a DoS) can exhaust LLM credits,
+captureSite Playwright workers, or DB connections.
+
+**Root cause:** The previous `middleware/rate-limit.ts`
+(`autotestRunLimiter` / `reportSubmitLimiter` /
+`llmGenerateLimiter`) targeted autotest-era routes that the
+2026-05-07 pivot deleted. The middleware was removed in the
+follow-up dead-code cleanup (commit d817167) because all three
+limiters had zero call sites. Validator routes were never
+re-wired to limiters.
+
+**Cost concern:** `/api/scan` POST kicks off a ~$0.15 pipeline
+(112 personas × Sonnet vision). 100 requests/hour at the API
+costs $15/hour without rate limiting.
+
+**Unblock:** Rebuild a small rate-limit module sized for the
+validator surface area:
+  - `/api/scan` POST: 5/min per IP + 20/hour per wallet
+  - `/api/auth/nonce`: 30/min per IP
+  - everything else: 60/min per IP (cheap reads)
+Use `express-rate-limit` (already a dep) or the `keyv`-backed
+pattern. ~1 hour engineering.
+
+**Cost:** ~1 hour. Should land before any public/marketing
+traffic; until then the API is on Railway custom-domain hidden
+URLs which limits exposure but doesn't eliminate it.
