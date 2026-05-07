@@ -43,6 +43,7 @@ import { simulatePersonaResponse, type SimulatedResponse } from './dimension_sim
 import {
   runPersonaResponseLLM,
   extractVoiceQuotes,
+  type SiteContext,
 } from './dimensions/llm.js';
 import { clusterFrictions } from './dimensions/frictions.js';
 import { captureSite } from './site_capture.js';
@@ -330,6 +331,11 @@ async function runScan(scanId: string): Promise<void> {
       targetUrl,
       hypothesis,
       screenshotUrls,
+      siteContext: {
+        category: scan.category,
+        categoryConfidence: scan.categoryConfidence,
+        oneLinePitch: scan.oneLinePitch,
+      },
     });
     if (r.errored) totalErrored += 1;
     if (r.flagged) totalFlagged += 1;
@@ -518,6 +524,11 @@ async function runModeBPipeline(args: {
       targetUrl,
       hypothesis,
       screenshotUrls,
+      siteContext: {
+        category: scan.category,
+        categoryConfidence: scan.categoryConfidence,
+        oneLinePitch: scan.oneLinePitch,
+      },
     });
     if (r.errored) errored += 1;
     if (r.flagged) flagged += 1;
@@ -681,8 +692,9 @@ async function runPersonaAndPersist(args: {
   targetUrl: string;
   hypothesis: string | undefined;
   screenshotUrls: string[];
+  siteContext: SiteContext;
 }): Promise<PersonaPersistResult> {
-  const { scanId, persona, cohortId, targetUrl, hypothesis, screenshotUrls } = args;
+  const { scanId, persona, cohortId, targetUrl, hypothesis, screenshotUrls, siteContext } = args;
   let sim: SimulatedResponse | null = null;
   let voice: VoiceQuotes = {
     voiceFirstImpression: null,
@@ -706,6 +718,7 @@ async function runPersonaAndPersist(args: {
         targetUrl,
         hypothesis,
         USE_VISION ? screenshotUrls : undefined,
+        siteContext,
       );
       sim = result.sim;
       voice = extractVoiceQuotes(result.parsed);

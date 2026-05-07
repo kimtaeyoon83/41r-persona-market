@@ -80,6 +80,20 @@ export const personaResponseSchema = z.object({
 
 export type PersonaLLMResponse = z.infer<typeof personaResponseSchema>;
 
+// Third-party classification of the site the persona is about to
+// look at. Threaded from `audience_fit_scans.{category, category_
+// confidence, one_line_pitch}` which classifySite() writes during
+// the capture step. Without this block, persona LLMs only saw the
+// raw URL string + their own crypto-tilted voice_sample and routinely
+// hallucinated wallet/DeFi features on non-crypto sites (Google
+// Merch case 2026-05-07: long-tail bucket quote "지갑 연결이 필수인데
+// 초보자한테는 진입 장벽이 너무 높아요" on a plain e-commerce site).
+export type SiteContext = {
+  category: string | null;
+  categoryConfidence: number | null;
+  oneLinePitch: string | null;
+};
+
 // ─── Prompt builder ───────────────────────────────────────────────
 function buildSystemPrompt(): string {
   return `You are a UX research synthesizer responding AS a specific human persona looking at a product. You output JSON only — no prose outside the JSON.
@@ -165,13 +179,36 @@ RULES:
 - Replace every "Replace with..." placeholder string with the persona's actual content.
 - Output ONLY the JSON object, no markdown fences, no commentary.`;
 
-function buildUserPrompt(persona: PersonaRow, targetUrl: string, hypothesis?: string): string {
+function buildUserPrompt(
+  persona: PersonaRow,
+  targetUrl: string,
+  hypothesis?: string,
+  siteContext?: SiteContext,
+): string {
   const v = persona.vector;
   const d = v.demographics;
   const u = v.ux_preferences;
 
   const lines: string[] = [];
   lines.push(`Target URL: ${targetUrl}`);
+  if (siteContext && (siteContext.category || siteContext.oneLinePitch)) {
+    lines.push('');
+    lines.push('Site context (third-party classification — read this BEFORE forming an opinion):');
+    if (siteContext.category) {
+      const conf = siteContext.categoryConfidence;
+      const confSuffix =
+        conf !== null && conf < 0.5
+          ? ` (confidence: ${conf.toFixed(2)} — category may be unclear; verify against the screenshot before reacting)`
+          : conf !== null
+            ? ` (confidence: ${conf.toFixed(2)})`
+            : '';
+      lines.push(`  category: ${siteContext.category}${confSuffix}`);
+    }
+    if (siteContext.oneLinePitch) {
+      lines.push(`  description: ${siteContext.oneLinePitch}`);
+    }
+    lines.push('  Anchor your reaction to THIS category. Do not project features (wallet, signing, on-chain UX, etc.) that this category does not include.');
+  }
   lines.push('');
   lines.push('Persona profile:');
   lines.push(`  voice_sample: "${v.voice_sample}"`);
@@ -303,10 +340,11 @@ export async function runPersonaResponseLLM(
   targetUrl: string,
   hypothesis?: string,
   screenshotUrls?: readonly string[],
+  siteContext?: SiteContext,
 ): Promise<PersonaResponseResult> {
   const t0 = Date.now();
   const system = buildSystemPrompt();
-  const userText = buildUserPrompt(persona, targetUrl, hypothesis);
+  const userText = buildUserPrompt(persona, targetUrl, hypothesis, siteContext);
 
   const useVision = !!screenshotUrls && screenshotUrls.length > 0;
   const imageBlocks = useVision ? buildImageBlocks(screenshotUrls) : [];

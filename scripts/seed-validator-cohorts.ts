@@ -74,15 +74,22 @@ function inRange(
   return lo + rand() * (hi - lo);
 }
 
+// Phase 1 voice cleanup (2026-05-07): crypto_native / web3_pro voice
+// samples were rewritten to be category-agnostic. The vector traits
+// (security_aware, detail_oriented, fast-mover) survive — the
+// vocabulary doesn't. Before this change, a crypto_native persona
+// looking at a Google Merch Store would parrot "Slippage and MEV
+// signaling matter most" and fabricate wallet-connection frictions
+// on a plain e-commerce site. Voice is the dominant tone signal.
 const VOICE_BY_COHORT: Record<string, string[]> = {
   crypto_native: [
-    'Slippage and MEV signaling matter most to me. I move fast.',
-    'I prefer mobile wallets that just work — keyboard shortcuts on desktop are a bonus.',
+    'I evaluate products on speed, transparency, and control. Numbers matter more than marketing.',
+    'I want power-user shortcuts on desktop and apps that do not waste my time on mobile.',
     'If the security model is unclear in 30 seconds, I bounce.',
   ],
   defi_beginner: [
-    'I want to learn but the jargon scares me off. Hand-holding helps.',
-    'I ask questions before pressing anything that costs money.',
+    'I want to learn but jargon scares me off. Hand-holding helps.',
+    'I ask questions before pressing anything that has consequences.',
     'A clear glossary would make me much more comfortable.',
   ],
   designer_20s: [
@@ -106,8 +113,8 @@ const VOICE_BY_COHORT: Record<string, string[]> = {
     'Speed matters more than depth.',
   ],
   web3_pro: [
-    'I run multi-chain ops. Power-user shortcuts and CSV export are non-negotiable.',
-    'I notice gas-aware UX and signing UX immediately.',
+    'Power-user shortcuts, CSV export, and keyboard nav are non-negotiable for me.',
+    'I notice friction in confirmation flows and notification UX immediately.',
     'I will dig into a docs page if the surface UI is solid.',
   ],
   non_tech_30s: [
