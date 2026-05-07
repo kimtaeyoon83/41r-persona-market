@@ -8,18 +8,21 @@ Human testers complete tests → earn USDC rewards → generate AI Personas → 
 ## Architecture
 
 ```
-apps/api             (Express :4100)  — routes, services, x402, Solana, Stagehand runner
-apps/web             (Next.js :3000)  — app-router pages + /experiment dashboard
-apps/persona-engine  (FastAPI :4200)  — Python wrapper over persona_agent, scoring adapters
+apps/api             (Express :4100)  — routes, validator pipeline, Solana sponsored tx
+apps/web             (Next.js :3000)  — app-router pages (/, /validator/*, /me/*)
+apps/persona-engine  (FastAPI :4200)  — legacy Python service (not invoked by validator)
 packages/shared            — TypeScript interfaces (@41rpm/shared)
 packages/solana-utils      — Token-2022 utilities (@41rpm/solana-utils)
-packages/persona-client    — TypeScript client for persona-engine HTTP
-scripts/                   — setup / seed / batch / usage-summary / render-check
+packages/persona-client    — legacy TypeScript client for persona-engine HTTP
+packages/contracts         — Solana program / IDL stubs
+scripts/                   — seed / migration / backfill / usage-summary
 ```
 
-`persona-engine` depends on upstream `persona_agent` (separate repo at
-`/Users/freddie/dev/repo/personal/41r-advisor/persona_agent`). Keep both
-in sync when editing browser_runner / agent_loop.
+`apps/persona-engine` and `packages/persona-client` are leftovers
+from the autotest era; the validator pipeline (Mode A / Mode B
+scans) does not call persona-engine. The directory is preserved
+because the env vars `USE_PERSONA_ENGINE` and `PERSONA_ENGINE_URL`
+still parse and a future workload may revive it. Treat as dormant.
 
 ## Deployment (Railway + Cloudflare R2)
 
@@ -79,66 +82,68 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
 pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
-pnpm --filter api test      # Run vitest (415 tests as of 2026-05-02)
+pnpm --filter api test      # Run vitest (199 tests as of 2026-05-07)
 pnpm --filter api db:generate  # Emit a new versioned migration from schema changes → apps/api/drizzle/*.sql
 pnpm --filter api db:migrate   # Apply pending migrations to DATABASE_URL (preferred for Railway deploys)
 pnpm --filter api db:push      # Dev only: push schema directly, bypassing migration files
-pnpm tsx scripts/seed-data.ts              # Base seed (5 hand-written + 2 tests)
-pnpm tsx scripts/append-diverse-personas.ts  # +15 diverse profiles (total 20 personas)
-pnpm tsx scripts/run-persona-batch.ts --limit N   # Batch persona runs (default mode=text)
-pnpm tsx scripts/usage-summary.ts          # Analyze /tmp/llm-usage.jsonl
-pnpm tsx scripts/seed-validator-cohorts.ts # 112 personas across 8 STANDARD_COHORTS (Validator)
-pnpm tsx scripts/seed-calibration.ts       # 600 synthetic calibration_records (Validator §5)
-pnpm tsx scripts/backfill-cohort-ci.ts [--dry-run]                 # Validator: bootstrap CI for legacy cohort rows
-pnpm tsx scripts/backfill-site-classifier.ts [--dry-run] [--max N] # Validator: re-run classifier on placeholder scans
-```
 
-### persona-engine (Python)
-```bash
-cd apps/persona-engine
-.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 4200 --app-dir .
-# Requires Python 3.11+ and persona_agent installed via pip install -e
+# Validator seeds + maintenance
+pnpm tsx scripts/seed-validator-cohorts.ts # 112 personas across 8 STANDARD_COHORTS
+pnpm tsx scripts/seed-calibration.ts       # synthetic calibration_records (Validator §5)
+pnpm tsx scripts/backfill-cohort-ci.ts [--dry-run]                 # bootstrap CI for legacy cohort rows
+pnpm tsx scripts/backfill-site-classifier.ts [--dry-run] [--max N] # re-run classifier on placeholder scans
+pnpm tsx scripts/update-validator-voice-samples.ts                 # in-place voice rewrite for existing personas
+pnpm tsx scripts/usage-summary.ts          # analyze /tmp/llm-usage.jsonl
 ```
 
 ## Key Conventions
 
 ### Backend (apps/api)
-- All routes under `src/routes/`, mounted in `src/index.ts`
-- Services in `src/services/` — llm.ts, solana.ts, autotest.ts, matching.ts,
-  sas.ts, r2.ts, dashboard.ts (landing aggregate), scoring/, browser_quirks/
-- Database: Drizzle ORM with PostgreSQL, schema in `src/db/schema.ts`
-- LLM models: Claude Sonnet 4.6 (generation), Claude Haiku 4.5 (scoring/extraction)
-- JSON from LLM: always use `parseJsonSafe()` which has `repairJson()` fallback
-- Quality scoring: power curve `reward = baseReward * (score / 5.0)^1.5`
-- Error pattern: try/catch in every route handler, 400/404/409/500 responses
+- 5 active routes under `src/routes/`, mounted in `src/index.ts`:
+  `auth.ts`, `scan.ts`, `calibration.ts`, `benchmark.ts`, `hello.ts`
+- Active services in `src/services/`: `llm.ts`, `audience_fit.ts`,
+  `scan_pipeline.ts`, `site_classifier.ts`, `site_capture.ts`,
+  `cohort_selection.ts`, `anthropic_client.ts`, `aarrr.ts`,
+  `dimension_simulator.ts`, `persona_wallets.ts`, `sponsored_tx.ts`,
+  `fee_payer.ts`, `r2.ts`, `health.ts`, `benchmark.ts`,
+  `dimensions/` (LLM dimension scorers + friction clustering),
+  `calibration/` (calibration aggregator).
+- Database: Drizzle ORM with PostgreSQL, schema in `src/db/schema.ts`,
+  versioned migrations in `apps/api/drizzle/`
+- LLM models: Claude Sonnet 4.6 (vision / generation), Claude Haiku 4.5
+  (text scoring / classification)
+- JSON from LLM: always use `parseJsonSafe()` from `services/llm.ts` —
+  has a `repairJson()` fallback so partial-truncation responses survive
+- Anthropic SDK: never instantiate directly in apps/api. Use `client`
+  + `withRoute('label', () => client.messages.create(...))` from
+  `services/anthropic_client.ts` so usage logging keeps working.
+- Error pattern: try/catch in every route handler, 400/404/409/500
+  responses with `{ error, ... }` body.
 
 ### Frontend (apps/web)
-- Next.js 14 App Router, all pages in `app/`
-- Shared API URL: `import { API_BASE } from '@/lib/api'` — never hardcode localhost
-- API client: `lib/api.ts` exports `testApi`, `reportApi`, `personaApi`,
-  `testerApi`, `autoTestApi`, `dashboardApi` (landing KPIs / activity).
-  Validator uses `scanApi` for /api/scan/* routes.
-- Loading / error UI: validator pages render their own inline patterns
-  (small text + retry button). The previous shared `<Loading>` /
-  `<ErrorDisplay>` components were autotest-era and were removed in
-  the 2026-05-07 dead-code cleanup.
-- Design system: Hi-Fi dark theme built on OKLCH neutrals + Solana brand accent
-  (sol-green #14F195, sol-purple #9945FF, sol-blue #00C2FF). All primitives and
-  tokens are defined in `app/globals.css` — do not introduce one-off styles
-  when a utility class already covers the need.
-- Fonts: **Inter Tight** (display, `-0.025em` tight tracking) + **Inter** (body)
-  + **JetBrains Mono** (money / addresses). Font CSS variables are
-  `--font-display-loaded`, `--font-sans-loaded`, `--font-mono-loaded`, piped
-  through `--font-display` / `--font-sans` / `--font-mono` so `TweaksPanel`
-  can swap the display face at runtime.
-- Wallet: Phantom via `components/wallet-provider.tsx`, `useWalletContext()`
-  hook. Exposes `publicKey`, `connected`, `connect()`, `disconnect()`,
-  **`signMessage(message)`** returning base58 signature.
-- Role awareness: `useAppRole()` from `components/sidebar.tsx` returns
-  `{role: 'company' | 'tester', setRole}`. Persists in localStorage
-  (`sidebar:role`) and fires `41r:role` CustomEvent on change so pages like
-  Home KPI dashboard can react. Sidebar nav is role-filtered; use this hook
-  when a page needs to branch on role.
+- Next.js 14 App Router. Active routes:
+  `/`, `/validator/*`, `/me/wallet`, `/me/analyses`.
+- Shared API URL: `import { API_BASE } from '@/lib/api'` — never hardcode.
+- API client (`lib/api.ts`): primary surface is `scanApi` for
+  `/api/scan/*` routes. `signedRequest()` helper still exists for any
+  future wallet-signed mutation, even though most validator routes are
+  Privy-authenticated (see Auth section).
+- Auth provider: **Privy** (`@privy-io/react-auth`) wraps the app via
+  `apps/web/app/providers.tsx`. Single auth layer for Email / Google /
+  Phantom / Solflare / Discord / X login + optional embedded Solana
+  wallet. `defaultSolanaRpcsPlugin()` is registered so chain-aware
+  signing on `solana:devnet` works.
+- Loading / error UI: each page renders its own inline pattern (small
+  text + retry button). No shared primitives.
+- Components: `app-shell.tsx` is the only shared wrapper. Earlier
+  shared components (sidebar, topbar, tweaks-panel, persona-radar-20,
+  wallet-provider, etc.) were autotest-era and got cleaned up.
+- Design system: Hi-Fi light theme on OKLCH neutrals + Solana brand
+  accent. All primitives and tokens in `app/globals.css` — prefer
+  the utility classes below over ad-hoc Tailwind combos.
+- Fonts: **Inter Tight** (display, `-0.025em` tight tracking) +
+  **Inter** (body) + **JetBrains Mono** (money / addresses). CSS
+  variables `--font-display`, `--font-sans`, `--font-mono`.
 
 ### Design tokens / utility classes
 Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
@@ -154,458 +159,51 @@ Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
 - Colors: `--bg-0..4` (5 neutral steps), `--line-1/2`, `--fg-0..4`,
   `--accent` / `--accent-soft` / `--accent-line`, semantic
   `--success` / `--warn` / `--danger` / `--info` with `-soft` + `-line` variants
-- Legacy aliases (`--bg-surface`, `--text-primary`, `--border-dim`, …) still
-  resolve to the new tokens — safe to delete when you touch a given file.
-
-### Shared primitives
-- `components/topbar.tsx` — hairline page header (title + subtitle + actions
-  + eyebrow chip). Drop into any page that needs a consistent title slot.
-- `components/var-tabs.tsx` — `01 Label / 02 Label` layout switcher (used on
-  Home, company test detail).
-- `components/persona-radar-20.tsx` — flattens persona.vector (test_style +
-  expertise + feedback_pattern + reliability) into a 20-axis polygon.
-- `components/tweaks-panel.tsx` — floating settings card (accent hue, font,
-  density, radius). Toggled from sidebar footer, persists to localStorage
-  (`41r:tweaks`).
-- `components/dev-demo-banner.tsx` — amber "Dev / Demo — not production flow"
-  banner for `/x402` and `/autotest-bsc`.
+- Mobile-only utilities (load-bearing — see Do NOT list below):
+  `.v-page-pad`, `.v-stack-sm`, `.v-grid-stack-sm`, `.v-row-wrap`,
+  `.hide-mobile` + the global `html, body { overflow-x: hidden }` rule.
 
 ### Solana Integration
 - Network: devnet
-- 41R Token: Token-2022 with 5% transfer fee (mint in TOKEN_41R_MINT env)
-- USDC: devnet mock mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` (6 decimals)
-- x402: payment-gated endpoints via `middleware/x402.ts` ($0.001 ~ $0.10)
-- SAS: on-chain attestation with fallback to local demo IDs
-- Keypair: loaded from `SOLANA_KEYPAIR_JSON` env var (production) or `~/.config/solana/id.json` (local)
+- USDC: devnet mock mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+  (6 decimals). Sponsored 0-USDC tx is the validator scan payment
+  pattern (see `services/sponsored_tx.ts` + `services/fee_payer.ts`).
+- Keypair: `SOLANA_KEYPAIR_JSON` env var (production) or
+  `~/.config/solana/id.json` (local).
+- Persona wallets: HD-derived from `PERSONA_MASTER_MNEMONIC`. See
+  `services/persona_wallets.ts::getPersonaAddress(hdIndex)`.
 
-### Auth / signed requests (important)
-Mutating routes (`POST /api/tester/register`, `PUT /api/tester/:wallet`,
-`POST /api/report/submit`, `POST /api/test/register`) require a wallet-signed
-nonce. Pattern:
-
-```ts
-// client (apps/web/lib/api.ts)
-await signedRequest('/api/...', { method: 'POST', body }, { wallet, signMessage })
-// under the hood:
-//  1. GET /api/auth/nonce?wallet=...  → { nonce, expiresAt }
-//  2. signMessage(nonce)              → base58 signature
-//  3. POST with x-wallet-address, x-nonce, x-signature headers
-```
-
-- **Do not** POST to signed routes without going through `signedRequest`.
-  `request()` in `lib/api.ts` preserves Content-Type when callers pass their
-  own headers — regression reproducer in `/tmp/e2e-flows.py`.
-- Server side: `middleware/auth.ts` `requireSignedRequest` verifies ed25519 +
-  single-use nonce (5-min TTL). Handlers additionally assert
-  `req.signedWallet === body.walletField` where applicable.
-- Schemas: every signed POST has a Zod schema in `apps/api/src/schemas/`
-  applied via `validateBody(schema)` in the route chain (after
-  `requireSignedRequest`, before the handler).
-
-### E2E test hooks (dev only)
-- `__E2E_BYPASS_DEPOSIT=1` in localStorage: on `/company/register` and
-  `/autotest`, skip the Solana USDC round-trip (signTransaction +
-  confirmTransaction). Uses a synthetic payment_tx. Gated behind
-  `NODE_ENV !== 'production'` so it's dead code in prod builds.
-  Useful for browser E2E that can't easily mock web3.js internals.
+### Auth (Privy + middleware)
+- Web: Privy is the single auth provider. `usePrivy()` gives
+  `{ ready, authenticated, getAccessToken }`; `AuthBridge` in
+  `providers.tsx` wires the access-token getter into `lib/api.ts`
+  so every `request()` call attaches `Authorization: Bearer <token>`
+  when logged in.
+- API: `middleware/privy_auth.ts` exports `requirePrivyAuth` (reject
+  if missing/invalid token) and `optionalPrivyAuth` (attach
+  `req.privyUser` when present, otherwise pass through). `/api/scan`
+  uses `optional` so anonymous landing-page demos still work.
+- Legacy wallet-signed nonce path (`middleware/auth.ts` +
+  `signedRequest()` in `lib/api.ts`) is preserved for any future
+  signed mutation surface but currently has no live consumer routes.
+  Don't remove it without confirming no follow-up sprint needs it.
 
 ### Testing
-- Vitest for API unit tests (`apps/api/src/__tests__/`) — **238 tests**
-  (auth, cors, env, schemas, settlement-worker, scoring suites, the
-  **43-test dashboard suite** covering timeAgo / spark7* / countInWindow /
-  avgInWindow / formatCountDelta / formatSumDelta / formatAvgDelta, the
-  **diagnosis suite** covering `validateAuditCitations` +
-  `computeFidelityBand` + `clusterPainPointDescriptions` +
-  `isHarnessErrorOutcome` + `buildSynthesisPayload` +
-  `accumulatePainPointsForReport` — the LLM-touching tests mock
-  `services/anthropic_client` via `vi.mock` so the path is exercised
-  without real API calls. New suites added 2026-04-25:
-  `stagehand-error.test.ts` (captureSessionError helper, 6 tests),
-  `race-timeout.test.ts` (raceWithTimeout + TimeoutError, 4 tests),
-  `autotest-trigger-dedup.test.ts` (selectQueueableJobs, 6 tests).
-  Empty-session guard regression in `scoring-report.test.ts` +
-  `scoring-checklist.test.ts` asserts Haiku is NOT called when
-  `outcome=error && turns≤1` — anti-fabrication lock-in)
-- Pytest for persona-engine (`apps/persona-engine/tests/`) — 35 tests
-- Browser E2E harness at `/tmp/e2e-flows.py` (Phantom mock via tweetnacl +
-  playwright). Covers tester register → report submit → persona generate
-  → company register → AutoTest (5 flows, 22/22 assertions).
-- Legacy API-only E2E: `scripts/e2e-flow.ts` (updated to generate real
-  keypairs + sign nonces).
-- Dashboard render check: `scripts/check-dashboard-render.py` (headless
-  chromium) and `scripts/check-experiment-index.py`.
-
-## Autotest Modes (`POST /api/autotest/run`)
-
-Route table (default is now **stagehand_hybrid** as of 2026-04-19):
-
-| `mode` value                            | Path                          | Cost/run | Use case                     |
-|-----------------------------------------|-------------------------------|----------|------------------------------|
-| `"browser"` / `"hybrid"` / (omitted)    | stagehand_hybrid              | ~24¢     | **Default** — deep UX reports |
-| `"text"`                                | persona-engine text mode      | ~5¢      | Bulk experiments, fast       |
-| `"persona_agent"` / `"persona_agent_browser"` | persona_agent native browser | ~17¢     | Persona-fidelity research    |
-
-- **stagehand_hybrid**: Node-side Stagehand drives Playwright. Scoring
-  (checklist / questionnaire / structured_report / quality breakdown) is
-  now **fully in-process TypeScript** — see `services/scoring/*` ported
-  from the persona-engine Python adapters on 2026-04-22. Produces
-  actionable pain_points tied to real UI elements. The cross-language
-  hop to persona-engine `/analyses/score` is gone; persona-engine is
-  only needed for `mode=text` and the legacy `persona_agent` paths.
-- **persona_agent native**: In-process vision+decision loop with patience
-  budget. Kept for research but trips mid-flow on complex SPAs.
-- Legacy `services/autotest.ts` path still exists when `USE_PERSONA_ENGINE=0`.
-
-### Hang protection (2026-04-25 hardening)
-
-Three layered timeouts so the persona chain can never wedge indefinitely:
-
-| Layer | Cap | Scope |
-|---|---|---|
-| Inner stagehand `RUN_TIMEOUT_MS` | 5 min | browser run only (page.act, navigation) |
-| Per-LLM-call `SCORING_TIMEOUT_MS` | 90s | each of `scoreChecklist` / `answerQuestionnaire` / `generateStructuredReport` in `runStagehandHybridAndPersist` |
-| Outer `PERSIST_HARDCUT_MS` | 12 min | the whole persist chain (browser + scoring + R2 + DB) |
-
-`raceWithTimeout` + `TimeoutError` are exported from
-`services/stagehand_hybrid.ts` so all three layers use the same
-helper. On hit, `TimeoutError` carries the label
-(`scoreChecklist(abcd1234)` etc.) for RCA. `runStagehandHybridAndPersist`
-is split into a thin outer wrapper + private `…Inner` so the outer
-timeout wraps the entire body (the inner hardcut covers stagehand
-only, leaving R2 + DB previously unprotected).
-
-### Queue dedup (`selectQueueableJobs`)
-
-`/api/dev/autotest/trigger` previously could queue 2 personas with
-the same `testerAddr` (matchPersonas can return multiple personas per
-tester); the second one wasted ~$0.10 of stagehand+scoring compute
-before its insert hit the unique constraint and threw. `services/
-queue_dedup.ts::selectQueueableJobs(matches, modes, alreadyCovered)`
-folds DB-covered + in-batch dedup into one pass, exported so the
-6-test unit suite can lock the contract without spinning up Express.
-
-### Browser session replay (`_session_video` sentinel, 2026-04-27)
-
-Every stagehand_hybrid run records a low-res webm of the actual
-browser session and uploads it to Cloudflare R2. The link is
-persisted as a `_session_video` sentinel inside
-`test_reports.questionnaireAnswers` (same conditional pattern as
-`_quirks` / `_quality_breakdown` / `_session_error`). UI block on
-`/report/[id]` parses it and renders an HTML5 `<video>` player.
-
-Pipeline:
-
-```
-Stagehand (chrome-launcher CDP)            apps/api/src/services/stagehand_hybrid.ts
-  └─ Page.startScreencast (jpeg, 5fps)     mainSession TS bypass — Stagehand v3 has no
-  └─ Page.screencastFrame events           recordVideo option in localBrowserLaunchOptions
-  └─ write JPEGs → /tmp/stagehand-frames/<sid>/
-ffmpeg                                     apps/api/src/services/video.ts
-  └─ libvpx 854×480 @ 5fps, 200kbit
-  └─ /tmp/stagehand-videos/<sid>.webm
-R2 upload                                  apps/api/src/routes/autotest.ts
-  └─ key: replays/<sid>.webm  (no prefix; matches the local filename)
-  └─ url: https://pub-<bucket>.r2.dev/replays/<sid>.webm
-  └─ persisted as _session_video {url, sizeBytes, durationSec, width, height, fps}
-```
-
-Local dev fallback: when R2 isn't configured, `services/video.ts`
-returns the bucket key as the URL (`replays/<sid>.webm`). The web UI
-prefixes non-`http` URLs with `API_BASE`, and `index.ts` mounts
-`app.use('/replays', express.static('/tmp/stagehand-videos'))` in the
-non-production block so the local file serves directly. The
-post-upload `unlinkSync` in `routes/autotest.ts` is **skipped when
-the URL doesn't start with `http`** — required so the local file
-stays around for serving.
-
-Production needs `ffmpeg` in the runtime image — it's in the
-`apt-get install` line of `apps/api/Dockerfile`. `isFfmpegAvailable()`
-in `services/video.ts` caches the probe; restart the API after
-installing ffmpeg locally or the cached `false` will skip transcoding.
-
-## Landing Dashboard (`/` + `/api/dashboard`)
-
-One-shot aggregate that powers every live widget on the Home page.
-**Never put hardcoded KPIs / lists / sparklines back in `apps/web/app/page.tsx`** —
-thread them through `GET /api/dashboard?role=&wallet=` instead.
-
-```
-role=company | tester             # required
-wallet=<solana pubkey>            # optional — no wallet = platform-wide view
-```
-
-Response shape (see `apps/api/src/services/dashboard.ts` for the source of
-truth; mirrored in `apps/web/lib/api.ts` for the client):
-
-```ts
-{
-  role, wallet,
-  kpis:          [{ label, value, unit?, delta, spark: number[7] }, x4],
-  primary_list:  [{ id, title, status, meta, pay, tone, href }, x≤4],
-  activity:      [{ at, t, text, kind, tone, meta? }, x≤20],
-  stats:         { total_tests, total_personas },
-  top_personas?: [{ id, tester_addr, voice_sample, vector, avg_quality,
-                    report_count }, x3],          // company view
-  my_persona?:   PersonaSummary | null,           // tester view (falls back to
-                                                  //  top community persona when
-                                                  //  wallet is absent)
-}
-```
-
-- **Delta is always 7d vs prior 7d**, even in the no-wallet branch, so the
-  landing never feels static. Formatters: `formatCountDelta`,
-  `formatSumDelta`, `formatAvgDelta`. Keep `spark` and `delta` on the same
-  window — otherwise "+3 this week" disagrees with a 14-day chart.
-- **Sparklines are 7 chronological points** (index 0 = 6d ago, index 6 =
-  today). Use `spark7` for counts, `spark7Avg` for avg-style (null bucket →
-  0), `spark7Cumulative` for running totals like Tier.
-- **Activity is a heterogeneous feed** (`kind: 'report' | 'test' | 'settlement'`)
-  sorted by `at` desc, capped at 20. Tone is auto-assigned from quality:
-  ≥4.0 success / <3.0 warn / else neutral. Tests are `accent`, settlements `info`.
-- **No-wallet UX**: the Home page shows a `Platform view — connect a wallet…`
-  hint, KPIs become platform-wide, and `my_persona` falls back to the
-  highest-avg-quality persona so the radar card is never empty.
-
-### Diagnosis / retry owner gate (devnet beta)
-
-`POST /api/test/:id/diagnosis` and `POST /api/test/:id/retry-autotest` used
-to require `test.companyAddr === signedWallet`. On devnet beta that check
-is **intentionally dropped** — any signed wallet may regenerate. Rationale:
-lets the team and demo viewers drive the full flow without needing to hold
-the exact owner key. `requireSignedRequest` still gates both routes, so
-anonymous writes are still refused. When promoting to mainnet, re-instate
-the owner check in `apps/api/src/routes/test.ts` at the `/retry-autotest`
-and `/:id/diagnosis` handlers (the deleted lines are in the
-`feat(api,web): realtime dashboard + loosened diagnosis gate` commit).
-
-## Experiment Dashboard
-
-- `/experiment` — list of active tests. Tests where `manualCount === 0 ||
-  personaCount === 0` are tagged **`pending comparison`** so users know
-  up front that the dashboard will be partial. Don't filter them out —
-  one-sided tests still have a detail page users may want to reach.
-- `/experiment/[testId]` — charts + Key findings + By-cohort + **Cohort ×
-  checklist matrix** + per-item breakdown. When `manual.count === 0 ||
-  persona.count === 0` the page renders a single-side banner and
-  **hides** cohort / convergence / confusion / paired scatter / rating
-  distribution — those panels either show fake agreement or broken
-  charts when one side is empty (we hit this on a test with 3 humans
-  + 0 personas: rating histogram plotted the persona=0 bucket as a tall
-  bar). Keep: headline, findings, per-item breakdown.
-- `/api/reports/compare/:testId` — aggregates headline + cohort metrics +
-  findings + **`by_cohort_item`** cross-table. Each cell carries
-  `{cohort, itemId, humanN, personaN, humanFailRate, personaFailRate,
-  flag}` with flag ∈ `both-fail | persona-worse | human-worse |
-  both-pass | split | insufficient`. `insufficient` fires whenever
-  either side has n<2 so a cell is always either actionable or clearly
-  unreadable — not misleadingly shown as "0%/0%".
-- `CohortMetrics` numeric fields (`humanMeanQuality`, `personaMeanQuality`,
-  `qualityAbsDiff`, `itemAgreementRate`, `ksStatisticQuality`) are
-  **nullable when their side is empty** (see `services/comparison.ts`
-  `computeCohortMetrics`). Previously `|0 − personaMean|` rendered as a
-  real gap in the dashboard; `findings.ts` + the UI now skip null cells.
-- Cohort key defaults to `crypto_experience` (4 buckets). Matching personas
-  to humans within same demographic reveals "persona ≈ human at 100% in
-  novice cohort, diverges in expert cohort" — the real investor story.
-
-## Company Test Dashboard (`/company/test/[testId]`, 2026-04-28)
-
-8-section spec built on top of `/api/test/:id` aggregates. Sections
-in render order — keep this contract; the spec was the result of an
-explicit design discussion ("8섹션 spec") and reordering breaks the
-intended company-facing narrative:
-
-| § | Section | Source | Notes |
-|---|---|---|---|
-| 1 | Hero KPIs (4 cards) | `/api/test/:id/insights` | Personas Tested · Pain Points (count) · Avg Quality · Completion Rate |
-| 2 | Why Users Drop (chat bubbles) | aggregated voice samples | Top pain points as direct persona quotes — no analysis text |
-| 3 | Persona Insights (3 cards) | per-persona breakdown | Quality + completion + freeText snippet, max 3 |
-| 4 | Funnel | `/api/test/:id/funnel` | Auto-extracted (see below). Cards per step + furthest_step distribution |
-| 5 | Advanced Settings panel | `PATCH /api/test/:id/settings` | Inputs: `compare_with_test_id`, `monthly_visitors`, `conversion_value`, `current_conversion_rate` |
-| 6 | A/B Comparison | `compareWithTestId` | Side-by-side metrics vs another test ID. Hidden when not set |
-| 7 | Revenue Impact | `monthly_visitors × conversion_rate × conversion_value` | Hidden when inputs not set |
-| 8 | Raw Data accordion | `/api/test/:id/insights` | Unfiltered aggregate JSON for debugging |
-
-Only the Funnel and Advanced Settings inputs introduce new state.
-Everything else is a different shape over data the diagnosis
-aggregator already produces — do not re-fetch the raw reports per
-card.
-
-### Funnel auto-extraction (`services/scoring/funnel.ts`, 2026-04-28)
-
-Funnel is **NOT** company-input — it's auto-extracted from session
-data via Haiku per-session + clustering, mirroring the diagnosis
-pain-point pipeline. The user explicitly pushed back on the
-"company fills in funnel steps" UX ("Funnel은 자동으로 할 수 있는거
-아니야?"); do not regress to input-driven.
-
-Pipeline:
-
-1. `extractFurthestStep(report)` — single Haiku call per session,
-   given the persona's checklist + scenario log, returns the farthest
-   step the user got to in human-readable text (e.g. "스왑 확인 모달",
-   "트랜잭션 확인").
-2. `clusterFunnelSteps(extractions)` — single Haiku call collapses
-   semantic duplicates ("스왑 확인 모달" + "swap confirmation modal"
-   → one canonical step). Identity-map fallback on LLM failure.
-3. `buildFunnelFromExtractions()` — pure aggregator, returns
-   `{steps[], total, distribution}`.
-4. `generateFunnelForTest(testId)` — top-level orchestrator, persists
-   to `tests.funnelJson` + `funnelGeneratedAt` + `funnelReportCount`.
-
-Endpoints:
-- `GET /api/test/:id/funnel` — cached read; auto-regen when stale
-  (report count changed since last generation).
-- `POST /api/test/:id/funnel/regenerate` — explicit refresh
-  (rate-limited).
-
-### New endpoints + schema columns (2026-04-28)
-
-| Endpoint | Method | Purpose |
-|---|---|---|
-| `/api/test/:id/insights` | GET | Slim aggregator wrapping `aggregateForDiagnosis` for dashboard reads |
-| `/api/test/:id/funnel` | GET | Cached funnel; auto-regen on stale |
-| `/api/test/:id/funnel/regenerate` | POST | Force refresh (rate-limited) |
-| `/api/test/:id/settings` | PATCH | Update `compareWithTestId` / `monthlyVisitors` / `conversionValue` / `currentConversionRate` (signed request + `updateTestSettingsBodySchema`) |
-
-New `tests` table columns (drizzle migrations 0003 + 0004):
-- `funnelJson jsonb` — cached funnel payload
-- `funnelGeneratedAt timestamptz`
-- `funnelReportCount int` — staleness check
-- `compareWithTestId uuid` — A/B Comparison target
-- `monthlyVisitors int`, `conversionValue numeric`, `currentConversionRate numeric` — Revenue Impact inputs
-
-Mirror these in `apps/web/lib/api.ts`: `getInsights`, `getFunnel`,
-`regenerateFunnel`, `updateSettings` methods. The web UI only ever
-reads through these.
-
-## Diagnosis validation pipeline (`services/scoring/diagnosis.ts`)
-
-A UX diagnosis for a test is **audit-grounded markdown** — every claim
-traces back to a concrete report row, and the reader sees up front how
-much to trust persona-derived findings. Four mechanisms layered on top
-of the base Sonnet synthesis call:
-
-### 1. Audit-chain citations
-- `PainPointCitation` carries `{reportId, evidenceTurn, isPersona,
-  personaTester, severity, description}`. The synthesis prompt instructs
-  the model to cite sources as `[<reportId8>·t<turn>]` and
-  `validateAuditCitations()` scans the output for any id not present in
-  the aggregate's `perPersona[].reportId`.
-- Unknown citations get a trailing `> ⚠ **Audit check**: N citation(s)
-  reference report IDs not in this test's data` footer — the
-  DiagnosisMarkdown UI renders this as a red warning card.
-- The validator regex matches **only inside `[...]` brackets** —
-  matching bare hex across the whole document was a bug that flagged
-  hex colour codes like `14F195` (Solana brand) as hallucinated report
-  IDs. There's a dedicated regression test for this.
-
-### 2. Confirmation labels (both / human-only / persona-only)
-- Pain-points are sourced from two places: persona reports' upstream
-  `_structured_report` sentinel (from Stagehand+Node scoring), and a
-  Task-#12 Haiku pass that extracts pain-points from **manual reports'**
-  free-text. Without the second pass, confirmation labels were
-  permanently "persona-only" — humans had no seat in the pain-point map.
-- Each `painPointFrequency` entry splits citations by `isPersona` and
-  the prompt is required to tag each pain-point with
-  `confirmation: both | human-only | persona-only`. UI convention:
-  persona-only gets a "수동 재현 필요" caveat in the reliability
-  section.
-
-### 3. Semantic clustering (unlock "both" label)
-- Before rendering, `clusterPainPointDescriptions()` batches every
-  description into a single Haiku call that groups semantically
-  equivalent phrasings — "로그인 벽 접근 불가" and "지갑 연결 시 진입
-  차단" collapse into one canonical cluster. Without this, the
-  whitespace+lowercase dedup in `normalizeStr()` left each phrasing
-  as its own entry and `both` never fired.
-- Failure mode is identity-map (each description as its own cluster),
-  not a crash — a transient LLM outage still ships a diagnosis.
-- Cost ~$0.0015/diagnosis. Exported so tests can mock `client.messages.
-  create` via `vi.mock('../services/anthropic_client.js', …)`.
-
-### 4. Fidelity gate banner
-- `computeFidelityBand(itemAgreementRate, pairedCount)` → `'high' |
-  'medium' | 'low' | 'n/a'`. Thresholds mirror `services/findings.ts`
-  (paired ≥ 5 + agreement ≥ 0.6 ⇒ high, ≥ 0.4 ⇒ medium, else low; 0
-  paired ⇒ n/a). Prepended to the markdown output as a blockquote with
-  one of `⚠️ / ✅ / ℹ️ / 🟡` so the DiagnosisMarkdown React component
-  can pick it out and render as a coloured banner card.
-- Recommendations are required by prompt to carry
-  `[해결 대상: N순위 <pain point 이름>]` so R1..Rn trace back to
-  specific pain points. The LLM is allowed to say
-  `[해결 대상: 없음 — <alternative evidence>]` when no rank fits,
-  which is preferred over inventing a rank.
-
-### 5. Empty-session guard + harness-error split (2026-04-25 hardening)
-
-When stagehand crashed before capturing observations, the Haiku
-`structured_report` and Sonnet `checklist` calls were grounding on
-checklist task text rather than evidence — inventing plausible
-narratives ("mobile viewport drop", "JSON parse mid-session") that
-the diagnosis aggregator then promoted to rank-1 product findings.
-Five layered fixes lock this down:
-
-- **`scoring/report.ts`** — `outcome=error && turns.length<=1` short-
-  circuits the Haiku call and returns an explicit no-data report with
-  empty `pain_points`. Tests assert `mockCreate.not.toHaveBeenCalled()`.
-- **`scoring/checklist.ts`** — same guard, routes to
-  `ruleBasedFallback` (which produces the generic `세션 error로 시도
-  불가` memo) instead of asking Sonnet to judge nothing.
-- **`scoring/diagnosis.ts`** — `isHarnessErrorOutcome(outcome)` predicate
-  + new `DiagnosisAggregate.harnessErrorReports[]` field. The
-  `accumulatePainPointsForReport` helper (extracted, exported,
-  testable) drops `outcome=error` reports' pain_points from
-  `painPointMap` and pushes them into `harnessErrorReports` instead.
-  Conservative — only the literal `'error'` label triggers; `unknown`
-  and empty preserve their findings (manual reports without `_quality_
-  breakdown` sentinels stay in the rank).
-- **Synthesis prompt §5-1** — new "세션 실패 (harnessErrorReports)"
-  section. The prompt instructs the model to label these as `41R 플랫폼
-  자동화 실패`, NOT product issues, and to never produce R-recs for
-  them. `buildSynthesisPayload` (exported pure builder) carries the
-  list, capped at 30 entries, with shortened reportIds matching the
-  audit-chain format.
-- **jup.ag regression fixture** — 14 errored personas reproduced in
-  `diagnosis.test.ts` `accumulatePainPointsForReport · jup.ag
-  regression` block. Asserts `painPointMap.size === 0` +
-  `harnessErrorReports.length === 14` for the legacy fixture shape so
-  a future refactor of the inner loop can't silently regress.
-
-### Session-error sentinel (`_session_error`, 2026-04-25)
-
-Companion RCA infra. When stagehand crashes (init failure, top-level
-catch, or zero-turn collapse), `captureSessionError(err, phase,
-lastAction?)` (exported from `services/stagehand_hybrid.ts`) bounds
-err.message ≤ 2000, stack ≤ 2000, last_action ≤ 500 and stuffs them
-into `HybridSessionLog.session_error`. The route handler then writes
-a `_session_error` sentinel into `test_reports.questionnaireAnswers`
-— same conditional pattern as `_quirks` / `_quality_breakdown`. No
-schema change. RCA queries can now group failures by phase
-(`init` / `phase_a..d` / `final` / `cleanup`) + last_action without
-re-running the persona.
-
-### Client-side rendering split (`components` in page.tsx files)
-- `/company/test/[id]` diagnosis tab parses the markdown into
-  `{banner, body, auditWarning}` via `parseDiagnosisMarkdown()`, then
-  renders each as a separate styled card. Don't hand the raw markdown
-  back to `ReactMarkdown` — the banner + audit-footer would turn into
-  plain blockquotes and lose their colour coding.
-- `/report/[reportId]` renders a **Structured Report** section parsed
-  from the `_structured_report` sentinel: summary + ux_scores bars +
-  pain_points (severity chips + evidence_turn) + positive_signals +
-  recommendations. Before Task #22 this data was stored but never
-  surfaced — the filter-only codepath hid it entirely. `_structured_
-  report` / `_quality_breakdown` / `_source` / `_quirks` are still
-  filtered out of the generic Questionnaire Answers list; the
-  Structured Report section is the structured rendering.
+- Vitest at `apps/api/src/__tests__/` — **199 tests** as of 2026-05-07.
+  Suites cover env validation, auth schema, audience-fit math,
+  cohort selection, dimension LLM contracts (incl. the Q2 site-context
+  + Q3 voice-cleanup regression locks), scan shapers, AARRR weighted
+  funnel, friction clustering, site classifier, acquisition priors.
+  LLM-touching tests mock `services/anthropic_client` via `vi.mock`
+  so the prompt path runs without real API calls.
+- Persona-engine (Python): `apps/persona-engine/tests/` — pytest.
 
 ## Audience-Fit Validator (`/validator/*` + `/api/scan/*`, audited 2026-05-02)
 
-A separate product surface from the autotest/diagnosis pipeline.
-Measures **audience-fit** across 8 cohorts × 5 dimensions instead of
-running per-persona browser sessions. Pure capture-and-score: one
-screenshot per scan, ~100 LLM persona reactions, weighted aggregate.
+The current product. Measures **audience-fit** across 8 cohorts ×
+5 dimensions via capture-and-score: one screenshot per scan, ~100
+LLM persona reactions, weighted aggregate. Personas don't browse —
+they react to a screenshot.
 
 ### Architecture
 
@@ -791,26 +389,13 @@ a new pipeline.
   AsyncLocalStorage; tag via `withRoute('...', () => client.messages.create(...))`
 - `scripts/usage-summary.ts` — totals by model/service/route, heaviest calls,
   duplicate-prompt detection
-- Route tags used by the diagnosis pipeline:
-  `diagnosis` (Sonnet synthesis),
-  `diagnosis.cluster_pain_points` (Haiku semantic clustering),
-  `diagnosis.human_pain_points` (Haiku per-manual-report extraction).
-  Each diagnosis run is one `diagnosis` + one `cluster_pain_points` +
-  N `human_pain_points` (parallel across manual reports with no
-  upstream `_structured_report` sentinel).
-
-## Cost Optimization Notes (persona-engine)
-
-- `structured_report` uses tier `review_inspection` (Haiku) with
-  `max_tokens=1400` — lower cap (800) truncated JSON. See
-  `apps/persona-engine/report_generator.py`.
-- `persona_agent.browser_runner` resizes screenshots to 900px long-side
-  before sending to vision LLM (`PERSONA_AGENT_VISION_MAX_DIM`).
-- `persona_agent.agent_loop._decide` uses Anthropic prompt caching —
-  stable prefix (persona soul + plan + system) marked
-  `cache_control: ephemeral`. Disable via `PERSONA_AGENT_PROMPT_CACHE=0`.
-- `persona_agent.agent_loop._summarize_page` caps a11y tree at 20 nodes
-  (was 50) via `PERSONA_AGENT_A11Y_NODES`.
+- Route tags used by the validator pipeline (use these as
+  filter keys in `usage-summary.ts`):
+  `validator.classify_site` (Haiku vision, 1× per scan),
+  `validator.parse_audience` (Haiku, Mode B only — 1× per scan),
+  `validator.persona_response` (Sonnet vision when USE_VISION=1
+  or Haiku text otherwise, 112× per Mode A scan / ~50× Mode B),
+  `validator.cluster_frictions` (Haiku, 1× per scan).
 
 ## Local Dev Gotchas
 
@@ -820,14 +405,6 @@ a new pipeline.
   ulimit -n 65536
   WATCHPACK_POLLING=true CHOKIDAR_USEPOLLING=true pnpm --filter web dev
   ```
-- **Python 3.11+ required** for persona-engine (pydantic `dict | None` syntax).
-  If you see `TypeError: unsupported operand type(s) for |`, install 3.11
-  via `brew install python@3.11`.
-- **TypedDict in persona-engine/adapters/tester_to_soul.py** must come from
-  `typing_extensions` (not `typing`) for pydantic v2 on py<3.12.
-- **persona_agent workspace** must be configured before any `_internal`
-  import — see `apps/persona-engine/main.py` top-of-file setup.
-
 ## Security / Observability / Settlement (Phase 0 + 1 hardening)
 
 - **Wallet signature verification** — all mutating routes gated by
@@ -844,9 +421,10 @@ a new pipeline.
   Limitations §9 below.
 - **Zod body validation** — `schemas/index.ts` + `validateBody()`. Every
   signed POST has a schema, applied right after `requireSignedRequest`.
-- **Env flag safety** — `config/env.ts` forces `SKIP_PAYMENT_VERIFY=false`
-  when `NODE_ENV === 'production'` regardless of env input. Boot log prints
-  `[env] NODE_ENV=... · payment verify: ENABLED/SKIPPED · x402 mode: …`.
+- **Env flag safety** — `config/env.ts` enforces production-only
+  invariants at boot (e.g. mandatory secrets present, dev-only
+  bypass flags forced off). Boot log prints
+  `[env] NODE_ENV=... · LOG_LEVEL=... · persona-engine: on|off`.
 - **Structured logging** — `apps/api/src/logger.ts` exports a pino instance
   (+ `childLogger(bindings)`). Railway surfaces JSON logs cleanly. Replace
   remaining `console.*` as you touch files.
@@ -864,13 +442,13 @@ a new pipeline.
 Required in root `.env` (local) or Railway env vars (production):
 ```
 DATABASE_URL          # PostgreSQL connection string
-ANTHROPIC_API_KEY     # Claude API key
+ANTHROPIC_API_KEY     # Claude API key (Sonnet + Haiku)
 SOLANA_KEYPAIR_PATH   # Path to Solana keypair JSON (local)
 SOLANA_KEYPAIR_JSON   # Solana keypair as JSON string (production — takes priority over PATH)
-X402_RESOURCE_WALLET  # Wallet receiving x402 payments
-TOKEN_41R_MINT        # 41R token mint address
-SAS_CREDENTIAL_PDA    # SAS credential account
-SAS_SCHEMA_PDA        # SAS schema account
+PERSONA_MASTER_MNEMONIC   # BIP-39 mnemonic for HD-derived persona wallets
+PRIVY_APP_ID          # Public Privy app id (also embedded in client bundle)
+PRIVY_APP_SECRET      # Privy server secret (validates access tokens)
+NEXT_PUBLIC_PRIVY_APP_ID   # Mirrors PRIVY_APP_ID for the web bundle
 ```
 
 R2 (screenshot storage, production only):
@@ -882,29 +460,28 @@ R2_BUCKET             # Bucket name (default: 41rpm-screenshots)
 R2_PUBLIC_URL         # Public CDN URL for the bucket
 ```
 
-Persona-engine (required when `USE_PERSONA_ENGINE=1`):
-```
-USE_PERSONA_ENGINE=1                     # route autotest through persona-engine
-PERSONA_ENGINE_URL=http://127.0.0.1:4200 # or the Railway internal URL
-PERSONA_ENGINE_WORKSPACE=/tmp/persona-jobs   # writable path for job artifacts
-```
-
 Optional:
 ```
 API_PORT=4100
 NEXT_PUBLIC_API_URL=http://localhost:4100
 CORS_ALLOWED_ORIGINS=...    # comma-separated; overrides the default allowlist
-SKIP_PAYMENT_VERIFY=true    # Local dev only — auto-forced to false in production
-USE_X402_FALLBACK=false     # Use custom USDC verification instead of x402
-CHROMIUM_PATH=/usr/bin/chromium  # Set in Docker for Stagehand
+USE_VISION=1                # Use Sonnet vision for persona response (otherwise Haiku text)
+USE_SIMULATOR=0             # Skip LLM, use synthetic responses (dev iteration)
+ADMIN_API_KEY=...           # Gates /api/admin/* (≥12 chars; absent ⇒ 404)
 LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
+```
+
+Dormant (parsed but not used by the validator pipeline):
+```
+USE_PERSONA_ENGINE=0        # legacy autotest routing flag
+PERSONA_ENGINE_URL=...      # legacy persona-engine FastAPI base URL
 ```
 
 ### Screenshots & File Storage
 - Production: uploaded to Cloudflare R2 via `services/r2.ts` (S3-compatible API)
-- Local dev: saved to `../../screenshots/` + served via Express static
-- Frontend: check if URL starts with `http` → use directly, otherwise prefix with `API_BASE/screenshots/`
-- Screenshot URLs in DB `test_reports.screenshots` are full R2 URLs in production
+- Local dev: saved under `/tmp/site-captures/` + served via Express static
+- Frontend: check if URL starts with `http` → use directly, otherwise prefix with `API_BASE`
+- Validator scan screenshots are stored in `audience_fit_scans.captureScreenshotUrls` (jsonb array of full URLs)
 
 ### Workspace Packages
 - `packages/shared` and `packages/solana-utils` have `main` pointing to `dist/` (built output)
@@ -925,90 +502,10 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
 - Assume local file paths work in Docker — use env vars for all external paths
 - Instantiate Anthropic client directly in `apps/api` — use `client` + `withRoute`
   from `services/anthropic_client.ts` so usage tracking keeps working
-- Change `mode=browser` default without measuring cost/quality on both paths —
-  the stagehand_hybrid default came from an A/B run (see feature/event-hardening
-  branch history)
-- Remove the `result: {...}` nested field from the synchronous `/api/autotest/run`
-  response — the UI's completion panel reads it. The top-level flat fields
-  exist for other consumers but the nested one is what drives the screen.
-- Remove the `__E2E_BYPASS_DEPOSIT` branches from `/company/register` or
-  `/autotest` without replacing the browser E2E strategy — the test harness
-  in `/tmp/e2e-flows.py` depends on them. They are guarded by
-  `NODE_ENV !== 'production'` so they compile out of prod bundles.
 - Add ad-hoc `bg-surface border border-border-dim` card styles — use
   `.hf-card` / `.hf-card-inset`. Same for chips (`.chip.<variant>`) and
   buttons (`.hf-btn`). Migrating older pages to these classes is always
   a safe follow-up.
-- Hardcode KPIs / sparklines / activity back into `apps/web/app/page.tsx`.
-  Every widget on the landing must read from `dashboardApi.get(role, wallet)`
-  so the page stays live. If you need a new metric, add it to
-  `services/dashboard.ts` and surface it through the same payload.
-- Re-add the owner check on `POST /api/test/:id/diagnosis` or
-  `/retry-autotest` while on devnet beta — it's intentionally off (see
-  Landing Dashboard §). Flip it back on as part of the mainnet hardening
-  checklist, not as a drive-by fix.
-- Replace the semantic clustering pass in `diagnosis.ts` with
-  whitespace+lowercase dedup. `normalizeStr()` still exists as a
-  **fallback** for when the clusterer has no input or the LLM call
-  fails; making it the primary path permanently blocks the `both`
-  confirmation label from ever firing (same phrasing from a human and
-  a persona become two separate entries).
-- Hand raw `_structured_report` / `_quality_breakdown` / `_source` /
-  `_quirks` sentinels to `ReactMarkdown` or the Questionnaire Answers
-  list — they're internal sentinels, not user-facing answers. Parse
-  them into the Structured Report section on `/report/[id]` (see
-  Diagnosis validation pipeline §).
-- Render the experiment page's cohort / convergence / confusion /
-  paired-scatter / rating-distribution panels when `manual.count === 0
-  || persona.count === 0`. They either silently show "0%" (reads as
-  "perfect agreement") or plot the zero bucket as a tall bar. The
-  single-side banner + hidden sections is the contract.
-- Remove the empty-session guards in `scoring/report.ts` /
-  `scoring/checklist.ts`. They short-circuit the LLM call when
-  `outcome=error && turns≤1`; reverting to the LLM path means Haiku /
-  Sonnet immediately go back to inventing plausible failure narratives
-  ("mobile viewport drop", "JSON parse mid-session") that the
-  diagnosis aggregator promotes to rank-1 product findings. The
-  regression tests in `scoring-report.test.ts` /
-  `scoring-checklist.test.ts` lock this in via
-  `mockCreate.not.toHaveBeenCalled()` — don't relax those assertions.
-- Drop `harnessErrorReports` from `DiagnosisAggregate` or fold it
-  back into `painPointFrequency`. Top-rank product findings get
-  contaminated with infra failures the second this split disappears
-  (jup.ag had 14 errored personas show up as rank-1 "테스트 환경
-  제약" before the split landed). The regression suite in
-  `diagnosis.test.ts` `accumulatePainPointsForReport · jup.ag
-  regression` is the safety net.
-- Remove the per-LLM-call 90s timeout (`SCORING_TIMEOUT_MS`) or the
-  outer 12-min hardcut (`PERSIST_HARDCUT_MS`) in
-  `runStagehandHybridAndPersist`. The inner stagehand 5-min hardcut
-  covers only the browser portion; the post-stagehand scoring chain +
-  R2 + DB had no upper bound and could wedge the chain.then() in
-  /autotest/trigger indefinitely. `raceWithTimeout` + `TimeoutError`
-  exported from `stagehand_hybrid.ts` — reuse, don't reimplement.
-- Inline the queue dedup in `dev.ts` again. Use the
-  `selectQueueableJobs` helper — `matchPersonas` can return 2
-  personas sharing one testerAddr, and inlining the loop loses the
-  in-batch dedup that prevents the wasted-compute symptom (full
-  run + scoring → unique-constraint throw on insert).
-- Reorder or hide sections in the Company Test Dashboard
-  (`/company/test/[id]`) without explicit need. The 8-section spec
-  (Hero KPIs → Why Users Drop → Persona Insights → Funnel → Advanced
-  Settings → A/B Comparison → Revenue Impact → Raw Data) was an
-  explicit design decision; A/B and Revenue panels conditionally hide
-  when their inputs are unset, but the others stay in order. New
-  metrics belong inside an existing section (or as a new one), not
-  shuffled in front.
-- Reintroduce input-driven funnel UX. Funnel steps are
-  auto-extracted by Haiku from session data
-  (`services/scoring/funnel.ts`); the user explicitly rejected the
-  "company fills in funnel steps" flow ("Funnel은 자동으로 할 수 있는거
-  아니야?"). If the LLM extraction is wrong, fix the prompt or add a
-  manual override field, but do not make manual the default path.
-- Polling for non-404 responses with a body grep that includes
-  `error` as one of the alternations — `{"error":"Not found"}` matches
-  and the loop exits early. Use the HTTP status code (`curl -o /dev/null
-  -w "%{http_code}"`) when waiting for a Railway redeploy.
 - Reintroduce per-persona age jitter in `personaAgeFromGroup`. The
   persona vector only stores categorical `age_group`; jittering by
   `personaId` hash invents data the system doesn't measure. Identical
@@ -1229,14 +726,14 @@ alongside aggregates — the honest finding is:
 Keep this framing in mind when adding features or running experiments. Do not
 pitch a single aggregate ρ number without the cohort context.
 
-The **3-layer trust contract** the diagnosis ships with (fidelity band →
-confirmation label → audit citation) is what turns "LLM wrote an essay"
-into "reader can verify every claim traces to a report row". When
-considering a change that relaxes any of these, think in terms of what
-breaks if a company reads a persona-only pain point as a real product
-defect — the `both` / `human-only` / `persona-only` split is how we
-prevent that failure mode, and the semantic clustering pass is what
-makes that split meaningful.
+The validator's analogous trust contract (audited 2026-05-07) is the
+**bottleneck-diagnosis framing** of the AARRR funnel — surface the
+largest stage-to-stage drop ("BIGGEST LEAK"), label the visitor-
+weighted view as "experimental — directional only, not a traffic
+forecast", and never lead with absolute %s as conversion predictions.
+This is what protects companies from reading a 22% activation as
+"22% of real visitors will activate" when the real signal is "this
+stage is your bottleneck — fix it first."
 
 ## Known Limitations / Follow-ups (post-2026-05-07 hardening)
 
