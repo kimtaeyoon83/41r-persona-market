@@ -28,11 +28,15 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Project RPM",
   description: "Find Your Product-Market Fit by AI Persona",
+  // Favicon: rely on Next.js auto-detection of `app/favicon.ico`
+  // (multi-size 16×16 + 32×32 ICO). Previously we added two more PNG
+  // <link rel="icon"> entries via metadata.icons — `/favicon.png`
+  // and `/logo/rpm_black_vertical.png` (identical 500×500 vertical
+  // wordmark) — and the `sizes="any"` hint on the latter made the
+  // browser pick the vertical logo even for the 16×16 tab slot, which
+  // downscaled to an illegible black bar. Drop both. Apple touch icon
+  // is kept on the vertical logo because iOS home-screen is bigger.
   icons: {
-    icon: [
-      { url: "/favicon.png", type: "image/png" },
-      { url: "/logo/rpm_black_vertical.png", type: "image/png", sizes: "any" },
-    ],
     apple: "/logo/rpm_black_vertical.png",
   },
 };
