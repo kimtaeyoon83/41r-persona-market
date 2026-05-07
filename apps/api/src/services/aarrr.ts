@@ -5,12 +5,17 @@
 // passing personas are a subset of the previous stage's, so the bar
 // chart is monotonically non-increasing and reads as a real funnel.
 //
-// Per spec §1.5 + §6.2:
+// Per spec §1.5 + §6.2 — see THRESHOLDS const below for the
+// authoritative values (also surfaced in the report UI as the
+// per-stage `threshold` string):
 //   Acquisition  — reached the URL (baseline 100%).
 //   Activation   — Aha moment reached. Adds: task_success >= 30.
-//   Retention    — Returns by D-7. Adds: retention_d7 >= 30.
+//   Retention    — Returns by D-7. Adds: retention_d7 >= 5.
 //   Referral     — Would recommend. Adds: happiness >= 60.
-//   Revenue      — Conversion likely. Adds: adoption >= 65.
+//   Revenue      — Conversion likely. Adds: adoption >= 30.
+// (Retention + Revenue thresholds were retuned 2026-05-06 from the
+//  v1.0 baseline of 30 / 65; rationale documented in the comment
+//  next to THRESHOLDS below.)
 //
 // Thresholds re-derived from the percentile distribution across all
 // scans (audit 2026-05-02): they were previously independent filters
