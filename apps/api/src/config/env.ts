@@ -86,10 +86,6 @@ const envSchema = z.object({
   SKIP_PAYMENT_VERIFY: boolFromString(false),
   USE_X402_FALLBACK: boolFromString(false),
 
-  // Persona engine
-  USE_PERSONA_ENGINE: boolFromString(false),
-  PERSONA_ENGINE_URL: z.string().url().default('http://persona-engine:4200'),
-  PERSONA_ENGINE_AUTH_TOKEN: z.string().optional(),
   PERSONA_SOURCE_REPORT_LIMIT: intFromString(5),
 
   // Privy (Phase 4 §1) — single-auth identity provider.
@@ -170,9 +166,7 @@ export const isTest = env.NODE_ENV === 'test';
 export function logEnvSummary(): void {
   console.log(
     `[env] NODE_ENV=${env.NODE_ENV} · ` +
-      `payment verify: ${env.SKIP_PAYMENT_VERIFY ? 'SKIPPED' : 'ENABLED'} · ` +
-      `x402 mode: ${env.USE_X402_FALLBACK ? 'fallback' : 'x402'} · ` +
-      `persona-engine: ${env.USE_PERSONA_ENGINE ? 'on' : 'off'}`,
+      `payment verify: ${env.SKIP_PAYMENT_VERIFY ? 'SKIPPED' : 'ENABLED'}`,
   );
   // R2 is required for production screenshot CDN — warn but don't throw.
   if (env.NODE_ENV === 'production' && !env.R2_ACCESS_KEY_ID) {

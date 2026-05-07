@@ -601,16 +601,15 @@ stale text. Listed in order of highest-friction first.
    middleware is effectively dead until a future signed-mutation
    route lands.
 
-4. **⚠️ persona-engine directory is a 565 MB ghost.** The
-   `apps/persona-engine/` directory contains only `__pycache__`,
-   `adapters/`, `tests/`, `sample-usage.jsonl` — `main.py`,
-   `report_generator.py`, the `persona_agent` module are all
-   gone. The validator pipeline does not call persona-engine at
-   all (verified: only reference in active source is the env-var
-   declarations at `config/env.ts`). The directory is preserved
-   per CLAUDE.md "Architecture" note as dormant. *Fix candidate*:
-   delete `apps/persona-engine/` and the env vars; if the future
-   re-enable plan is real, move it to `archive/` instead.
+4. **✅ persona-engine ghost — RESOLVED 2026-05-07.** The 565 MB
+   `apps/persona-engine/` directory + `packages/persona-client/`
+   + their env vars (`USE_PERSONA_ENGINE`, `PERSONA_ENGINE_URL`,
+   `PERSONA_ENGINE_AUTH_TOKEN`) + the related stale docs
+   (`docs/persona-engine-integration-gaps.md`, `INTEGRATION.md`)
+   were all removed in the Step B hygiene pass. The validator
+   pipeline is now self-contained: Sonnet vision / Haiku text via
+   the Anthropic SDK directly, no external service. CLAUDE.md
+   Architecture section was updated to reflect the cleanup.
 
 5. **⚠️ INTENT_ACTION multipliers are universal (Merch n=1
    calibration).** Already documented in CLAUDE.md "Known

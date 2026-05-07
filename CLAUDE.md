@@ -10,19 +10,18 @@ Human testers complete tests → earn USDC rewards → generate AI Personas → 
 ```
 apps/api             (Express :4100)  — routes, validator pipeline, Solana sponsored tx
 apps/web             (Next.js :3000)  — app-router pages (/, /validator/*, /me/*)
-apps/persona-engine  (FastAPI :4200)  — legacy Python service (not invoked by validator)
 packages/shared            — TypeScript interfaces (@41rpm/shared)
 packages/solana-utils      — Token-2022 utilities (@41rpm/solana-utils)
-packages/persona-client    — legacy TypeScript client for persona-engine HTTP
 packages/contracts         — Solana program / IDL stubs
 scripts/                   — seed / migration / backfill / usage-summary
 ```
 
-`apps/persona-engine` and `packages/persona-client` are leftovers
-from the autotest era; the validator pipeline (Mode A / Mode B
-scans) does not call persona-engine. The directory is preserved
-because the env vars `USE_PERSONA_ENGINE` and `PERSONA_ENGINE_URL`
-still parse and a future workload may revive it. Treat as dormant.
+The autotest-era `apps/persona-engine/` (FastAPI service) +
+`packages/persona-client/` (TS HTTP client) + their env vars
+(`USE_PERSONA_ENGINE`, `PERSONA_ENGINE_URL`, `PERSONA_ENGINE_AUTH_TOKEN`)
+were all removed in the 2026-05-07 hygiene pass. Validator pipeline
+(Mode A / Mode B scans) is self-contained — Sonnet vision /
+Haiku text via the Anthropic SDK directly, no external service.
 
 ## Deployment (Railway + Cloudflare R2)
 
@@ -196,7 +195,6 @@ Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
   funnel, friction clustering, site classifier, acquisition priors.
   LLM-touching tests mock `services/anthropic_client` via `vi.mock`
   so the prompt path runs without real API calls.
-- Persona-engine (Python): `apps/persona-engine/tests/` — pytest.
 
 ## Audience-Fit Validator (`/validator/*` + `/api/scan/*`, audited 2026-05-02)
 
@@ -382,10 +380,7 @@ a new pipeline.
 ## LLM Usage Tracking
 
 - Unified JSONL log at `USAGE_LOG_PATH` (default `/tmp/llm-usage.jsonl`)
-- Python side: `apps/persona-engine/usage_logger.py` monkey-patches
-  `anthropic.Messages.create`; tag routes via `with_route("...")` + request
-  ids via `with_request_id(...)`
-- Node side: `apps/api/src/services/anthropic_client.ts` wraps the SDK via
+- `apps/api/src/services/anthropic_client.ts` wraps the SDK via
   AsyncLocalStorage; tag via `withRoute('...', () => client.messages.create(...))`
 - `scripts/usage-summary.ts` — totals by model/service/route, heaviest calls,
   duplicate-prompt detection
@@ -424,13 +419,13 @@ a new pipeline.
 - **Env flag safety** — `config/env.ts` enforces production-only
   invariants at boot (e.g. mandatory secrets present, dev-only
   bypass flags forced off). Boot log prints
-  `[env] NODE_ENV=... · LOG_LEVEL=... · persona-engine: on|off`.
+  `[env] NODE_ENV=... · payment verify: ENABLED|SKIPPED`.
 - **Structured logging** — `apps/api/src/logger.ts` exports a pino instance
   (+ `childLogger(bindings)`). Railway surfaces JSON logs cleanly. Replace
   remaining `console.*` as you touch files.
-- **Deep health** — `GET /api/health?deep=1` pings DB + persona-engine +
-  Solana RPC with per-dep latency (`services/health.ts`). 503 when any dep
-  is down. Basic `/api/health` stays synchronous + cheap.
+- **Deep health** — `GET /api/health?deep=1` pings DB + Solana RPC with
+  per-dep latency (`services/health.ts`). 503 when any dep is down.
+  Basic `/api/health` stays synchronous + cheap.
 - **Settlement worker** — exponential backoff 30s → 1m → 5m → 15m cap,
   24h MAX_AGE terminal marker (`services/settlement-worker.ts`). Runs in
   background; disable via `SETTLEMENT_WORKER_DISABLED=1` for tests.
@@ -469,12 +464,6 @@ USE_VISION=1                # Use Sonnet vision for persona response (otherwise 
 USE_SIMULATOR=0             # Skip LLM, use synthetic responses (dev iteration)
 ADMIN_API_KEY=...           # Gates /api/admin/* (≥12 chars; absent ⇒ 404)
 LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
-```
-
-Dormant (parsed but not used by the validator pipeline):
-```
-USE_PERSONA_ENGINE=0        # legacy autotest routing flag
-PERSONA_ENGINE_URL=...      # legacy persona-engine FastAPI base URL
 ```
 
 ### Screenshots & File Storage

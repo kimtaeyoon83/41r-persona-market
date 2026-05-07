@@ -1,7 +1,6 @@
 /**
  * Wrapped Anthropic SDK client that logs every ``messages.create`` call
- * to the shared JSONL usage log (same file that persona-engine's
- * ``usage_logger.py`` writes to). Use ``withRoute`` / ``withRequestId``
+ * to the shared JSONL usage log. Use ``withRoute`` / ``withRequestId``
  * to tag calls so ``scripts/usage-summary.ts`` can attribute tokens.
  *
  * Drop-in replacement for ``new Anthropic()``:

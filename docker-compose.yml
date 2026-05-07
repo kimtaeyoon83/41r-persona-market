@@ -21,23 +21,8 @@ services:
       API_PORT: 4100
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       SKIP_PAYMENT_VERIFY: "true"
-      PERSONA_ENGINE_URL: http://persona-engine:4200
     depends_on:
       - db
-      - persona-engine
-
-  persona-engine:
-    build:
-      context: ./apps/persona-engine
-      dockerfile: Dockerfile
-    ports:
-      - "4201:4200"
-    environment:
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      PERSONA_ENGINE_WORKSPACE: /var/persona_jobs
-      LOG_LEVEL: INFO
-    volumes:
-      - persona_jobs:/var/persona_jobs
 
   web:
     build:
@@ -52,4 +37,3 @@ services:
 
 volumes:
   pgdata:
-  persona_jobs:

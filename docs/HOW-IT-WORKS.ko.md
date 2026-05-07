@@ -580,14 +580,15 @@ CLAUDE.md "Audience-Fit Validator §" + 2026-05-07 hardening commit들
    사용 — `requireSignedRequest`를 쓰는 라우트는 하나도 없음. 미래의
    signed-mutation 라우트가 land할 때까지 effective dead.
 
-4. **⚠️ persona-engine 디렉토리가 565 MB ghost.** `apps/persona-engine/`
-   에는 `__pycache__`, `adapters/`, `tests/`, `sample-usage.jsonl`만
-   있고, `main.py`, `report_generator.py`, `persona_agent` 모듈은
-   모두 사라짐. validator 파이프라인은 persona-engine을 호출하지
-   않음 (검증: 활성 소스에서 유일한 참조는 `config/env.ts`의 env-var
-   선언뿐). 디렉토리는 CLAUDE.md "Architecture" 노트에 의해 dormant
-   로 보존되어 있음. *Fix candidate*: `apps/persona-engine/`과 env
-   var를 삭제; 미래 재활성화 계획이 진짜라면 `archive/`로 이동.
+4. **✅ persona-engine ghost — 2026-05-07 해결.** 565 MB
+   `apps/persona-engine/` 디렉토리 + `packages/persona-client/` +
+   관련 env vars (`USE_PERSONA_ENGINE`, `PERSONA_ENGINE_URL`,
+   `PERSONA_ENGINE_AUTH_TOKEN`) + stale 문서들
+   (`docs/persona-engine-integration-gaps.md`, `INTEGRATION.md`)
+   이 모두 Step B 정리 패스에서 제거됨. validator 파이프라인은
+   이제 self-contained: Anthropic SDK 직접 호출 (Sonnet vision /
+   Haiku text), 외부 서비스 없음. CLAUDE.md Architecture 섹션도
+   정리 반영.
 
 5. **⚠️ INTENT_ACTION 곱셈자가 universal (Merch n=1 calibration).**
    CLAUDE.md "Known Limitations §2"에 이미 문서화됨. 곱셈자가

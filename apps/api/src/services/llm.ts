@@ -130,10 +130,11 @@ export function parseJsonSafe<T = any>(text: string): T {
   }
 }
 
-// Model constants — re-exported for scoring adapters. Keep in sync with
-// persona-engine's routing.yaml tiers. Sonnet for review_proposer
-// (checklist/questionnaire), Haiku for review_inspection (structured
-// report) and hypothesis_rewrite (predicate evaluation when we enable it).
+// Model constants — re-exported for the validator scoring path.
+// Sonnet for vision (persona response when USE_VISION=1), Haiku for
+// text classification + clustering. Resolved from env vars
+// CLAUDE_SONNET_MODEL / CLAUDE_HAIKU_MODEL with defaults at
+// `apps/api/src/config/env.ts`.
 export const SCORING_MODELS = {
   sonnet: SONNET,
   haiku: HAIKU,
