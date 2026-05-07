@@ -8,7 +8,7 @@
 
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 
 // ─── Theme constants ──────────────────────────────────────────────
 export const C = {
@@ -335,10 +335,16 @@ export function SectionLabel({
   n,
   label,
   sub,
+  help,
 }: {
   n: string | number;
   label: string;
   sub?: string;
+  /** When set, renders a (?) help button after the section label.
+   *  Click opens a popup explaining what the section means + how
+   *  the numbers are computed. Wire to the methodology section in
+   *  /validator/how-it-works for the long-form treatment. */
+  help?: { title: string; body: ReactNode };
 }) {
   return (
     <div
@@ -364,7 +370,121 @@ export function SectionLabel({
         {label}
       </span>
       {sub && <span style={{ fontSize: 12, color: C.textFaint }}>· {sub}</span>}
+      {help && <HelpTip title={help.title}>{help.body}</HelpTip>}
     </div>
+  );
+}
+
+/** Inline (?) icon button. Click toggles a small popup card with the
+ *  explanation text + a "see methodology" link. Self-contained — no
+ *  dependency on Radix / Headless UI. Keyboard-accessible (Esc closes,
+ *  outside click closes). The popup is `position: absolute` relative
+ *  to the (?) button so it follows the trigger; the dimming overlay
+ *  is `position: fixed` so click-anywhere-else dismisses cleanly. */
+export function HelpTip({
+  title,
+  children,
+  size = 14,
+}: {
+  title: string;
+  children: ReactNode;
+  size?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: "relative", display: "inline-block", marginLeft: 4 }}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+        aria-label={`Help: ${title}`}
+        title={title}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 999,
+          border: `1px solid ${C.border}`,
+          background: open ? C.text : "transparent",
+          color: open ? C.bg : C.textDim,
+          fontSize: 10,
+          fontFamily: FM,
+          fontWeight: 600,
+          lineHeight: 1,
+          cursor: "pointer",
+          padding: 0,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          verticalAlign: "middle",
+        }}
+      >
+        ?
+      </button>
+      {open && (
+        <>
+          <div
+            onClick={() => setOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 50,
+              background: "transparent",
+            }}
+          />
+          <div
+            role="dialog"
+            aria-label={title}
+            style={{
+              position: "absolute",
+              top: size + 6,
+              left: 0,
+              zIndex: 51,
+              width: 320,
+              maxWidth: "calc(100vw - 32px)",
+              padding: "14px 16px",
+              background: C.panel,
+              border: `1px solid ${C.borderStrong}`,
+              borderRadius: 10,
+              boxShadow: "0 12px 32px rgba(0,0,0,0.12)",
+              fontFamily: FS,
+              fontSize: 12,
+              lineHeight: 1.55,
+              color: C.text,
+              textAlign: "left",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: FM,
+                fontSize: 11,
+                fontWeight: 600,
+                color: C.textDim,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                marginBottom: 6,
+              }}
+            >
+              {title}
+            </div>
+            <div style={{ marginBottom: 10 }}>{children}</div>
+            <Link
+              href="/validator/how-it-works"
+              style={{
+                fontSize: 11,
+                fontFamily: FM,
+                color: C.accent,
+                textDecoration: "underline",
+              }}
+              onClick={() => setOpen(false)}
+            >
+              methodology →
+            </Link>
+          </div>
+        </>
+      )}
+    </span>
   );
 }
 

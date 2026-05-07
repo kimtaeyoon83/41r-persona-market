@@ -252,6 +252,41 @@ export default function ValidatorReportPage() {
             n={1}
             label="Audience-Fit Score"
             sub="Composite of best · median · task-success · sentiment"
+            help={{
+              title: "How is this score computed?",
+              body: (
+                <>
+                  <p style={{ margin: "0 0 8px" }}>
+                    A 0-100 composite produced by{" "}
+                    <code>computeAudienceFit()</code> in{" "}
+                    <code>services/audience_fit.ts</code>:
+                  </p>
+                  <pre
+                    style={{
+                      margin: "0 0 8px",
+                      padding: 8,
+                      background: "#f3f0e8",
+                      borderRadius: 6,
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {`score =
+  0.40 × best_cohort_fit
++ 0.30 × median_cohort_fit
++ 0.20 × global_task_success_avg
++ 0.10 × global_sentiment_avg`}
+                  </pre>
+                  <p style={{ margin: 0 }}>
+                    Each cohort_fit is a weighted aggregate of the 5 persona
+                    dimensions (engagement·task_success·happiness·adoption·
+                    retention). Best+median weighting rewards niche-PMF wins
+                    while preventing a single-cohort outlier from dominating.
+                  </p>
+                </>
+              ),
+            }}
           />
         )}
         {!result && r.scan.mode === "A" && (
@@ -434,7 +469,39 @@ export default function ValidatorReportPage() {
         </div>}
 
         {/* ② Engagement */}
-        <SectionLabel n={2} label="Engagement" sub="First-session flow in plain terms" />
+        <SectionLabel
+          n={2}
+          label="Engagement"
+          sub="First-session flow in plain terms"
+          help={{
+            title: "Engagement & retention curve",
+            body: (
+              <>
+                <p style={{ margin: "0 0 8px" }}>
+                  Each persona picks one of 5 engagement bands
+                  (<code>abandon</code> / <code>skim</code> /{" "}
+                  <code>browse</code> / <code>engage</code> /{" "}
+                  <code>extended</code>) and one of 4 retention bands
+                  (<code>no_return</code> / <code>weak</code> /{" "}
+                  <code>moderate</code> / <code>strong</code>) in their JSON
+                  response.
+                </p>
+                <p style={{ margin: "0 0 8px" }}>
+                  The bands map to deterministic numeric scores via lookup
+                  tables in <code>audience_fit.ts</code> —{" "}
+                  <code>ENGAGEMENT_BAND_TO_SCORE</code> (10/30/55/75/90) and{" "}
+                  <code>RETENTION_BAND_TO_DCURVE</code> (D-1·D-3·D-7·D-30
+                  per band). Personas don&apos;t generate raw percentages
+                  themselves — that would be false precision.
+                </p>
+                <p style={{ margin: 0 }}>
+                  Retention curve = average of all valid personas&apos;
+                  D-curves across cohorts.
+                </p>
+              </>
+            ),
+          }}
+        />
         <div className="v-grid-stack-sm" style={{ marginBottom: 14 }}>
           <Card padding={18}>
             <div
@@ -504,7 +571,36 @@ export default function ValidatorReportPage() {
         </div>
 
         {/* ③ Friction & Bottleneck */}
-        <SectionLabel n={3} label="Friction & Bottleneck" sub="Where the journey breaks" />
+        <SectionLabel
+          n={3}
+          label="Friction & Bottleneck"
+          sub="Where the journey breaks"
+          help={{
+            title: "How are friction clusters built?",
+            body: (
+              <>
+                <p style={{ margin: "0 0 8px" }}>
+                  After every persona has answered, we run one Haiku call
+                  (<code>validator.cluster_frictions</code>) that takes the
+                  full list of <code>voice_biggest_friction</code> quotes
+                  and groups semantically equivalent complaints into 3-5
+                  themed clusters.
+                </p>
+                <p style={{ margin: "0 0 8px" }}>
+                  Source: <code>services/dimensions/frictions.ts</code>.
+                  The clusterer ranks by <code>n</code> (size) and caps at
+                  top 5; every persona quote that didn&apos;t cluster ends
+                  up in the &quot;Other / long-tail&quot; bucket so no
+                  friction is silently dropped.
+                </p>
+                <p style={{ margin: 0 }}>
+                  <code>impact = +Math.round(n / total × 30)</code> — a
+                  rough fit-cost estimate, not a measured value.
+                </p>
+              </>
+            ),
+          }}
+        />
         <Card padding={18} style={{ marginBottom: 24 }}>
           {frictions.map((f, i) => (
             <div
@@ -586,6 +682,32 @@ export default function ValidatorReportPage() {
           n={4}
           label="Persona Resonance"
           sub="Who used it how — click a card for drill-down"
+          help={{
+            title: "Where do these personas come from?",
+            body: (
+              <>
+                <p style={{ margin: "0 0 8px" }}>
+                  ~112 procedurally-seeded personas (Mode A) drawn from 8
+                  STANDARD_COHORTS in{" "}
+                  <code>packages/shared/src/cohorts.ts</code>. Each
+                  persona&apos;s <code>vector</code> (demographics, tech-
+                  literacy, voice_sample, etc.) is fed into a Sonnet/Haiku
+                  call asking &quot;react to this site as THIS persona&quot;.
+                </p>
+                <p style={{ margin: "0 0 8px" }}>
+                  Fit / non-fit split is by <code>cohort_fit_score</code> on
+                  the cohort the persona belongs to. Each persona row carries
+                  its own dimension scores; click a card for the full
+                  per-axis breakdown + voice quotes.
+                </p>
+                <p style={{ margin: 0 }}>
+                  Synthetic personas are flagged with a small &quot;synth&quot;
+                  marker so a stakeholder doesn&apos;t mistake pool names
+                  (e.g. &quot;Jonas Bauer&quot;) for real users.
+                </p>
+              </>
+            ),
+          }}
         />
         <div className="v-grid-stack-sm" style={{ marginBottom: 24 }}>
           <PersonaBoard
@@ -736,6 +858,42 @@ function AarrrFunnelBlock({
         n="P"
         label="AARRR Funnel"
         sub={`Acquisition → Activation → Retention → Referral → Revenue · n=${funnel.total_personas}`}
+        help={{
+          title: "How does the funnel filter personas?",
+          body: (
+            <>
+              <p style={{ margin: "0 0 8px" }}>
+                Each stage is a <strong>subset</strong> of the previous,
+                making this a real funnel (monotonically non-increasing).
+                Source: <code>services/aarrr.ts</code>.
+              </p>
+              <pre
+                style={{
+                  margin: "0 0 8px",
+                  padding: 8,
+                  background: "#f3f0e8",
+                  borderRadius: 6,
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {`Acquisition  baseline (all valid personas)
+Activation   + task_success ≥ 30
+Retention    + retention_d7 ≥ 5
+Referral     + happiness ≥ 60
+Revenue      + adoption ≥ 30`}
+              </pre>
+              <p style={{ margin: 0 }}>
+                The biggest stage-to-stage drop names where the audience
+                loses intent the most. Read this as a <em>diagnostic</em>{" "}
+                — which stage to fix first — not as a conversion forecast.
+                Visitor-weighted view applies traffic-realistic priors and
+                intent-action multipliers; see methodology.
+              </p>
+            </>
+          ),
+        }}
       />
       <Card padding={20} style={{ marginBottom: 24 }}>
         {biggestDrop >= 5 && (
@@ -976,6 +1134,43 @@ function ModeBVerdictBlock({
         n={1}
         label="Verification Verdict"
         sub="Pass · Conditional · Fail thresholds: ≥60 / 40-60 / <40"
+        help={{
+          title: "What does this verdict mean?",
+          body: (
+            <>
+              <p style={{ margin: "0 0 8px" }}>
+                Mode B (Verify) parses your audience description into a{" "}
+                <code>CohortSelector</code> via Haiku, then picks up to 50
+                matching personas from the pool and runs the same per-
+                persona LLM as Mode A.
+              </p>
+              <p style={{ margin: "0 0 8px" }}>
+                The single resulting cohort_fit_score is mapped to a 3-band
+                verdict per spec §1.3:
+              </p>
+              <pre
+                style={{
+                  margin: "0 0 8px",
+                  padding: 8,
+                  background: "#f3f0e8",
+                  borderRadius: 6,
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {`≥ 60   Pass         strong fit
+40-60  Conditional  needs work
+< 40   Fail         wrong audience`}
+              </pre>
+              <p style={{ margin: 0 }}>
+                Sources:{" "}
+                <code>services/scan_pipeline.ts::runModeBPipeline</code> +{" "}
+                <code>services/dimensions/audience_parser.ts</code>.
+              </p>
+            </>
+          ),
+        }}
       />
       <div
         style={{
