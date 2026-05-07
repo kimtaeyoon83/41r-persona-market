@@ -254,6 +254,19 @@ export function computeAarrrWeightedFromRows(
   } as const;
 
   const totalPersonas = valid.length;
+  // `n_passing` for weighted stages is an *estimated* visitor-equivalent
+  // count, derived from `score% × totalPersonas`. The score itself is
+  // a visitor-traffic-weighted projection; it has no exact integer
+  // count (no real visitors were measured), but rendering "0 / 111"
+  // in the UI made the funnel look broken (2026-05-07 user report).
+  // The estimate keeps panel/visitor cards visually consistent and
+  // reads naturally as "~25 of 111 (visitor-weighted)" in the UI.
+  const estCount = (score: number): number =>
+    Math.round((score / 100) * totalPersonas);
+  const activationScore = weightedPct('activationRate') * INTENT_ACTION.activation;
+  const retentionScore = weightedPct('retentionRate') * INTENT_ACTION.retention;
+  const referralScore = weightedPct('referralRate') * INTENT_ACTION.referral;
+  const revenueScore = weightedPct('revenueRate') * INTENT_ACTION.revenue;
   const stages: AarrrStage[] = [
     {
       key: 'acquisition',
@@ -266,32 +279,32 @@ export function computeAarrrWeightedFromRows(
     {
       key: 'activation',
       label: 'Activation',
-      score: weightedPct('activationRate') * INTENT_ACTION.activation,
-      n_passing: 0, // weighted view has no meaningful integer count
+      score: activationScore,
+      n_passing: estCount(activationScore),
       total: totalPersonas,
       threshold: THRESHOLDS.activation,
     },
     {
       key: 'retention',
       label: 'Retention',
-      score: weightedPct('retentionRate') * INTENT_ACTION.retention,
-      n_passing: 0,
+      score: retentionScore,
+      n_passing: estCount(retentionScore),
       total: totalPersonas,
       threshold: THRESHOLDS.retention,
     },
     {
       key: 'referral',
       label: 'Referral',
-      score: weightedPct('referralRate') * INTENT_ACTION.referral,
-      n_passing: 0,
+      score: referralScore,
+      n_passing: estCount(referralScore),
       total: totalPersonas,
       threshold: THRESHOLDS.referral,
     },
     {
       key: 'revenue',
       label: 'Revenue',
-      score: weightedPct('revenueRate') * INTENT_ACTION.revenue,
-      n_passing: 0,
+      score: revenueScore,
+      n_passing: estCount(revenueScore),
       total: totalPersonas,
       threshold: THRESHOLDS.revenue,
     },
