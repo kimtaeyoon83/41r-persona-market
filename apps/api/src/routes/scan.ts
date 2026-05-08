@@ -23,6 +23,7 @@ import {
   type CohortFit,
 } from '../services/audience_fit.js';
 import { startScanWorker } from '../services/scan_pipeline.js';
+import { recomputeHumanAggregate } from '../services/human_aggregate.js';
 import { getCategoryBenchmark } from '../services/benchmark.js';
 import {
   computeAarrr,
@@ -268,6 +269,16 @@ router.get('/:id/report', async (req, res) => {
     );
   const livePersonasCompleted = liveCount?.n ?? 0;
 
+  // Phase 5 — survey response count drives the "Compare with humans
+  // (n=X)" footer button label on the report page. Cheap COUNT
+  // alongside the existing live counts so we don't need a separate
+  // round-trip from the client.
+  const [surveyCountRow] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.surveyResponses)
+    .where(eq(schema.surveyResponses.scanId, id));
+  const surveyResponseCount = surveyCountRow?.n ?? 0;
+
   // Composite per-persona score for fit/non-fit ranking. Cheap proxy
   // for the §4.2 weighted aggregate; using the same dimensions keeps
   // partial-state ordering consistent with the final cohort_fit_score.
@@ -426,6 +437,14 @@ router.get('/:id/report', async (req, res) => {
     // Live progressive fields — populated during scan + after.
     recent_responses: recentRows.map(shapeRecentResponse),
     cohort_progress: shapeCohortProgress(cohortProgressRows),
+    // Phase 5 — drives the "Compare with humans (n=X)" footer button.
+    // Live count of survey_responses; resets to 0 when no submissions.
+    survey_response_count: surveyResponseCount,
+    /** Whether human_aggregate has been computed at least once. The
+     *  report page uses this to decide whether the Compare button
+     *  goes straight to the comparison page or first triggers a
+     *  recompute. */
+    human_aggregate_computed: scan.humanAggregate !== null,
     // Pro tier: AARRR funnel — Mode A only (Mode B is single-audience).
     aarrr: completed && scan.mode === 'A' ? await computeAarrr(id) : null,
     // Acquisition Layer v1.1 — weighted (visitor-level) AARRR. Same
@@ -766,7 +785,10 @@ async function computeWeightedAarrrFor(
 // promotes this to Privy login.
 
 const surveyBody = z.object({
-  email: z.string().email().max(200),
+  // Phase 5.1 — identity comes from Privy (req.privyUser.id), not the
+  // body. The legacy `email` field was dropped here when the route
+  // became authenticated; existing pre-Phase-5.1 rows keep their email
+  // values in the DB but new submissions don't carry them.
   // SUS-10 (Q1..Q10), 1-5 Likert.
   sus_responses: z.array(z.number().int().min(1).max(5)).length(10),
   // Engagement band — same enum as the AI persona schema.
@@ -791,6 +813,14 @@ const surveyBody = z.object({
     crypto_experience: z.number().min(0).max(1),
     mobile_first: z.boolean(),
   }),
+  // Per-scan custom-question answers. Keys are the question ids on
+  // audience_fit_scans.custom_questions; values are 1-5 ints (Likert)
+  // or strings (text). Optional/empty when the scan has no custom
+  // questions or the respondent skipped them.
+  custom_answers: z
+    .record(z.string(), z.union([z.number().int().min(1).max(5), z.string().max(2000)]))
+    .optional()
+    .default({}),
 });
 
 // Map human-side enum answers into the same 0-100 dimension scores
@@ -815,9 +845,11 @@ function computeSusScoreLocal(responses: readonly number[]): number {
   return sum * 2.5;
 }
 
-router.post('/:id/survey', async (req, res) => {
-  const { id } = req.params;
-  if (!UUID_RE.test(id ?? '')) {
+router.post('/:id/survey', requirePrivyAuth, async (req, res) => {
+  // Note: with `requirePrivyAuth` chained, Express's req.params.id typing
+  // widens to string | string[] | undefined. Coerce to string explicitly.
+  const id = String(req.params.id ?? '');
+  if (!UUID_RE.test(id)) {
     res.status(404).json({ error: 'scan_not_found' });
     return;
   }
@@ -828,6 +860,7 @@ router.post('/:id/survey', async (req, res) => {
     return;
   }
   const body = parsed.data;
+  const userId = req.privyUser!.id;
 
   const [scan] = await db
     .select()
@@ -892,6 +925,57 @@ router.post('/:id/survey', async (req, res) => {
     });
   }
 
+  // Phase 5 — persist the raw per-respondent submission so the
+  // human-aggregate pipeline (POST /:id/human-aggregate) can re-cluster
+  // voice quotes + recompute dimension means using the same code paths
+  // as the AI pipeline. calibration_records keeps only the 5 dimension
+  // numerics; survey_responses keeps everything verbatim.
+  //
+  // Phase 5.1 — upsert on (scan_id, user_id) so a respondent can edit
+  // their answer. Re-submitting overwrites all jsonb fields, but the
+  // `id` and `submitted_at` (re-bumped to NOW) are kept consistent so
+  // the recompute pipeline reads the latest state. The 5 calibration_records
+  // rows above are append-only — re-edits append a new tuple per dimension
+  // (calibration aggregator dedupes by date+site+dim+source for its
+  // analysis, so duplicates don't double-count).
+  const surveyValues = {
+    susResponses: body.sus_responses,
+    dimensionInputs: {
+      engagement_category: body.engagement_category,
+      signup_likelihood: body.signup_likelihood,
+      retention_category: body.retention_category,
+      completion_likelihood: body.completion_likelihood,
+    },
+    voice: body.voice,
+    customAnswers: body.custom_answers,
+    demographics: body.demographics,
+  };
+  // Upsert via select-then-insert/update — Drizzle's onConflictDoUpdate
+  // composite-target typing is awkward and the unique index runs at
+  // the DB layer either way. The (scan_id, user_id) UNIQUE constraint
+  // still enforces uniqueness if a race lands two requests in flight.
+  const [existing] = await db
+    .select({ id: schema.surveyResponses.id })
+    .from(schema.surveyResponses)
+    .where(
+      and(
+        eq(schema.surveyResponses.scanId, id),
+        eq(schema.surveyResponses.userId, userId),
+      ),
+    );
+  if (existing) {
+    await db
+      .update(schema.surveyResponses)
+      .set({ ...surveyValues, submittedAt: new Date() })
+      .where(eq(schema.surveyResponses.id, existing.id));
+  } else {
+    await db.insert(schema.surveyResponses).values({
+      scanId: id,
+      userId,
+      ...surveyValues,
+    });
+  }
+
   res.json({
     ok: true,
     scanId: id,
@@ -901,6 +985,207 @@ router.post('/:id/survey', async (req, res) => {
       human,
       delta: dims.reduce((acc, d) => ({ ...acc, [d]: llm[d] - human[d] }), {} as Record<string, number>),
     },
+  });
+});
+
+// ─── Human aggregate (Phase 5) ────────────────────────────────────
+// Triggered manually by the operator (Compare button on the report
+// page) once N survey responses have piled up. Reads survey_responses,
+// runs the same aggregation primitives the AI pipeline uses, and
+// writes the like-for-like report into audience_fit_scans.human_aggregate.
+//
+// Idempotent — re-runnable any time. Each call overwrites in-place
+// so the latest n_respondents is always the source of truth. No auth
+// gate in Phase 5 (the /survey endpoint is also unauthenticated).
+// Phase 6 will gate behind scan-ownership when survey URLs become
+// shareable from a logged-in dashboard.
+router.post('/:id/human-aggregate', async (req, res) => {
+  const { id } = req.params;
+  if (!UUID_RE.test(id ?? '')) {
+    res.status(404).json({ error: 'scan_not_found' });
+    return;
+  }
+  const [scan] = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(eq(schema.audienceFitScans.id, id));
+  if (!scan) {
+    res.status(404).json({ error: 'scan_not_found' });
+    return;
+  }
+  try {
+    const aggregate = await recomputeHumanAggregate(id);
+    if (!aggregate) {
+      res.status(409).json({ error: 'no_responses', message: 'No survey responses for this scan yet.' });
+      return;
+    }
+    res.json({ ok: true, aggregate });
+  } catch (err) {
+    res.status(500).json({
+      error: 'aggregate_failed',
+      message: err instanceof Error ? err.message : 'unknown',
+    });
+  }
+});
+
+// ─── Compare AI vs Human (Phase 5) ─────────────────────────────────
+// Single endpoint backing /validator/compare/[scanId]. Returns the
+// already-cached human_aggregate (or null when the operator hasn't
+// triggered POST /human-aggregate yet) plus the AI side's headline
+// dimension means + audience_fit_score + frictions, plus a `diff`
+// block computing per-dimension Δ and friction-overlap stats.
+router.get('/:id/compare', async (req, res) => {
+  const { id } = req.params;
+  if (!UUID_RE.test(id ?? '')) {
+    res.status(404).json({ error: 'scan_not_found' });
+    return;
+  }
+  const [scan] = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(eq(schema.audienceFitScans.id, id));
+  if (!scan) {
+    res.status(404).json({ error: 'scan_not_found' });
+    return;
+  }
+
+  // Live response count — what the report-page button shows next to
+  // "Compare with humans (n=X)". Distinct from n_respondents in the
+  // cached aggregate because the operator may not have re-aggregated
+  // since the last submission landed.
+  const [respondentCount] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.surveyResponses)
+    .where(eq(schema.surveyResponses.scanId, id));
+
+  // AI-side dimension means — same recipe as the /survey handler's
+  // wAvg() weighting. Pulled once here so the diff math doesn't depend
+  // on the report-builder running first.
+  const cohortRows = await db
+    .select()
+    .from(schema.scanCohortResults)
+    .where(eq(schema.scanCohortResults.scanId, id));
+  const totalN = cohortRows.reduce((s, c) => s + c.nCompleted, 0) || 1;
+  const wAvg = (
+    key:
+      | 'happinessMean'
+      | 'engagementMean'
+      | 'adoptionMean'
+      | 'retentionMean'
+      | 'taskSuccessMean',
+  ) =>
+    cohortRows.reduce((s, c) => s + (c[key] ?? 0) * c.nCompleted, 0) / totalN;
+
+  const aiDimMeans = {
+    happiness: wAvg('happinessMean'),
+    task_success: wAvg('taskSuccessMean'),
+    adoption: wAvg('adoptionMean'),
+    retention_d7: wAvg('retentionMean'),
+    engagement: wAvg('engagementMean'),
+  };
+
+  // Human aggregate — null when the operator hasn't run POST
+  // /human-aggregate yet OR when there are no responses.
+  type HumanAggregateShape = {
+    n_respondents: number;
+    audience_fit_score: number;
+    dimension_means: typeof aiDimMeans;
+    frictions: Array<{ rank: number; title: string; n: number; quote: string }> | null;
+    aarrr: { stages: Array<{ key: string; score: number; n_passing: number; total: number }>; total_personas: number } | null;
+    custom_question_rollup: Record<string, { likert?: { mean: number; n_answered: number }; quotes?: string[] }>;
+    computed_at: string;
+  };
+  const human = (scan.humanAggregate as HumanAggregateShape | null) ?? null;
+
+  // Friction overlap — match by lowercased title substring. Cheap
+  // heuristic; real semantic matching would need an embedding step.
+  // The UI side just needs to know "which AI clusters have a human
+  // analog" to color them, not the exact mapping.
+  const aiFrictions = (scan.frictionsJson ?? []) as Array<{
+    rank: number;
+    title: string;
+    n: number;
+  }>;
+  const humanFrictions = human?.frictions ?? [];
+
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]+/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 3);
+
+  function frictionOverlap(
+    a: ReadonlyArray<{ title: string }>,
+    b: ReadonlyArray<{ title: string }>,
+  ): number {
+    if (a.length === 0 || b.length === 0) return 0;
+    let matches = 0;
+    for (const x of a) {
+      const xt = new Set(norm(x.title));
+      const hit = b.some((y) => {
+        const yt = norm(y.title);
+        return yt.some((w) => xt.has(w));
+      });
+      if (hit) matches += 1;
+    }
+    return matches / Math.max(a.length, b.length);
+  }
+
+  const diff = human
+    ? {
+        audience_fit_delta:
+          human.audience_fit_score - (scan.audienceFitScore ?? 0),
+        dimension_deltas: {
+          happiness: human.dimension_means.happiness - aiDimMeans.happiness,
+          task_success:
+            human.dimension_means.task_success - aiDimMeans.task_success,
+          adoption: human.dimension_means.adoption - aiDimMeans.adoption,
+          retention_d7:
+            human.dimension_means.retention_d7 - aiDimMeans.retention_d7,
+          engagement: human.dimension_means.engagement - aiDimMeans.engagement,
+        },
+        friction_overlap: frictionOverlap(aiFrictions, humanFrictions),
+        ai_only_frictions: aiFrictions
+          .filter((af) => {
+            const at = new Set(norm(af.title));
+            return !humanFrictions.some((hf) =>
+              norm(hf.title).some((w) => at.has(w)),
+            );
+          })
+          .slice(0, 3)
+          .map((f) => ({ rank: f.rank, title: f.title, n: f.n })),
+        human_only_frictions: humanFrictions
+          .filter((hf) => {
+            const ht = new Set(norm(hf.title));
+            return !aiFrictions.some((af) =>
+              norm(af.title).some((w) => ht.has(w)),
+            );
+          })
+          .slice(0, 3)
+          .map((f) => ({ rank: f.rank, title: f.title, n: f.n })),
+      }
+    : null;
+
+  res.json({
+    scan: {
+      id: scan.id,
+      target_url: scan.targetUrl,
+      category: scan.category,
+      one_line_pitch: scan.oneLinePitch,
+      mode: scan.mode,
+      status: scan.status,
+      custom_questions: scan.customQuestions ?? null,
+    },
+    ai: {
+      audience_fit_score: scan.audienceFitScore,
+      dimension_means: aiDimMeans,
+      frictions: aiFrictions,
+      n_personas: scan.personasCompleted,
+    },
+    human, // null when not yet aggregated
+    diff,  // null when human is null
+    survey_response_count: respondentCount?.n ?? 0,
   });
 });
 
@@ -1675,6 +1960,10 @@ function shapeScanMeta(s: typeof schema.audienceFitScans.$inferSelect) {
       | 'fail'
       | null,
     mode_b_parsed_selector: s.modeBParsedSelector,
+    // Phase 5 — exposed so the survey page can render site-specific
+    // questions and the report page can show "n custom questions"
+    // without a separate fetch.
+    custom_questions: s.customQuestions ?? null,
     created_at: s.createdAt.toISOString(),
     completed_at: s.completedAt ? s.completedAt.toISOString() : null,
   };
@@ -1721,6 +2010,8 @@ function buildDemoReport() {
       personas_completed: 113,
       personas_flagged: 0,
       weights_version: 'v1.3',
+      // Phase 5 — null in the demo (no human survey for demo scan).
+      custom_questions: null,
       created_at: '2026-04-30T14:22:00.000Z',
       completed_at: '2026-04-30T14:28:00.000Z',
     },
@@ -1878,6 +2169,12 @@ function buildDemoReport() {
         { key: 'revenue', label: 'Revenue', score: 38, n_passing: 43, total: 113, threshold: 'adoption ≥ 50' },
       ],
     },
+    // Phase 5 — keep the demo response shape in sync with ScanReport.
+    // The function is untyped (the route just `res.json`s it), so
+    // tsc won't catch missing fields, but the Compare button reads
+    // these directly and renders "(n=)" if undefined.
+    survey_response_count: 0,
+    human_aggregate_computed: false,
   };
 }
 

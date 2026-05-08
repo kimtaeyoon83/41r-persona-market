@@ -48,6 +48,7 @@ import {
 import { clusterFrictions } from './dimensions/frictions.js';
 import { captureSite } from './site_capture.js';
 import { classifySite } from './site_classifier.js';
+import { generateCustomQuestions } from './dimensions/custom_questions.js';
 
 const log = logger.child({ service: 'scan_pipeline' });
 
@@ -207,6 +208,28 @@ async function runScan(scanId: string): Promise<void> {
         log.info(
           { scanId, category: cls.category, conf: cls.category_confidence },
           'site classified',
+        );
+      }
+
+      // Phase 5 — Generate site-specific human-survey questions.
+      // Independent of cls success: even when classification was
+      // null we can still draft questions from screenshot + URL,
+      // they just won't include category context. Failure path
+      // leaves the column null and the survey UI skips the section.
+      const customQs = await generateCustomQuestions({
+        targetUrl,
+        category: scan.category,
+        oneLinePitch: scan.oneLinePitch,
+        screenshotUrls,
+      });
+      if (customQs && customQs.length > 0) {
+        await db
+          .update(schema.audienceFitScans)
+          .set({ customQuestions: customQs })
+          .where(eq(schema.audienceFitScans.id, scanId));
+        log.info(
+          { scanId, n: customQs.length },
+          'custom survey questions generated',
         );
       }
     } catch (err) {

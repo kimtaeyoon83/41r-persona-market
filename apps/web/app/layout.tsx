@@ -29,13 +29,13 @@ export const metadata: Metadata = {
   title: "Project RPM",
   description: "Find Your Product-Market Fit by AI Persona",
   // Favicon: rely on Next.js auto-detection of `app/favicon.ico`
-  // (multi-size 16×16 + 32×32 ICO). Previously we added two more PNG
-  // <link rel="icon"> entries via metadata.icons — `/favicon.png`
-  // and `/logo/rpm_black_vertical.png` (identical 500×500 vertical
-  // wordmark) — and the `sizes="any"` hint on the latter made the
-  // browser pick the vertical logo even for the 16×16 tab slot, which
-  // downscaled to an illegible black bar. Drop both. Apple touch icon
-  // is kept on the vertical logo because iOS home-screen is bigger.
+  // (multi-size 16/32/48/64/128/256 PNG-payload ICO, generated from
+  // `public/favicon.png` via sips + a Buffer-built ICO header). Do
+  // NOT add extra <link rel="icon"> PNG entries via metadata.icons —
+  // a `sizes="any"` hint on a 500×500 vertical-wordmark PNG wins the
+  // 16×16 tab slot in Chrome and downscales to an illegible black
+  // bar. Apple touch icon stays on the vertical logo because iOS
+  // home-screen renders large enough for the wordmark to read.
   icons: {
     apple: "/logo/rpm_black_vertical.png",
   },

@@ -26,6 +26,14 @@ score**와 진단 컨텍스트(코호트별 분석, friction 클러스터, 방�
 사용자는 루프에 없고, 신뢰 계약(trust contract)은 개별 페르소나의
 예측이 아닌 **코호트 집계 신호**에 기반합니다.
 
+**Phase 5+ 확장** (2026-05-08~): 같은 스캔에 대해 실제 사람 응답자가
+Privy 인증 설문(`/validator/survey/<scanId>`)을 작성할 수 있고, 응답이
+충분히 모이면 운영자가 "Compare with humans (n=X)" 버튼을 눌러
+**AI vs Human 비교 리포트**를 `/validator/compare/<scanId>`에서 생성할
+수 있습니다. Human 리포트는 AI 측과 **동일한 집계 primitive**
+(dimension means → friction clustering → AARRR)를 사용해 모든 축에서
+바로 비교 가능합니다. 자세한 흐름은 §14 참조.
+
 ---
 
 ## 2. 파이프라인 한눈에 보기
@@ -45,9 +53,11 @@ startScanWorker
                                 catch → status='failed'
    ↓
 runScan(scanId)                 scan_pipeline.ts:147+
-   ├─ Step 0  capturing       captureSite() + classifySite()
+   ├─ Step 0  capturing       captureSite() + classifySite() +
+   │                          generateCustomQuestions() (Phase 5)
    │                          → audience_fit_scans.{captureScreenshotUrls,
-   │                            category, categoryConfidence, oneLinePitch}
+   │                            category, categoryConfidence, oneLinePitch,
+   │                            customQuestions}
    ├─ Step 1  sampling        활성 페르소나 로드
    │                          → Mode A: selectPersonasForCohorts (8 코호트)
    │                          → Mode B: parseAudience + selectPersonasForAudience
@@ -63,6 +73,31 @@ runScan(scanId)                 scan_pipeline.ts:147+
                               status, audienceFitScore, best/worst, ...
 ```
 
+**Phase 5 — Human comparison (비동기, runScan과 별도):**
+
+```
+운영자가 /validator/survey/<scanId> 링크 공유
+   ↓
+응답자(Privy 인증, Phase 5.1)가 설문 제출
+   → POST /api/scan/:id/survey  routes/scan.ts
+                                survey_responses upsert (user_id 키로 1행)
+                                + calibration_records 5행 append (legacy)
+   ↓
+... 시간이 흐르고 더 많은 사람이 제출 ...
+   ↓
+운영자가 리포트 페이지에서 "Compare with humans (n=X)" 클릭
+   → POST /api/scan/:id/human-aggregate
+                            human_aggregate.ts::recomputeHumanAggregate(scanId)
+                            AI 측과 동일한 dimension 채점 + clusterFrictions +
+                            computeAarrrFromRows 파이프라인
+                            → audience_fit_scans.human_aggregate (jsonb)
+   ↓
+누구든 링크가 있으면 /validator/compare/<scanId> 접근
+   → GET /api/scan/:id/compare  { ai, human, diff } 반환
+```
+
+자세한 Phase 5 + 5.1 흐름은 §14 참조.
+
 출처: 각 step의 구현은 모두 `apps/api/src/services/scan_pipeline.ts`와
 그 헬퍼 import에 있습니다.
 
@@ -74,17 +109,19 @@ runScan(scanId)                 scan_pipeline.ts:147+
 
 ## 3. LLM 호출 카탈로그
 
-전체 파이프라인에서 LLM 호출 사이트는 4곳입니다. 모두
-`services/anthropic_client.ts::withRoute(label, …)` 를 통하므로
+전체 파이프라인에서 LLM 호출 사이트는 6곳입니다 (Phase 5에서 2개 추가).
+모두 `services/anthropic_client.ts::withRoute(label, …)` 를 통하므로
 사용량 로그가 호출 목적별로 태깅됩니다. 태그는 `CLAUDE.md`의 "LLM
 Usage Tracking" 섹션에 문서화되어 있습니다.
 
 | # | Route tag | Model | When | Cost / call | Source |
 |---|---|---|---|---|---|
 | 1 | `validator.classify_site` | Haiku (vision) | 캡쳐 후 스캔당 1회 | ~$0.0008 | `services/site_classifier.ts:115-128` |
-| 2 | `validator.parse_audience` | Haiku (text) | Mode B에서만 스캔당 1회 | ~$0.0005 | `services/dimensions/audience_parser.ts` |
-| 3 | `validator.persona_response` | `USE_VISION=1`이면 Sonnet (vision), 아니면 Haiku (text) | 페르소나당 1회 | Sonnet ~$0.01-0.05 / Haiku ~$0.001 | `services/dimensions/llm.ts:343-399` |
-| 4 | `validator.cluster_frictions` | Haiku (text) | 응답 수집 후 스캔당 1회 | ~$0.003 | `services/dimensions/frictions.ts:184-194` |
+| 2 | `validator.custom_questions` | Haiku (vision) | classifySite 직후 스캔당 1회 (Phase 5 — 사이트별 3-5개 설문 질문 자동생성) | ~$0.001 | `services/dimensions/custom_questions.ts` |
+| 3 | `validator.parse_audience` | Haiku (text) | Mode B에서만 스캔당 1회 | ~$0.0005 | `services/dimensions/audience_parser.ts` |
+| 4 | `validator.persona_response` | `USE_VISION=1`이면 Sonnet (vision), 아니면 Haiku (text) | 페르소나당 1회 | Sonnet ~$0.01-0.05 / Haiku ~$0.001 | `services/dimensions/llm.ts:343-399` |
+| 5 | `validator.cluster_frictions` | Haiku (text) | 응답 수집 후 스캔당 1회 | ~$0.003 | `services/dimensions/frictions.ts:184-194` |
+| 6 | `validator.cluster_human_frictions` | Haiku (text) | `POST /:id/human-aggregate` 호출 시 n ≥ 3이면 1회 (Phase 5) | ~$0.003 | `services/human_aggregate.ts` |
 
 모델 식별자는 `apps/api/src/config/env.ts:69-70`에서 env var + 기본값
 으로 결정됩니다:
@@ -604,6 +641,14 @@ CLAUDE.md "Audience-Fit Validator §" + 2026-05-07 hardening commit들
    walkthrough는 deferred — Mode B가 primary surface 될 때 자체
    문서를 받아야 함.
 
+7. **⚠️ 코호트 풀이 크립토 편향됨.** 8개 STANDARD_COHORTS 중 3개
+   (37.5%)가 크립토 cohort라서 비크립토 사이트에서 rank-1 friction이
+   "Wrong audience entirely"로 자주 나옴. Evaluator-archetype 기반
+   9-cohort 재설계 (general 8 — 신규 `investor` 포함 — + 광범위
+   `crypto_user` add-on 1)는 2026-05-08에 합의됐지만 **보류**.
+   완전한 spec은 [`docs/cohort-redesign-deferred.md`](cohort-redesign-deferred.md)에.
+   재개 시 그 문서를 따라가면 됨 — 디자인 다시 도출할 필요 없음.
+
 ---
 
 ## 13. 여기서 코드를 읽기 시작할 곳
@@ -617,7 +662,160 @@ CLAUDE.md "Audience-Fit Validator §" + 2026-05-07 hardening commit들
 | 코호트 할당 알고리즘 | `apps/api/src/services/cohort_selection.ts` |
 | Friction 클러스터링 | `apps/api/src/services/dimensions/frictions.ts` |
 | Site classifier 프롬프트 | `apps/api/src/services/site_classifier.ts` |
+| 사이트별 설문 질문 생성기 (Phase 5) | `apps/api/src/services/dimensions/custom_questions.ts` |
+| Human aggregate (Phase 5) | `apps/api/src/services/human_aggregate.ts` |
+| `/api/me/survey-responses` 엔드포인트 | `apps/api/src/routes/me_responses.ts` |
 | 코호트 정의 | `packages/shared/src/cohorts.ts` |
 | Acquisition priors (visitor view) | `packages/shared/src/acquisition_priors.ts` |
 | Test contracts / regression locks | `apps/api/src/__tests__/` |
 | Open follow-ups + Do-NOTs | `CLAUDE.md` (repo root) |
+
+---
+
+## 14. Human comparison 흐름 (Phase 5 + 5.1)
+
+AI 측은 **persona-conditional intent**를 측정합니다. 실제 방문자가
+어떻게 반응하는지 알려면, validator는 모든 스캔에 대해 비동기로
+실행되는 **human survey** 옵션을 함께 제공합니다. 충분한 사람이 답한
+뒤 운영자가 human aggregate를 트리거하면 side-by-side 비교 리포트가
+나옵니다.
+
+### 14.1 설문 공유 → 제출
+
+```
+운영자: https://app.project-rpm.xyz/validator/survey/<scanId> 공유
+
+응답자 → /validator/survey/[scanId]/page.tsx
+   ├─ 마운트 시: scanApi.getReport(scanId)
+   │            └→ scan.custom_questions: CustomQuestion[] 반환
+   │               (스캔 시점에 Haiku가 자동 생성한 사이트별 3-5개 Q —
+   │                §3 row 2 + services/dimensions/custom_questions.ts 참조)
+   ├─ 미인증이면: "Sign in →" 버튼 노출 (Privy 모달)
+   ├─ 마운트 시 (인증됨): meApi.getMySurveyResponse(scanId)
+   │            └→ 본인 기존 응답 있으면 prefill, 없으면 404 → 빈 폼
+   └─ 제출 시: scanApi.submitSurvey(scanId, body)
+              → POST /api/scan/:id/survey   (requirePrivyAuth)
+```
+
+설문 양식은 AI 페르소나가 채점되는 SUS-10 + 5축 dimension 입력 + voice
+quote 4개 textarea + 그 스캔의 `custom_questions` 배열 (Likert 1-5
+또는 free-text). 즉 사람과 AI 제출이 **동일한 채점 수학**으로 들어갑니다.
+
+### 14.2 POST /api/scan/:id/survey — 핸들러 동작
+
+`apps/api/src/routes/scan.ts` (`requirePrivyAuth`):
+
+1. **Identity** — `userId = req.privyUser!.id` (Phase 5.1; 이전엔
+   body의 `email` 필드를 썼으나 제거됨).
+2. **AI와 동일한 5축으로 사람 입력 채점** —
+   `happiness = computeSusScoreLocal(sus_responses)`,
+   `engagement = HUMAN_ENGAGEMENT_TO_SCORE[band]`,
+   `adoption = signup_likelihood × 100`,
+   `retention = HUMAN_RETENTION_TO_D7[band]`,
+   `task_success = completion_likelihood × 100`. 이 공식은
+   `services/dimensions/llm.ts::mapLLMResponseToSimulated`를 미러.
+3. **calibration_records 5행 append** (legacy 운영팀 aggregator —
+   `services/calibration/aggregator.ts` — 가 dimension별
+   `(LLM 평균, human ground-truth)` 쌍을 저장; `/validator/calibration`
+   페이지가 이걸 읽음).
+4. **survey_responses 1행 upsert** — `(scan_id, user_id)` UNIQUE 키로.
+   재제출 시 jsonb 필드 모두 덮어쓰기 + `submittedAt` bump. Voice
+   quote, demographics, custom_answers는 여기에 그대로 저장됨
+   (calibration_records는 다 버림).
+
+### 14.3 운영자가 aggregate 트리거
+
+리포트 페이지 footer "Compare with humans (n=X) →" 버튼 클릭:
+
+```
+리포트 페이지 (인증 불필요, 누구나 읽기 가능)
+   ├─ /validator/report/[scanId] → footer Btn href
+   └→ /validator/compare/[scanId]/page.tsx
+       ├─ scanApi.getCompareReport(scanId)  (read; human 비어있어도 OK)
+       └─ aggregate 아직 없으면: "Compute now" 버튼
+           └→ scanApi.recomputeHumanAggregate(scanId)
+              → POST /api/scan/:id/human-aggregate
+              → human_aggregate.ts::recomputeHumanAggregate(scanId)
+```
+
+`recomputeHumanAggregate`는 **AI 측의 strict mirror**:
+
+| 단계 | 재사용된 AI primitive | Human 측 입력 |
+|---|---|---|
+| 응답자별 채점 | inline (`services/dimensions/llm.ts`와 동일 상수) | survey_responses 행들 |
+| 단일 버킷 fit score | `DIMENSION_WEIGHTS_V1` 공식 (human_aggregate.ts에 `W`로 inline) | 응답자별 dimension 평균 |
+| Friction clustering | `assembleFrictionClusters()` (pure helper, `services/dimensions/frictions.ts`에서 export) | voice quote 4개 + 자유서술 custom answer |
+| AARRR funnel | `computeAarrrFromRows()` (pure helper, `services/aarrr.ts`에서 export) | 응답자별 score row |
+
+Human friction clustering의 Haiku 호출은 in-module
+(`validator.cluster_human_frictions`, §3 row 6). AI 측과 **다른 prompt**
+사용 — 입력은 voice 4축 + custom-answer free-text, 모두 `cohort='human'`
+태그. `n_respondents < 3`이면 helper가 short-circuit하여 Haiku 호출
+대신 단일 "Raw human voice" 버킷을 반환 (3 미만에선 Haiku가 불안정한
+클러스터를 만듦).
+
+`HumanAggregate` 출력 shape:
+
+```ts
+{
+  n_respondents: number,
+  audience_fit_score: number,        // 단일 버킷 cohort_fit_score
+  dimension_means: { happiness, task_success, adoption, retention_d7, engagement },
+  frictions: FrictionCluster[] | null,
+  aarrr: AarrrFunnel | null,         // AI와 동일한 v1.1 thresholds
+  custom_question_rollup: {          // custom 질문별:
+    [qid]: { likert?: { mean, n_answered }; quotes?: string[] }
+  },
+  computed_at: ISO-8601 string,
+}
+```
+
+는 `audience_fit_scans.human_aggregate` jsonb로 저장됨. 엔드포인트는
+**멱등** — 언제든 재실행 가능, 매번 in-place 덮어쓰기.
+
+### 14.4 GET /api/scan/:id/compare — diff 수학
+
+`{ ai, human, diff }` 반환:
+
+- `ai.dimension_means` — 코호트 가중 평균 (`POST /survey`의 `wAvg()`
+  패턴 미러)
+- `human` — 캐시된 `human_aggregate` jsonb (아직 계산 안 됐으면 `null`)
+- `diff.audience_fit_delta` = `human − ai`
+- `diff.dimension_deltas` — 축별 Δ
+- `diff.friction_overlap` — 클러스터 title의 token-overlap heuristic
+  (단순함; semantic embedding 매칭은 아니지만 overlap 클러스터를 같은
+  색으로 표시 vs. AI-only / Human-only 구분에는 충분)
+- `diff.{ai,human}_only_frictions[]` — top 3씩, Compare 페이지의
+  callout으로 노출
+
+`survey_response_count`도 일반 `/api/scan/:id/report` 엔드포인트에
+노출되어 있어, 리포트 페이지 footer가 추가 라운드트립 없이
+"Compare with humans (n=X) →"를 그릴 수 있음.
+
+### 14.5 본인 view — `/me/responses[/:scanId]`
+
+응답자는 `/me/responses` (인증 게이트)를 다시 방문해 자신이 제출한 모든
+설문을 확인할 수 있고, 카드 클릭으로 `/me/responses/<scanId>`에
+들어가면 본인 AI-vs-Me 디테일 (5-dimension Δ + voice quotes +
+custom-answer 표 + aggregate `/validator/compare/<scanId>`로 가는 CTA)을
+봅니다.
+
+서버 측에서 `routes/me_responses.ts`는 모든 쿼리에
+`user_id = req.privyUser.id`를 강제 — UI 컨벤션이 아니라 데이터 격리
+경계입니다. 다른 사용자의 scan id를 추측해서 들어가도 404, 다른 사람의
+row가 새지 않습니다.
+
+### 14.6 신뢰 계약
+
+두 문장:
+
+> AI 측은 **persona-conditional intent**를 측정합니다 (8 코호트가 이
+> 사이트에 공감하는가?). Human 측은 **실제 응답자가 한 말**을
+> 측정합니다. Compare 페이지는 그 차이를 노출하므로, stakeholder는 한
+> 페이지에서 두 신호를 모두 봅니다 — 둘인 척하는 단일 집계 score가
+> 아닙니다.
+
+리포트 카피와 Compare 페이지의 정직한 framing이 load-bearing 부분.
+CLAUDE.md §"Investor Dashboard Narrative"가 AI 측에 같은 제약을
+문서화하고, AARRR-as-forecast §"Do NOT" 항목이 human 측에도 동일하게
+적용됩니다.

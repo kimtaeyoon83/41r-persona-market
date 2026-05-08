@@ -47,6 +47,17 @@ export default function ValidatorReportPage() {
   // (Stage 1 × Stage 2 acquisition priors). Default: panel, since
   // the weighted view depends on heuristic priors that are still v1.0.
   const [view, setView] = useState<"panel" | "visitor">("panel");
+  const [shareLabel, setShareLabel] = useState<"Share report" | "Copied!" | "Copy failed">("Share report");
+
+  const onShareReport = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setShareLabel("Copied!");
+    } catch {
+      setShareLabel("Copy failed");
+    }
+    setTimeout(() => setShareLabel("Share report"), 1500);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -230,9 +241,31 @@ export default function ValidatorReportPage() {
             )}
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <Btn>Re-run</Btn>
-            <Btn>Export ↗</Btn>
-            <Btn primary>Share report</Btn>
+            <Btn href={`/?url=${encodeURIComponent(r.scan.target_url)}`}>
+              Re-run
+            </Btn>
+            <a
+              href={`${API_BASE}/api/scan/${r.scan.id}/report.md`}
+              download={`audience-fit-${r.scan.id.slice(0, 8)}.md`}
+              style={{
+                background: C.panel,
+                color: C.text,
+                border: `1px solid ${C.border}`,
+                borderRadius: 7,
+                padding: "8px 14px",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: FS,
+                textDecoration: "none",
+                display: "inline-block",
+              }}
+            >
+              Export ↗
+            </a>
+            <Btn primary onClick={onShareReport}>
+              {shareLabel}
+            </Btn>
           </div>
         </div>
 
@@ -1177,6 +1210,16 @@ strong      85   70   55   30`}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Btn href="/validator/how-it-works">How it works →</Btn>
             <Btn href={`/validator/survey/${scanId}`}>Take baseline survey →</Btn>
+            {/* Phase 5 — Compare AI vs Human. The button always
+                navigates; the compare page handles the n=0 empty
+                state and offers a "Compute now" button itself, so
+                we don't need to disable here. */}
+            <Btn
+              primary={r.survey_response_count > 0}
+              href={`/validator/compare/${scanId}`}
+            >
+              Compare with humans (n={r.survey_response_count}) →
+            </Btn>
             <Btn href="/validator/calibration">Calibration report →</Btn>
           </div>
         </div>

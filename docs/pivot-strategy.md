@@ -1,8 +1,21 @@
 # 41R Persona Market — 전략 피봇 리포트
 
+> ✅ **Outcome**: 이 문서가 권한 피봇은 **2026-05-04에 실행 완료**되었습니다.
+> 자율-Stagehand autotest 마켓플레이스가 제거되고 단일 스크린샷 기반
+> **Audience-Fit Validator** 시스템이 라이브 상태입니다. Phase 5 (2026-05-08)
+> 에서 실제 사람 응답자가 같은 스캔에 설문을 제출하고 운영자가 AI vs Human
+> 비교 리포트를 트리거하는 흐름이 추가되었습니다.
+> 현행 시스템 문서는 [`HOW-IT-WORKS.md`](HOW-IT-WORKS.md) (또는 한글
+> [`HOW-IT-WORKS.ko.md`](HOW-IT-WORKS.ko.md)) + 리포 루트 `CLAUDE.md`에
+> 있습니다. 이 문서는 **피봇이 왜 합리적이었는지**를 보여주는 historical
+> reference로 보존됩니다.
+>
+> 아래 본문의 "현재 상태", 가설, 설계 변경 등은 2026-04-10 시점 스냅샷.
+> 본문 자체는 의도적으로 freeze됩니다 — 사실 변경 안 함.
+
 > **작성일**: 2026-04-10
 > **목적**: "QA 도구"에서 "AI 페르소나 기반 유저·데이터 플랫폼"으로의 전환을 위한 가설 검증·설계·시장 분석
-> **현재 상태**: 해킹톤 MVP (apps/api 22 endpoints, 7 tables / apps/web 17 pages)
+> **현재 상태 (작성 시점 기준)**: 해킹톤 MVP (apps/api 22 endpoints, 7 tables / apps/web 17 pages)
 
 ---
 

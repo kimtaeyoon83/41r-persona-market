@@ -46,7 +46,9 @@ function HomeInner() {
   // and any legacy "Verify Mode B" links).
   const initialMode: AnalysisMode = searchParams.get("mode") === "B" ? "B" : "A";
   const [mode, setMode] = useState<AnalysisMode>(initialMode);
-  const [url, setUrl] = useState("");
+  // `?url=...` prefill — used by the Report page's Re-run button so a
+  // viewer can re-analyze the same target without retyping it.
+  const [url, setUrl] = useState(searchParams.get("url") ?? "");
   const [audience, setAudience] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

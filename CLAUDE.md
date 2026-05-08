@@ -98,14 +98,18 @@ pnpm tsx scripts/usage-summary.ts          # analyze /tmp/llm-usage.jsonl
 ## Key Conventions
 
 ### Backend (apps/api)
-- 5 active routes under `src/routes/`, mounted in `src/index.ts`:
-  `auth.ts`, `scan.ts`, `calibration.ts`, `benchmark.ts`, `hello.ts`
+- 6 active routes under `src/routes/`, mounted in `src/index.ts`:
+  `auth.ts`, `scan.ts`, `calibration.ts`, `benchmark.ts`, `hello.ts`,
+  `me_responses.ts` (Phase 5.1 — `/api/me/survey-responses[/:scanId]`).
 - Active services in `src/services/`: `llm.ts`, `audience_fit.ts`,
   `scan_pipeline.ts`, `site_classifier.ts`, `site_capture.ts`,
   `cohort_selection.ts`, `anthropic_client.ts`, `aarrr.ts`,
   `dimension_simulator.ts`, `persona_wallets.ts`, `sponsored_tx.ts`,
   `fee_payer.ts`, `r2.ts`, `health.ts`, `benchmark.ts`,
-  `dimensions/` (LLM dimension scorers + friction clustering),
+  `human_aggregate.ts` (Phase 5 — survey_responses → AI-shape human
+  report via the same dimension/friction/AARRR pipeline),
+  `dimensions/` (LLM dimension scorers + friction clustering +
+  `custom_questions.ts` Haiku site-specific question generator),
   `calibration/` (calibration aggregator).
 - Database: Drizzle ORM with PostgreSQL, schema in `src/db/schema.ts`,
   versioned migrations in `apps/api/drizzle/`
@@ -121,7 +125,9 @@ pnpm tsx scripts/usage-summary.ts          # analyze /tmp/llm-usage.jsonl
 
 ### Frontend (apps/web)
 - Next.js 14 App Router. Active routes:
-  `/`, `/validator/*`, `/me/wallet`, `/me/analyses`.
+  `/`, `/validator/*` (incl. `/validator/compare/[scanId]` — Phase 5),
+  `/me/wallet`, `/me/analyses`,
+  `/me/responses[/[scanId]]` (Phase 5.1 — own survey list + AI-vs-Me detail).
 - Shared API URL: `import { API_BASE } from '@/lib/api'` — never hardcode.
 - API client (`lib/api.ts`): primary surface is `scanApi` for
   `/api/scan/*` routes. `signedRequest()` helper still exists for any
@@ -196,12 +202,15 @@ Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
   LLM-touching tests mock `services/anthropic_client` via `vi.mock`
   so the prompt path runs without real API calls.
 
-## Audience-Fit Validator (`/validator/*` + `/api/scan/*`, audited 2026-05-02)
+## Audience-Fit Validator (`/validator/*` + `/api/scan/*`, audited 2026-05-08)
 
 The current product. Measures **audience-fit** across 8 cohorts ×
 5 dimensions via capture-and-score: one screenshot per scan, ~100
 LLM persona reactions, weighted aggregate. Personas don't browse —
-they react to a screenshot.
+they react to a screenshot. Phase 5+ adds human comparison: real
+respondents take a Privy-authed survey on the same scan, the
+operator clicks "Compare with humans", and a `/validator/compare`
+page renders AI vs Human side-by-side.
 
 ### Architecture
 
@@ -209,7 +218,11 @@ they react to a screenshot.
 POST /api/scan                  apps/api/src/routes/scan.ts
   → scan_pipeline.ts             startScanWorker(scanId) — fire-and-forget
        Step 0 capturing           captureSite() — Playwright full-page screenshot
-       Step 0.5                   classifySite() — Haiku vision: {category, confidence, one_line_pitch}
+       Step 0.5a                  classifySite() — Haiku vision:
+                                    {category, confidence, one_line_pitch}
+       Step 0.5b (Phase 5)        generateCustomQuestions() — Haiku vision:
+                                    3-5 site-specific human-survey questions,
+                                    persisted to audience_fit_scans.custom_questions
        Step 1 sampling            selectPersonasForCohorts(personas, cohortDefs)
                                     └─ filtered by scan.targetCohorts when set
        Step 2 responding          runPersonaResponseLLM() per persona
@@ -220,6 +233,21 @@ POST /api/scan                  apps/api/src/routes/scan.ts
                                     clusterFrictions() — Haiku theme clustering
                                     computeAudienceFit() — Option A formula
        completed                  scan row + cohort rows queryable via /report
+
+Phase 5 — Human comparison (async, operator-triggered):
+POST /api/scan/:id/survey          authenticated (Privy); upserts one row in
+  → routes/scan.ts                 survey_responses keyed by (scan_id, user_id),
+                                   appends 5 rows to calibration_records (legacy)
+POST /api/scan/:id/human-aggregate operator clicks "Compare with humans"; reads
+  → human_aggregate.ts             survey_responses, runs the SAME aggregation
+                                   primitives as the AI side (dimension means →
+                                   clusterFrictions Haiku call → AARRR), writes
+                                   audience_fit_scans.human_aggregate
+GET  /api/scan/:id/compare         returns { ai, human, diff } where diff =
+  → routes/scan.ts                 per-dimension Δ + friction overlap +
+                                   AI-only / Human-only cluster callouts
+GET  /api/scan/:id/report.md       public markdown export of the AI report
+                                   (for sharing with ChatGPT/Claude as a link)
 ```
 
 ### Two modes
@@ -271,6 +299,59 @@ than they are:
 - `ScanPersonaCard.is_synthetic: boolean` flags the substitution so
   PersonaBoard can render a small "synth" marker. Stakeholders see
   pool names AND the disclosure simultaneously — never just one.
+
+### Phase 5 — Human comparison report
+
+Async operator workflow. Real human respondents take a survey at
+`/validator/survey/<scanId>` (Privy-authed since Phase 5.1, see below);
+when enough have piled up, the operator clicks "Compare with humans
+(n=X)" on the report page, which fires `POST /:id/human-aggregate`.
+
+`services/human_aggregate.ts::recomputeHumanAggregate(scanId)` is the
+entry point. It is **strict-mirror of the AI side**: same dimension
+score formulas (`HUMAN_ENGAGEMENT_TO_SCORE`, `RETENTION_TO_D7`,
+`computeSusScore`), same single-bucket cohort_fit math (Mode-B-style
+collapse), same friction clustering primitive (`assembleFrictionClusters`
+re-used; the LLM call is in-module — Haiku, route tag
+`validator.cluster_human_frictions`), same AARRR (`computeAarrrFromRows`
+re-used). Output shape `HumanAggregate` is persisted as jsonb on
+`audience_fit_scans.human_aggregate` and rendered alongside the AI
+report at `/validator/compare/[scanId]`.
+
+Friction clustering safe-floor: when n_respondents < 3, the helper
+returns a single fallback bucket with raw quotes instead of calling
+Haiku — Haiku produces unstable clusters below that threshold.
+
+`GET /:id/compare` returns `{ ai, human, diff }`. `diff.audience_fit_delta`
+is `human − ai`. Friction overlap uses a token-overlap heuristic on
+cluster titles (lowercase + 3+ char tokens); not semantic embedding
+matching, but cheap and good enough to color overlapping clusters
+together vs. AI-only / Human-only.
+
+The `survey_response_count` and `human_aggregate_computed` fields land
+on the scan-report response so the report-page footer button can render
+"Compare with humans (n=X) →" without an extra round-trip.
+
+### Phase 5.1 — Privy-authed surveys + per-user editing
+
+`POST /api/scan/:id/survey` is **`requirePrivyAuth`**. The body schema
+no longer carries `email`; identity comes from `req.privyUser.id`. The
+handler upserts on the unique `(scan_id, user_id)` index — a
+respondent can come back, prefill from their prior submission via
+`GET /api/me/survey-responses/:scanId`, edit, and resubmit. Only the
+last submission counts toward `human_aggregate`.
+
+`/me/responses` (list) and `/me/responses/[scanId]` (AI-vs-Me detail
+with 5-dimension Δ) surface the per-user view. Server-side the
+`user_id = req.privyUser.id` filter is the **enforced data-isolation
+boundary** — a user can never read another user's rows even if they
+guess a scan id.
+
+Legacy email-only rows (3 pre-Phase-5.1 test submissions) survive
+because Postgres treats NULL as distinct in UNIQUE — `email` is
+nullable now, but the column stays for backward-compat with those
+old rows and any future legacy data. New rows always have
+`email IS NULL`, `user_id IS NOT NULL`.
 
 ### AARRR is CUMULATIVE (not independent filters)
 
@@ -387,10 +468,15 @@ a new pipeline.
 - Route tags used by the validator pipeline (use these as
   filter keys in `usage-summary.ts`):
   `validator.classify_site` (Haiku vision, 1× per scan),
+  `validator.custom_questions` (Haiku vision, Phase 5 — 1× per scan,
+  generates 3-5 site-specific human-survey questions right after
+  classifySite),
   `validator.parse_audience` (Haiku, Mode B only — 1× per scan),
   `validator.persona_response` (Sonnet vision when USE_VISION=1
   or Haiku text otherwise, 112× per Mode A scan / ~50× Mode B),
-  `validator.cluster_frictions` (Haiku, 1× per scan).
+  `validator.cluster_frictions` (Haiku, 1× per scan),
+  `validator.cluster_human_frictions` (Haiku, Phase 5 — 1× per
+  POST /:id/human-aggregate when n_respondents ≥ 3).
 
 ## Local Dev Gotchas
 
@@ -699,6 +785,55 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   not a traffic forecast"`. Don't soften that copy or restore the
   earlier `"v1.1 priors"` label — the honest framing protects the
   product against being misread as a GA4 substitute.
+- Drop the `(scan_id, user_id)` UNIQUE index on `survey_responses`.
+  Phase 5.1 upsert relies on it: `POST /:id/survey` does
+  select-then-insert/update keyed by this composite, and the unique
+  constraint is the race-safety net at the DB layer if two requests
+  land in flight from the same authenticated user. Legacy
+  `user_id IS NULL` rows are exempt because Postgres treats NULL as
+  distinct in UNIQUE — that's intentional, don't try to "fix" it
+  by NOT NULL'ing user_id (the 3 pre-Phase-5.1 test rows hold their
+  emails and have no user_id; bumping NOT NULL would require purging
+  them).
+- Reintroduce the `email` field to `surveyBody` Zod schema in
+  `routes/scan.ts`. Phase 5.1 made identity Privy-only; an email in
+  the body would let an authenticated user spoof a different
+  identity in the row's `email` column, which currently exists only
+  for backward-compat with legacy NULL-user_id rows. If we ever
+  want a "shared with non-account-holder" path, that's a separate
+  endpoint, not a re-wired version of this one.
+- Surface another user's `survey_responses` row through any
+  `/api/me/*` endpoint. The `user_id = req.privyUser.id` WHERE
+  filter in `routes/me_responses.ts` is the data-isolation
+  boundary, not a UI convention. Adding a public list endpoint
+  ("see all responses for this scan") needs to go on a different
+  route + return only de-identified aggregates (or live in the
+  operator-only surface that `human_aggregate` already serves).
+- Drop the `clusterHumanFrictions` n<3 fallback bucket in
+  `services/human_aggregate.ts`. Below 3 quotes Haiku produces
+  unstable clusters (often a single mega-cluster or 5 single-quote
+  clusters), so the helper short-circuits to a single "Raw human
+  voice" bucket carrying the actual quote string. This is a
+  signal-quality safe-floor, not a UI nicety — removing it without
+  changing the prompt re-introduces noisy clusters.
+- Stop appending the 5 `calibration_records` rows in `POST /survey`.
+  The Phase 5.1 rewrite kept them on purpose: they feed the
+  operator-team Track A aggregator (`services/calibration/aggregator.ts`)
+  + the `/validator/calibration` page. `survey_responses` is the
+  **per-respondent raw** store; `calibration_records` is the
+  **per-dimension cross-site** rollup. They serve different
+  audiences and different time scales — one isn't a successor of
+  the other.
+- Replace the `validator.cluster_human_frictions` Haiku call with
+  the AI-side `clusterFrictions(scanId)` helper. They look similar
+  but the input is different: AI clusters quotes from
+  `scan_persona_responses.voiceBiggestFriction` (cohort-tagged),
+  while human clusters pull `survey_responses.voice.{biggest_friction,
+  if_could_change_one_thing, first_impression, would_return_because}`
+  + free-text custom answers all tagged `cohort='human'`. Sharing
+  the wrapper would lose the human-side input shape. The
+  `assembleFrictionClusters` pure helper IS shared — that's the
+  right level of reuse.
 
 ## Investor Dashboard Narrative
 
@@ -746,15 +881,26 @@ features but they still correctly identify themselves as wrong
 audience for non-crypto sites — which is honest behavior, not a
 bug, but it dominates the friction list.
 
-**Unblock:** Split the pool into general 8 (age × tech_literacy
-× mobile/desktop × design axes, domain-neutral) + crypto add-on
-3 (only run when `scan.category ∈ {DeFi, NFT, Crypto Wallet}`).
-Requires DB migration on `personas` (cohort_id column or
-selector versioning), re-seed of the persona pool, and
-category-aware cohort selection in `scan_pipeline.ts::sampling`
-step. UI also needs cohort cards to render the active set.
+**Unblock:** Replace the 8 STANDARD_COHORTS with 8 general
+evaluator-archetype cohorts + 1 crypto add-on (collapses
+crypto_native/defi_beginner/web3_pro into one broad
+`crypto_user`). The general 8 includes a new `investor`
+archetype (currently missing — VC/angel pattern-matchers on
+traction signals). Crypto add-on fires only when
+`scan.category ∈ {DeFi, NFT, Crypto Wallet}`.
 
-**Cost:** ~1-2 sprints. Not a one-line change.
+**Design + implementation order is fully spec'd in
+[`docs/cohort-redesign-deferred.md`](docs/cohort-redesign-deferred.md)**
+(2026-05-08, agreed but deferred). When unblocking, follow that
+doc — do not redesign. Touches `packages/shared/src/cohorts.ts`,
+`scripts/seed-validator-cohorts.ts`, `services/cohort_selection.ts`,
+`scan_pipeline.ts`, and the heavyweight 96-entry
+`acquisition_priors.ts` retune.
+
+**Cost:** ~1-2 sprints. The doc breaks it into a Sprint 1
+(cohorts + seed + selection — immediate friction-list relief)
+and Sprint 2 (priors retune — keeps the visitor-weighted view
+consistent with the new cohort set).
 
 ### 2. INTENT_ACTION multipliers are universal (visitor-view collapse)
 

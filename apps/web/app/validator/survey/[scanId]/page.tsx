@@ -1,18 +1,22 @@
 "use client";
 
-// Human survey page — Phase 2 §D3 / P2-5.
+// Human survey page — Phase 5.1.
 //
 // A human takes the same §11.1 survey the AI personas take for the
-// same site. Submit → POST /api/scan/:id/survey → 5 calibration_records
-// rows with source='human_baseline'. Track A aggregator picks them up.
+// same site. Submit → POST /api/scan/:id/survey upserts one row in
+// survey_responses (keyed by user_id) AND appends 5 calibration_records
+// rows for legacy operator aggregation.
 //
-// In Phase 2 the email field is just for traceability (no auth).
-// Phase 4 promotes to Privy login.
+// Phase 5.1 — Privy auth required. Identity comes from the JWT (no
+// email field). On mount we fetch the user's prior submission (if any)
+// and prefill the form so they can edit instead of starting from
+// scratch.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { scanApi } from "@/lib/api";
+import { usePrivy } from "@privy-io/react-auth";
+import { meApi, scanApi, type CustomQuestion } from "@/lib/api";
 import { C, FM, FS, Frame } from "../../_components/ui";
 
 const SUS_QUESTIONS = [
@@ -53,8 +57,8 @@ const AGE_OPTIONS = [
 export default function SurveyPage() {
   const params = useParams<{ scanId: string }>();
   const scanId = params?.scanId ?? "";
+  const { ready, authenticated, login } = usePrivy();
 
-  const [email, setEmail] = useState("");
   const [sus, setSus] = useState<number[]>(Array(10).fill(3));
   const [engagement, setEngagement] = useState<string>("browse");
   const [signupLikelihood, setSignupLikelihood] = useState(50);
@@ -72,14 +76,71 @@ export default function SurveyPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<{ delta: Record<string, number> } | null>(null);
+  const [hasPriorSubmission, setHasPriorSubmission] = useState(false);
+
+  // Phase 5 — site-specific custom questions, loaded once on mount.
+  // Null while loading, [] when the scan has none, populated otherwise.
+  const [customQuestions, setCustomQuestions] = useState<CustomQuestion[] | null>(null);
+  const [customAnswers, setCustomAnswers] = useState<Record<string, number | string>>({});
+
+  // Load scan custom questions (always) + the user's prior response (if
+  // authenticated) on mount. The prefill turns the page into an editor
+  // instead of a blank form for users who already submitted.
+  useEffect(() => {
+    if (!scanId) return;
+    let cancelled = false;
+    scanApi
+      .getReport(scanId)
+      .then((r) => {
+        if (cancelled) return;
+        setCustomQuestions(r.scan.custom_questions ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setCustomQuestions([]);
+      });
+    return () => { cancelled = true; };
+  }, [scanId]);
+
+  // Prefill from prior submission. Runs only after Privy reports authenticated.
+  useEffect(() => {
+    if (!scanId || !ready || !authenticated) return;
+    let cancelled = false;
+    meApi
+      .getMySurveyResponse(scanId)
+      .then((r) => {
+        if (cancelled) return;
+        setHasPriorSubmission(true);
+        setSus(r.response.sus_responses);
+        setEngagement(r.response.dimension_inputs.engagement_category);
+        setSignupLikelihood(Math.round(r.response.dimension_inputs.signup_likelihood * 100));
+        setRetention(r.response.dimension_inputs.retention_category);
+        setCompletionLikelihood(Math.round(r.response.dimension_inputs.completion_likelihood * 100));
+        setFirstImpression(r.response.voice.first_impression ?? "");
+        setBiggestFriction(r.response.voice.biggest_friction ?? "");
+        setWouldReturnBecause(r.response.voice.would_return_because ?? "");
+        setOneThingToChange(r.response.voice.if_could_change_one_thing ?? "");
+        setAgeGroup(r.response.demographics.age_group);
+        setTechLit(Math.round(r.response.demographics.tech_literacy * 100));
+        setCryptoExp(Math.round(r.response.demographics.crypto_experience * 100));
+        setMobileFirst(r.response.demographics.mobile_first);
+        setCustomAnswers(r.response.custom_answers ?? {});
+      })
+      .catch(() => {
+        // 404 = first-time submission. Leave defaults.
+        if (!cancelled) setHasPriorSubmission(false);
+      });
+    return () => { cancelled = true; };
+  }, [scanId, ready, authenticated]);
 
   const onSubmit = async () => {
     if (submitting) return;
-    if (!email.trim()) { setError("Email required"); return; }
+    if (!authenticated) {
+      if (ready) login();
+      return;
+    }
     setError(null); setSubmitting(true);
     try {
       const r = await scanApi.submitSurvey(scanId, {
-        email: email.trim(),
         sus_responses: sus,
         engagement_category: engagement as "abandon" | "skim" | "browse" | "engage" | "extended",
         signup_likelihood: signupLikelihood / 100,
@@ -97,6 +158,7 @@ export default function SurveyPage() {
           crypto_experience: cryptoExp / 100,
           mobile_first: mobileFirst,
         },
+        custom_answers: customAnswers,
       });
       setSuccess({ delta: r.summary.delta });
     } catch (err) {
@@ -165,16 +227,61 @@ export default function SurveyPage() {
           ground-truth for measuring AI persona accuracy.
         </div>
 
-        {/* Email */}
-        <Section title="Your email" sub="For traceability only — no marketing.">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            style={inputStyle()}
-          />
-        </Section>
+        {/* Auth gate — Phase 5.1 replaces the email field. Anyone can
+            view the form, but Submit triggers Privy login if needed.
+            When the user has a prior submission, show the "you're
+            editing your previous answer" banner. */}
+        {ready && !authenticated && (
+          <div
+            style={{
+              padding: 14,
+              marginBottom: 20,
+              background: C.panel,
+              border: `1px solid ${C.border}`,
+              borderRadius: 8,
+              fontSize: 13,
+              color: C.textDim,
+              lineHeight: 1.6,
+            }}
+          >
+            Sign in to submit your survey. Your responses are tied to your
+            account so you can come back and edit them later.
+            <button
+              onClick={() => login()}
+              style={{
+                display: "inline-block",
+                marginLeft: 10,
+                padding: "6px 14px",
+                fontSize: 12,
+                fontFamily: FS,
+                fontWeight: 500,
+                background: C.text,
+                color: C.bg,
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              Sign in →
+            </button>
+          </div>
+        )}
+        {ready && authenticated && hasPriorSubmission && (
+          <div
+            style={{
+              padding: 12,
+              marginBottom: 20,
+              background: C.panel,
+              border: `1px solid ${C.border}`,
+              borderRadius: 8,
+              fontSize: 12,
+              color: C.textDim,
+            }}
+          >
+            ✎ You&rsquo;ve submitted before — editing your previous answer.
+            Resubmitting overwrites it.
+          </div>
+        )}
 
         {/* SUS-10 */}
         <Section title="Usability (SUS-10)" sub="Strongly disagree (1) → Strongly agree (5)">
@@ -240,6 +347,73 @@ export default function SurveyPage() {
           <Textarea label="What would make you return" value={wouldReturnBecause} onChange={setWouldReturnBecause} />
           <Textarea label="One thing to change" value={oneThingToChange} onChange={setOneThingToChange} />
         </Section>
+
+        {/* Site-specific questions — only render when the scan has them. */}
+        {customQuestions && customQuestions.length > 0 && (
+          <Section
+            title="Site-specific questions"
+            sub="Tailored to this site — your answers feed the comparison report."
+          >
+            {customQuestions.map((q) => (
+              <div key={q.id} style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 13, marginBottom: 8 }}>
+                  <span style={{ color: C.textFaint, fontFamily: FM, marginRight: 6 }}>
+                    {q.id.toUpperCase()}.
+                  </span>
+                  {q.question}
+                </div>
+                {q.type === "likert" ? (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {[1, 2, 3, 4, 5].map((v) => {
+                      const selected = customAnswers[q.id] === v;
+                      return (
+                        <button
+                          key={v}
+                          onClick={() =>
+                            setCustomAnswers((a) => ({ ...a, [q.id]: v }))
+                          }
+                          style={{
+                            flex: 1,
+                            padding: "10px 0",
+                            fontSize: 13,
+                            fontFamily: FM,
+                            background: selected ? C.text : C.panel,
+                            color: selected ? C.bg : C.text,
+                            border: `1px solid ${selected ? C.text : C.border}`,
+                            borderRadius: 6,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {v}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <textarea
+                    value={(customAnswers[q.id] as string) ?? ""}
+                    onChange={(e) =>
+                      setCustomAnswers((a) => ({ ...a, [q.id]: e.target.value }))
+                    }
+                    rows={3}
+                    placeholder="Type your answer here…"
+                    style={{
+                      width: "100%",
+                      padding: "10px 14px",
+                      fontSize: 13,
+                      fontFamily: FS,
+                      background: "#fff",
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 6,
+                      resize: "vertical",
+                      outline: "none",
+                    }}
+                  />
+                )}
+              </div>
+            ))}
+          </Section>
+        )}
 
         {/* Demographics */}
         <Section title="About you" sub="For cohort matching only — not stored against your email.">
@@ -435,16 +609,3 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
-function inputStyle(): React.CSSProperties {
-  return {
-    width: "100%",
-    padding: "10px 14px",
-    fontSize: 13,
-    fontFamily: FS,
-    background: "#fff",
-    border: `1px solid ${C.border}`,
-    borderRadius: 6,
-    outline: "none",
-    color: C.text,
-  };
-}

@@ -1,8 +1,25 @@
 # 41R Persona Market — 기술 아키텍처
 
-> **대상 독자**: 기술 검토를 진행하는 투자자 / 잠재 파트너
-> **작성 시점**: 2026-04-26 · **현재 코드베이스**: `dev` 브랜치
-> **요약 한 줄**: 인간 사용자 테스트를 **재사용 가능한 AI 페르소나**로 결정화하고, 그 페르소나가 자율적으로 웹 제품을 평가해 검증된 UX 리포트를 생성하는 Solana 기반 마켓플레이스.
+> ⚠️ **STALE / HISTORICAL — 2026-05-04 pivot 이전 시스템 기준**.
+> 이 문서가 묘사하는 자율-Stagehand autotest 마켓플레이스, persona-engine
+> Python 서비스, `/api/test/*` `/api/report/*` `/api/persona/*` 엔드포인트,
+> 인-프로세스 vision 루프, 회사가 USDC 예치 → 페르소나가 자율 테스트 실행
+> → 보상 분배 흐름은 **2026-05-04 pivot에서 모두 제거**되었습니다.
+> 현재 라이브 시스템은 **Audience-Fit Validator** (단일 스크린샷 기반
+> persona-conditional 평가). pivot 결정 자체는
+> [`pivot-strategy.md`](pivot-strategy.md) (2026-04-10 작성)에 문서화되어
+> 있고, 현행 시스템 문서는:
+>
+> - **현재 시스템 동작** → [`HOW-IT-WORKS.md`](HOW-IT-WORKS.md) /
+>   [`HOW-IT-WORKS.ko.md`](HOW-IT-WORKS.ko.md)
+> - **운영 가이드 + Do NOT** → 리포 루트 `CLAUDE.md`
+> - **Phase 5 human comparison** → 위 두 문서의 §14
+>
+> 이 문서는 autotest era 시스템에 대한 historical reference로만 보존됩니다.
+> 새로운 독자라면 위 현행 문서들을 먼저 읽으세요.
+
+> **작성 시점**: 2026-04-26 (pivot 8일 전) · **현재 시스템과 무관**
+> **요약 한 줄 (당시 기준)**: 인간 사용자 테스트를 **재사용 가능한 AI 페르소나**로 결정화하고, 그 페르소나가 자율적으로 웹 제품을 평가해 검증된 UX 리포트를 생성하는 Solana 기반 마켓플레이스.
 
 ---
 

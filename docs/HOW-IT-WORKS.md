@@ -29,6 +29,15 @@ browse — they react to a single screenshot. There are no real users
 in the loop; the trust contract rests on cohort-aggregate signals,
 not on individual persona predictions.
 
+**Phase 5+ extension** (since 2026-05-08): real human respondents can
+take a Privy-authed survey on the same scan
+(`/validator/survey/<scanId>`), and the operator can produce an
+**AI vs Human comparison report** at `/validator/compare/<scanId>` by
+clicking "Compare with humans (n=X)" once enough responses pile up.
+The human report uses the SAME aggregation primitives as the AI side
+(dimension means → friction clustering → AARRR), so the two are
+directly comparable on every axis. See §14 for the flow.
+
 ---
 
 ## 2. Pipeline at a glance
@@ -49,9 +58,11 @@ startScanWorker
                                 catch → status='failed'
    ↓
 runScan(scanId)                 scan_pipeline.ts:147+
-   ├─ Step 0  capturing       captureSite() + classifySite()
+   ├─ Step 0  capturing       captureSite() + classifySite() +
+   │                          generateCustomQuestions() (Phase 5)
    │                          → audience_fit_scans.{captureScreenshotUrls,
-   │                            category, categoryConfidence, oneLinePitch}
+   │                            category, categoryConfidence, oneLinePitch,
+   │                            customQuestions}
    ├─ Step 1  sampling        load active personas
    │                          → Mode A: selectPersonasForCohorts (8 cohorts)
    │                          → Mode B: parseAudience + selectPersonasForAudience
@@ -66,6 +77,31 @@ runScan(scanId)                 scan_pipeline.ts:147+
    └─ Step 4  completed       UPDATE audience_fit_scans
                               status, audienceFitScore, best/worst, etc.
 ```
+
+**Phase 5 — Human comparison (async, separate from runScan):**
+
+```
+operator shares /validator/survey/<scanId>
+   ↓
+respondent (Privy-authed, Phase 5.1) submits the survey
+   → POST /api/scan/:id/survey  routes/scan.ts
+                                upsert survey_responses (one row per user_id)
+                                + append 5 calibration_records rows (legacy)
+   ↓
+... time passes, more humans submit ...
+   ↓
+operator clicks "Compare with humans (n=X)" on the report page
+   → POST /api/scan/:id/human-aggregate
+                            human_aggregate.ts::recomputeHumanAggregate(scanId)
+                            same dimension scoring + clusterFrictions +
+                            computeAarrrFromRows pipeline as the AI side
+                            → audience_fit_scans.human_aggregate (jsonb)
+   ↓
+operator (or anyone with the link) views /validator/compare/<scanId>
+   → GET /api/scan/:id/compare  returns { ai, human, diff }
+```
+
+See §14 for the detailed Phase 5 + 5.1 flow.
 
 Source: every numbered step is implemented in
 `apps/api/src/services/scan_pipeline.ts` and the helpers it imports.
@@ -86,9 +122,11 @@ usage logging tags every call by purpose. Tags are documented in
 | # | Route tag | Model | When | Cost / call | Source |
 |---|---|---|---|---|---|
 | 1 | `validator.classify_site` | Haiku (vision) | once per scan, after capture | ~$0.0008 | `services/site_classifier.ts:115-128` |
-| 2 | `validator.parse_audience` | Haiku (text) | Mode B only, once per scan | ~$0.0005 | `services/dimensions/audience_parser.ts` |
-| 3 | `validator.persona_response` | Sonnet (vision) when `USE_VISION=1`, else Haiku (text) | per persona | Sonnet ~$0.01-0.05 / Haiku ~$0.001 | `services/dimensions/llm.ts:343-399` |
-| 4 | `validator.cluster_frictions` | Haiku (text) | once per scan, after responses | ~$0.003 | `services/dimensions/frictions.ts:184-194` |
+| 2 | `validator.custom_questions` | Haiku (vision) | once per scan, right after classifySite (Phase 5 — generates 3-5 site-specific human-survey questions) | ~$0.001 | `services/dimensions/custom_questions.ts` |
+| 3 | `validator.parse_audience` | Haiku (text) | Mode B only, once per scan | ~$0.0005 | `services/dimensions/audience_parser.ts` |
+| 4 | `validator.persona_response` | Sonnet (vision) when `USE_VISION=1`, else Haiku (text) | per persona | Sonnet ~$0.01-0.05 / Haiku ~$0.001 | `services/dimensions/llm.ts:343-399` |
+| 5 | `validator.cluster_frictions` | Haiku (text) | once per scan, after responses | ~$0.003 | `services/dimensions/frictions.ts:184-194` |
+| 6 | `validator.cluster_human_frictions` | Haiku (text) | once per `POST /:id/human-aggregate` when n ≥ 3 (Phase 5) | ~$0.003 | `services/human_aggregate.ts` |
 
 Model identifiers are resolved through env vars with sensible
 defaults at `apps/api/src/config/env.ts:69-70`:
@@ -627,6 +665,16 @@ stale text. Listed in order of highest-friction first.
    Detailed walkthrough deferred — the file should get its own
    short doc when Mode B becomes a primary surface.
 
+7. **⚠️ Cohort pool is crypto-tilted.** 3 of 8 STANDARD_COHORTS are
+   crypto-flavored (37.5%), so on non-crypto sites the rank-1
+   friction cluster is often "Wrong audience entirely". Design for
+   an evaluator-archetype 9-cohort replacement (general 8 incl. a
+   new `investor` archetype + 1 broad `crypto_user` add-on) was
+   agreed 2026-05-08 but **deferred** — full spec at
+   [`docs/cohort-redesign-deferred.md`](cohort-redesign-deferred.md).
+   When unblocking, follow that doc — the design crystallization
+   does not need to be repeated.
+
 ---
 
 ## 13. Where to read code from here
@@ -640,7 +688,165 @@ stale text. Listed in order of highest-friction first.
 | Cohort assignment algorithm | `apps/api/src/services/cohort_selection.ts` |
 | Friction clustering | `apps/api/src/services/dimensions/frictions.ts` |
 | Site classifier prompt | `apps/api/src/services/site_classifier.ts` |
+| Site-specific question generator (Phase 5) | `apps/api/src/services/dimensions/custom_questions.ts` |
+| Human aggregate (Phase 5) | `apps/api/src/services/human_aggregate.ts` |
+| `/api/me/survey-responses` endpoints | `apps/api/src/routes/me_responses.ts` |
 | Cohort definitions | `packages/shared/src/cohorts.ts` |
 | Acquisition priors (visitor view) | `packages/shared/src/acquisition_priors.ts` |
 | Test contracts / regression locks | `apps/api/src/__tests__/` |
+
+---
+
+## 14. Human comparison flow (Phase 5 + 5.1)
+
+The AI side measures **persona-conditional intent**. To know how
+real visitors actually react, the validator pairs every scan with an
+optional **human survey** that runs asynchronously alongside the AI
+pipeline. Once enough humans have answered, the operator triggers a
+human aggregate and gets a side-by-side comparison report.
+
+### 14.1 Survey share → submit
+
+```
+operator shares  https://app.project-rpm.xyz/validator/survey/<scanId>
+
+respondent → /validator/survey/[scanId]/page.tsx
+   ├─ on mount: scanApi.getReport(scanId)
+   │            └→ returns scan.custom_questions: CustomQuestion[]
+   │               (3-5 site-specific Q's generated by Haiku at scan time —
+   │                see §3 row 2 + services/dimensions/custom_questions.ts)
+   ├─ if not authenticated: show "Sign in →" button (Privy modal)
+   ├─ on mount (auth'd): meApi.getMySurveyResponse(scanId)
+   │            └→ prefill from prior submission if any, else 404 → blank form
+   └─ on submit: scanApi.submitSurvey(scanId, body)
+                 → POST /api/scan/:id/survey   (requirePrivyAuth)
+```
+
+The survey form is the SUS-10 + 5-axis dimension input set the AI
+personas are scored on, plus 4 voice quote textareas, plus the scan's
+`custom_questions` array rendered as Likert (1-5) or free-text inputs.
+This means human and AI submissions feed into the same scoring math.
+
+### 14.2 POST /api/scan/:id/survey — what the handler does
+
+`apps/api/src/routes/scan.ts` (`requirePrivyAuth`):
+
+1. **Identity** — `userId = req.privyUser!.id` (Phase 5.1; pre-Phase-5.1
+   used a body `email` field, now removed).
+2. **Score the human input on the same 5 axes as AI** —
+   `happiness = computeSusScoreLocal(sus_responses)`,
+   `engagement = HUMAN_ENGAGEMENT_TO_SCORE[band]`,
+   `adoption = signup_likelihood × 100`,
+   `retention = HUMAN_RETENTION_TO_D7[band]`,
+   `task_success = completion_likelihood × 100`. These mirror the
+   formulas in `services/dimensions/llm.ts::mapLLMResponseToSimulated`.
+3. **5 calibration_records rows** appended (legacy operator-team
+   aggregator at `services/calibration/aggregator.ts`; persists per-
+   dimension `(LLM mean, human ground-truth)` pairs the
+   `/validator/calibration` page reads).
+4. **One survey_responses row** upserted on `(scan_id, user_id)`
+   UNIQUE — re-submitting overwrites the jsonb fields and bumps
+   `submittedAt`. Voice quotes, demographics, and custom_answers
+   land here verbatim (calibration_records discards all of them).
+
+### 14.3 Operator triggers the aggregate
+
+When the report page footer button "Compare with humans (n=X) →"
+gets clicked:
+
+```
+report page (auth not required to read)
+   ├─ /validator/report/[scanId] → footer Btn href
+   └→ /validator/compare/[scanId]/page.tsx
+       ├─ scanApi.getCompareReport(scanId)  (read; can be empty)
+       └─ if no human aggregate yet: button "Compute now"
+           └→ scanApi.recomputeHumanAggregate(scanId)
+              → POST /api/scan/:id/human-aggregate
+              → human_aggregate.ts::recomputeHumanAggregate(scanId)
+```
+
+`recomputeHumanAggregate` is **strict-mirror of the AI side**:
+
+| Step | AI primitive (re-used) | Human-side input |
+|---|---|---|
+| Per-respondent score | inline (same constants as `services/dimensions/llm.ts`) | survey_responses rows |
+| Single-bucket fit score | `DIMENSION_WEIGHTS_V1` formula (inlined as `W` in human_aggregate.ts) | per-respondent dimension means |
+| Friction clustering | `assembleFrictionClusters()` (pure helper, exported from `services/dimensions/frictions.ts`) | voice quotes (4 fields) + free-text custom answers |
+| AARRR funnel | `computeAarrrFromRows()` (pure helper, exported from `services/aarrr.ts`) | per-respondent score rows |
+
+The Haiku call for human friction clustering is in-module
+(`validator.cluster_human_frictions`, see §3 row 6). It uses a
+**different prompt** than the AI side — input is human voice quotes
+across 4 voice fields + custom-answer free-text, all tagged
+`cohort='human'`. Below `n_respondents=3` the helper short-circuits
+to a single "Raw human voice" bucket carrying the actual quote
+string instead of calling Haiku — Haiku produces unstable clusters
+below that floor.
+
+The output `HumanAggregate` shape:
+
+```ts
+{
+  n_respondents: number,
+  audience_fit_score: number,        // single-bucket cohort_fit_score
+  dimension_means: { happiness, task_success, adoption, retention_d7, engagement },
+  frictions: FrictionCluster[] | null,
+  aarrr: AarrrFunnel | null,         // same v1.1 thresholds as AI
+  custom_question_rollup: {          // per custom question:
+    [qid]: { likert?: { mean, n_answered }; quotes?: string[] }
+  },
+  computed_at: ISO-8601 string,
+}
+```
+
+is persisted as jsonb on `audience_fit_scans.human_aggregate`. The
+endpoint is **idempotent** — re-runnable any time; each call
+overwrites in place.
+
+### 14.4 GET /api/scan/:id/compare — diff math
+
+Returns `{ ai, human, diff }` where:
+
+- `ai.dimension_means` — weighted average across cohorts
+  (mirrors the `wAvg()` pattern in `POST /survey`)
+- `human` — the cached `human_aggregate` jsonb (or `null` if not yet
+  computed)
+- `diff.audience_fit_delta` = `human − ai`
+- `diff.dimension_deltas` — per-axis Δ
+- `diff.friction_overlap` — token-overlap heuristic on cluster
+  titles (cheap; not semantic embedding matching, but enough to
+  color overlapping clusters together vs. AI-only / Human-only)
+- `diff.{ai,human}_only_frictions[]` — top 3 each, surfaced as
+  callouts on the Compare page
+
+`survey_response_count` is also exposed on the regular `/api/scan/:id/report`
+endpoint so the report-page footer can render "Compare with humans (n=X) →"
+without an extra round-trip.
+
+### 14.5 Per-user view — `/me/responses[/:scanId]`
+
+A respondent can revisit `/me/responses` (auth-gated) to see every
+survey they've submitted, and click into `/me/responses/<scanId>` for
+their AI-vs-Me detail (5-dimension Δ + voice quotes + custom-answer
+table + a CTA to the aggregate `/validator/compare/<scanId>`).
+
+Server-side, `routes/me_responses.ts` enforces
+`user_id = req.privyUser.id` on every query — that's the data
+isolation boundary, not a UI convention. Even guessing another
+user's scan id returns 404, not someone else's row.
+
+### 14.6 Trust contract
+
+Two sentences:
+
+> The AI side measures **persona-conditional intent** (would 8 cohorts
+> resonate with this site?). The human side measures **what real
+> respondents actually said**. The Compare page surfaces the diff so
+> a stakeholder sees both signals on the same page — not a single
+> aggregate score that pretends to be both.
+
+The honest framing in the report copy + Compare page is the
+load-bearing piece. CLAUDE.md §"Investor Dashboard Narrative"
+documents the same constraint for the AI side and the §"Do NOT"
+entry on AARRR-as-forecast applies equally to the human side.
 | Open follow-ups + Do-NOTs | `CLAUDE.md` (project root) |
