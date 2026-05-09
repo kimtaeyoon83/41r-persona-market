@@ -1135,62 +1135,80 @@ strong      85   70   55   30`}
           />
         </div>
 
-        {/* ⑤ AARRR funnel — Mode A only (Mode B audience is already
-            narrow and "funnel" semantics don't apply). Free feature
-            on the main report after the Pro tier was retired (D8). */}
+        {/* ⑤ AARRR funnel — Mode A only.
+            v1.1 calibration is still rough (Merch GA4 n=1 INTENT_ACTION
+            multipliers — CLAUDE.md "Known Limitations §2"), so the
+            funnel is rendered behind a "Coming in next version" overlay
+            with the actual chart blurred underneath. The chart still
+            renders to preserve layout + give a hint of structure; click
+            interactions are blocked by the overlay so the data isn't
+            actionable until calibration validates against more sites. */}
         {effectiveAarrr && (
-          <>
+          <div style={{ position: "relative", marginBottom: 10 }}>
+            {/* Blurred chart — no pointer events, so the overlay is
+                the only interactive layer. */}
             <div
               style={{
-                padding: "10px 14px",
-                background: C.warnSoft,
-                border: `1px solid ${C.warn}33`,
-                borderRadius: 8,
-                marginBottom: 10,
-                fontSize: 11,
-                color: C.text,
-                lineHeight: 1.55,
-                fontFamily: FS,
+                filter: "blur(6px) grayscale(0.3)",
+                opacity: 0.4,
+                pointerEvents: "none",
+                userSelect: "none",
               }}
-            >
-              <span
-                style={{
-                  fontFamily: FM,
-                  color: C.warn,
-                  fontWeight: 600,
-                  letterSpacing: "0.06em",
-                  marginRight: 6,
-                }}
-              >
-                {visitorAvailable ? "EXPERIMENTAL · DIRECTIONAL ONLY" : "PERSONA-CONDITIONAL"}
-              </span>
-              {visitorAvailable
-                ? "Visitor-weighted absolute values are calibrated against limited GA4 data (n=1) and overshoot reality by 5-30×. Use for relative ranking only — not as a conversion forecast. Switch to Research panel for honest cross-site comparison."
-                : "These % reflect engaged-persona behavior, not visitor traffic. Compare across sites; do not read as absolute conversion."}{" "}
-              <Link
-                href="/validator/how-it-works"
-                style={{ color: C.accent, textDecoration: "underline" }}
-              >
-                why
-              </Link>
-            </div>
-            {/* AARRR funnel rendered with reduced opacity + grayscale.
-                The numerics are real but their absolute calibration is
-                still in progress (Merch GA4 n=1 INTENT_ACTION universal
-                multipliers, see CLAUDE.md "Known Limitations §2"). The
-                dimmed look signals "use for diagnosis, not forecasting"
-                visually without hiding the data — the disclaimer banner
-                above stays at full opacity so the warning is unmissable. */}
-            <div
-              style={{
-                opacity: 0.55,
-                filter: "grayscale(0.25)",
-              }}
-              title="Calibration in progress — use AARRR for relative bottleneck diagnosis, not as a conversion forecast."
+              aria-hidden
             >
               <AarrrFunnelBlock funnel={effectiveAarrr} />
             </div>
-          </>
+            {/* Overlay banner — centered above the blurred funnel. */}
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                pointerEvents: "auto",
+              }}
+            >
+              <div
+                style={{
+                  padding: "16px 22px",
+                  background: C.panel,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 10,
+                  boxShadow: "0 6px 24px rgba(0,0,0,0.08)",
+                  fontFamily: FS,
+                  textAlign: "center",
+                  maxWidth: 480,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontFamily: FM,
+                    fontWeight: 600,
+                    letterSpacing: "0.08em",
+                    color: C.warn,
+                    marginBottom: 6,
+                  }}
+                >
+                  COMING IN NEXT VERSION
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 4 }}>
+                  AARRR funnel
+                </div>
+                <div style={{ fontSize: 12, color: C.textDim, lineHeight: 1.55 }}>
+                  Calibration in progress — pending broader GA4 reference data
+                  before this becomes a load-bearing metric.{" "}
+                  <Link
+                    href="/validator/how-it-works"
+                    style={{ color: C.accent, textDecoration: "underline" }}
+                  >
+                    why
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         <div
