@@ -363,11 +363,17 @@ monotonic non-increasing funnel shape. Independent thresholds (the
 helper is exported for unit tests; `audience_fit_helpers.test.ts`
 locks the monotonicity + threshold boundaries.
 
-Thresholds (from percentile audit, 2026-05-02):
+Thresholds (v1.1 retune 2026-05-06 — see Do-NOT entry on AARRR
+threshold reverts for the rationale + observed-distribution data
+that drove the retention/revenue gate cuts):
 - Activation: task_success ≥ 30
-- Retention: + retention_d7 ≥ 30
+- Retention: + retention_d7 ≥ 5     (v1.0 was ≥ 30, dropped because
+  ~85% of personas land in the weak band D7=5; old gate killed the
+  funnel post-activation)
 - Referral: + happiness ≥ 60
-- Revenue: + adoption ≥ 65
+- Revenue: + adoption ≥ 30          (v1.0 was ≥ 65, unreachable in
+  the observed adoption distribution; ≥ 30 = "meaningful purchase
+  intent" while still dropping the funnel)
 
 ### Friction clustering n invariant
 

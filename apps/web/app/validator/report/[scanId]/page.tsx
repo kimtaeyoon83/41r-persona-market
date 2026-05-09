@@ -1174,7 +1174,22 @@ strong      85   70   55   30`}
                 why
               </Link>
             </div>
-            <AarrrFunnelBlock funnel={effectiveAarrr} />
+            {/* AARRR funnel rendered with reduced opacity + grayscale.
+                The numerics are real but their absolute calibration is
+                still in progress (Merch GA4 n=1 INTENT_ACTION universal
+                multipliers, see CLAUDE.md "Known Limitations §2"). The
+                dimmed look signals "use for diagnosis, not forecasting"
+                visually without hiding the data — the disclaimer banner
+                above stays at full opacity so the warning is unmissable. */}
+            <div
+              style={{
+                opacity: 0.55,
+                filter: "grayscale(0.25)",
+              }}
+              title="Calibration in progress — use AARRR for relative bottleneck diagnosis, not as a conversion forecast."
+            >
+              <AarrrFunnelBlock funnel={effectiveAarrr} />
+            </div>
           </>
         )}
 
