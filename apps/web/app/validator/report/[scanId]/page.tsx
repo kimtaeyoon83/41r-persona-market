@@ -46,7 +46,11 @@ export default function ValidatorReportPage() {
   // (Stage 1, persona-conditional) and visitor-weighted view
   // (Stage 1 × Stage 2 acquisition priors). Default: panel, since
   // the weighted view depends on heuristic priors that are still v1.0.
-  const [view, setView] = useState<"panel" | "visitor">("panel");
+  // The visitor-weighted toggle is hidden until INTENT_ACTION
+  // calibration matures (see "Next version" hint chip below). When
+  // restoring the toggle, swap this back to:
+  //   const [view, setView] = useState<"panel" | "visitor">("panel");
+  // and set `visitorAvailable` below back to `view === "visitor" && weighted != null`.
   const [shareLabel, setShareLabel] = useState<"Share report" | "Copied!" | "Copy failed">("Share report");
 
   const onShareReport = async () => {
@@ -133,7 +137,10 @@ export default function ValidatorReportPage() {
   // toggle. When weighted is null (Mode B / no data / pre-deploy
   // scans) we silently fall back to panel so the UI never breaks.
   const weighted = result?.weighted ?? null;
-  const visitorAvailable = view === "visitor" && weighted != null;
+  // Phase 5+ — visitor view locked behind "Next version" hint, so this
+  // is pinned to false. When toggle is restored, change back to:
+  //   const visitorAvailable = view === "visitor" && weighted != null;
+  const visitorAvailable: boolean = false;
   const effectiveResult = visitorAvailable
     ? {
         audience_fit_score: weighted!.audience_fit_score,
@@ -194,49 +201,38 @@ export default function ValidatorReportPage() {
             <div style={{ marginTop: 12 }}>
               <ShareWithAi scanId={r.scan.id} />
             </div>
-            {/* Acquisition Layer v1.1 — view toggle. Only shown when the
-                weighted view is available (Mode A + post-Stage-3 scans). */}
+            {/* Acquisition Layer v1.1 — Visitor-weighted view toggle
+                hidden behind "Coming in next version" until the
+                INTENT_ACTION + per-category arrival_share priors are
+                validated against more than the Merch GA4 n=1 baseline.
+                The toggle UI is intentionally removed (not just
+                disabled) so the user sees only the Panel view, which
+                is what the report already defaults to. The `view`
+                state stays for forward-compat — restore the toggle
+                JSX here when calibration matures. */}
             {weighted && (
               <div
                 style={{
                   marginTop: 12,
-                  display: "inline-flex",
-                  gap: 0,
-                  background: "#f3f0e8",
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 999,
-                  padding: 3,
                   fontSize: 11,
                   fontFamily: FM,
+                  color: C.textDim,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "4px 10px",
+                  background: C.panel,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 999,
                 }}
+                title="Visitor-weighted view (intent → action conversion estimate) is on the roadmap. Currently showing the research-panel view, which is honest for cross-site comparison."
               >
-                {(
-                  [
-                    { id: "panel" as const, label: "Research panel", sub: "engaged audience — recommended for cross-site comparison" },
-                    { id: "visitor" as const, label: "Visitor-weighted", sub: "experimental — directional only, not a traffic forecast" },
-                  ]
-                ).map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => setView(m.id)}
-                    title={m.sub}
-                    style={{
-                      padding: "5px 12px",
-                      borderRadius: 999,
-                      background: view === m.id ? C.panel : "transparent",
-                      color: view === m.id ? C.text : C.textDim,
-                      border:
-                        view === m.id
-                          ? `1px solid ${C.borderStrong}`
-                          : "1px solid transparent",
-                      cursor: "pointer",
-                      fontFamily: FM,
-                      fontWeight: view === m.id ? 600 : 400,
-                    }}
-                  >
-                    {m.label}
-                  </button>
-                ))}
+                <span style={{ color: C.warn, fontWeight: 600, letterSpacing: "0.05em" }}>
+                  NEXT VERSION
+                </span>
+                <span>
+                  Visitor-weighted view (currently showing research-panel)
+                </span>
               </div>
             )}
           </div>
