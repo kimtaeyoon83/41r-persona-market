@@ -402,6 +402,10 @@ export default function SurveyPage() {
                       padding: "10px 14px",
                       fontSize: 13,
                       fontFamily: FS,
+                      // Explicit color — without it, text inherits the
+                      // page-level color set by html.dark class and
+                      // renders white on white background (invisible).
+                      color: C.text,
                       background: "#fff",
                       border: `1px solid ${C.border}`,
                       borderRadius: 6,
@@ -589,6 +593,9 @@ function Textarea({
           padding: "8px 12px",
           fontSize: 13,
           fontFamily: FS,
+          // Explicit color — page-level html.dark would make typed text
+          // white on this white background (invisible) without it.
+          color: C.text,
           background: "#fff",
           border: `1px solid ${C.border}`,
           borderRadius: 6,
