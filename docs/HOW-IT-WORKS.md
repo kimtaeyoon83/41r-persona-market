@@ -610,24 +610,19 @@ own comments or sibling documentation. None are runtime bugs — but
 the next reader of those files will hit confusion if they trust the
 stale text. Listed in order of highest-friction first.
 
-1. **⚠️ aarrr.ts file-header comment lists the wrong thresholds.**
-   Lines 11-13 say `retention_d7 >= 30` and `adoption >= 65`. The
-   actual filter expressions (lines 85, 87) and the `THRESHOLDS`
-   const (lines 42-48) use `≥ 5` and `≥ 30` per the v1.1 retune
-   documented at lines 50-58. The header text was never updated.
-   *Fix*: delete or rewrite lines 11-13 to match `THRESHOLDS`.
+1. **✅ aarrr.ts file-header comment thresholds — RESOLVED 2026-05-08.**
+   The header (lines 11-15) now correctly lists v1.1 values
+   (`retention_d7 >= 5`, `adoption >= 30`) matching the
+   `THRESHOLDS` const + filter expressions. CLAUDE.md
+   §"AARRR is CUMULATIVE" was also synced to v1.1 in the same pass.
 
-2. **⚠️ `lib/api.ts` has dead client methods.** The validator
-   pivot deleted the autotest API surface (`/api/test/*`,
-   `/api/report/*`, `/api/tester/*`) but `apps/web/lib/api.ts`
-   still exports `testApi`, `reportApi`, `personaApi`, `testerApi`,
-   `autoTestApi`, `dashboardApi`. Active validator pages call
-   `scanApi` only. The legacy clients are documented in CLAUDE.md
-   line 100 (Frontend conventions block) — that line is honest
-   (the exports DO exist) but the methods themselves are dead code:
-   any caller would 404. *Fix*: another refactor pass to drop the
-   unused exports + their `signedRequest` plumbing, OR explicitly
-   gate them behind a "preserved for future use" comment.
+2. **✅ `lib/api.ts` dead client methods — RESOLVED 2026-05-07.**
+   The autotest-era exports (`testApi`, `reportApi`, `personaApi`,
+   `testerApi`, `autoTestApi`, `dashboardApi`) were dropped in the
+   Step C refactor cleanup (commit `db4623a`). `lib/api.ts` now
+   exports exactly 4 active surfaces: `scanApi`, `meApi`,
+   `calibrationApi`, `authApi`. The `signedRequest` plumbing
+   remains for any future signed-mutation route (see issue #3).
 
 3. **⚠️ Wallet-signed nonce middleware has no live consumer.**
    `apps/api/src/middleware/auth.ts::requireSignedRequest` and the

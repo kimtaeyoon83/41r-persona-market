@@ -590,23 +590,18 @@ CLAUDE.md "Audience-Fit Validator §" + 2026-05-07 hardening commit들
 런타임 버그는 아니지만, 다음 reader가 stale 텍스트를 신뢰하면 혼란이
 생깁니다. 마찰이 가장 큰 순서로 정렬:
 
-1. **⚠️ aarrr.ts 파일 헤더 주석이 잘못된 임계값을 명시.**
-   라인 11-13은 `retention_d7 >= 30`과 `adoption >= 65`라고 적어
-   놓았는데, 실제 필터 식 (라인 85, 87)과 `THRESHOLDS` 상수 (라인
-   42-48)는 v1.1 retune (라인 50-58 문서화)대로 `≥ 5`와 `≥ 30`을
-   사용. 헤더 텍스트가 업데이트 안 됨.
-   *Fix*: 라인 11-13을 삭제하거나 `THRESHOLDS`와 일치하도록 재작성.
+1. **✅ aarrr.ts 파일 헤더 임계값 — 2026-05-08 해결.** 헤더(라인
+   11-15)가 이제 v1.1 값 (`retention_d7 >= 5`, `adoption >= 30`)을
+   정확히 명시하고 `THRESHOLDS` 상수 + 필터 식과 일치. CLAUDE.md
+   §"AARRR is CUMULATIVE"도 같은 작업에서 v1.1로 동기화됨.
 
-2. **⚠️ `lib/api.ts`에 dead client method들.** validator pivot이
-   autotest API surface (`/api/test/*`, `/api/report/*`,
-   `/api/tester/*`)를 삭제했지만 `apps/web/lib/api.ts`는 여전히
-   `testApi`, `reportApi`, `personaApi`, `testerApi`, `autoTestApi`,
-   `dashboardApi`를 export. 활성 validator 페이지들은 `scanApi`만
-   호출. legacy 클라이언트들은 CLAUDE.md 라인 100 (Frontend
-   conventions block)에 문서화되어 있음 — 그 라인은 정직 (export는
-   *존재함*) 하지만 method들 자체는 dead code: 호출하면 404. *Fix*:
-   다음 refactor pass에서 unused export + `signedRequest` 배관을
-   제거, OR "preserved for future use" 코멘트로 명시적 게이팅.
+2. **✅ `lib/api.ts` dead client method들 — 2026-05-07 해결.**
+   autotest era export들 (`testApi`, `reportApi`, `personaApi`,
+   `testerApi`, `autoTestApi`, `dashboardApi`)이 Step C refactor
+   cleanup (커밋 `db4623a`)에서 모두 제거됨. `lib/api.ts`는 이제
+   정확히 4개의 활성 surface만 export: `scanApi`, `meApi`,
+   `calibrationApi`, `authApi`. `signedRequest` 배관은 미래
+   signed-mutation 라우트를 위해 보존 (issue #3 참조).
 
 3. **⚠️ Wallet-signed nonce middleware에 살아있는 consumer 없음.**
    `apps/api/src/middleware/auth.ts::requireSignedRequest` 와
