@@ -437,7 +437,8 @@ pnpm --filter api test
 | Doc | Audience | Content |
 |---|---|---|
 | **`CLAUDE.md`** | engineers + Claude Code AI | Engineering conventions, Do-NOT rules, Known Limitations, math invariants, LLM usage tracking |
-| **`docs/HOW-IT-WORKS.md`** + `.ko.md` | technical readers | Code-grounded walkthrough of every pipeline step + the Phase 5 human comparison flow |
+| **`docs/HOW-IT-WORKS.md`** + `.ko.md` | technical readers | Topic-by-topic deep dive — persona response shape, cohort selection, AARRR rules, friction clustering, calibration, Phase 5 flow |
+| **`docs/REPORT-PIPELINE.md`** | technical readers | Chronological step-by-step trace from `POST /api/scan` to the rendered report — what data feeds in, what processing happens, what each step's output is. Complementary to HOW-IT-WORKS (which is topic-organized). |
 | `docs/cohort-redesign-deferred.md` | future implementer | Phase 2 cohort split design — agreed but deferred (evaluator archetypes + investor cohort + crypto add-on) |
 | `docs/pivot-strategy.md` | historical | 2026-04-10 strategic snapshot — why the autotest → validator pivot |
 | `docs/ARCHITECTURE.md` | historical | STALE — pre-pivot autotest marketplace architecture |
