@@ -952,24 +952,23 @@ the visitor view is load-bearing — see Do-NOT entry.
 **Cost:** Sales/BD effort, not engineering. Once data lands,
 ~half-sprint to wire per-category multipliers.
 
-### 4. Q4 hallucination-guard observation period
+### 4. Q4 hallucination-guard observation period — CLOSED (2026-06-10)
 
-**Status:** No hard guard added at the prompt level (intentional
-— context-starvation was the root cause and Q2+Q3 P1 fixed that).
-2026-05-07 5-site post-fix test recorded **0 site fabrications**
-on 4 non-crypto sites; the 2 residual crypto-vocab matches were
-honest persona self-identification (`"I'm a crypto person…"`),
-not invented site features.
-
-**Unblock:** Run 5-10 more non-crypto scans across diverse
-categories (Marketplace, Gaming, Social, etc.). If contamination
-stays at 0 site fabrications, decision is permanent: no
-prompt-level guard needed. If even 1 fabrication recurs, add the
-explicit `"If a feature you describe is not visible in the
-screenshot or implied by the site's stated category, do not
-mention it as a friction"` rule to the buildSystemPrompt body.
-
-**Cost:** Trivial — runs in the normal scan workflow.
+**Resolution:** The one-recurrence condition fired. First prod scan
+with capture-signal page facts (Spotify) produced a fabricated
+`"지갑 연결이 필수인 것처럼 보이는데"` friction from a Designer
+persona — the unspecified `popup_detected` fact gave crypto-tilted
+vectors a blank to fill. Per the pre-agreed rule, the explicit
+guard ("feature not visible in screenshot nor implied by category →
+not a friction; an unidentified popup is just a popup") was added
+to `buildSystemPrompt`, and the pageFacts popup line now carries
+"content not identified — do not assume what it asks for".
+Same-day Spotify rescan: 0 crypto/wallet mentions across 109
+personas, and the top friction title became **"Unidentified modal
+popup on load"** — the persona reported the popup without guessing
+its content, exactly the intended behavior. Lesson recorded: when
+feeding objective facts to personas, an under-specified fact is a
+hallucination seed — qualify what is NOT known.
 
 ### 5. Cross-scan QA script (Layer 2 detection)
 
