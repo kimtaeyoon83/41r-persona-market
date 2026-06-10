@@ -784,7 +784,11 @@ async function computeWeightedAarrrFor(
 // No auth in Phase 2 — email field is for traceability only. Phase 4
 // promotes this to Privy login.
 
-const surveyBody = z.object({
+// Exported for routes/partner.ts (geulbat S2S ingest) — the partner
+// channel reuses the exact same answer schema, plus its own
+// email/consent envelope. Do NOT add identity fields here (CLAUDE.md
+// Do-NOT on surveyBody email).
+export const surveyBody = z.object({
   // Phase 5.1 — identity comes from Privy (req.privyUser.id), not the
   // body. The legacy `email` field was dropped here when the route
   // became authenticated; existing pre-Phase-5.1 rows keep their email
@@ -827,14 +831,14 @@ const surveyBody = z.object({
 // the AI persona pipeline produces. Mirrors mapLLMResponseToSimulated
 // in services/dimensions/llm.ts so LLM vs human are directly
 // comparable.
-const HUMAN_ENGAGEMENT_TO_SCORE: Record<string, number> = {
+export const HUMAN_ENGAGEMENT_TO_SCORE: Record<string, number> = {
   abandon: 10, skim: 30, browse: 55, engage: 75, extended: 90,
 };
-const HUMAN_RETENTION_TO_D7: Record<string, number> = {
+export const HUMAN_RETENTION_TO_D7: Record<string, number> = {
   no_return: 0, weak: 5, moderate: 30, strong: 55,
 };
 
-function computeSusScoreLocal(responses: readonly number[]): number {
+export function computeSusScoreLocal(responses: readonly number[]): number {
   // Same canonical SUS-10 calc as services/audience_fit.ts.
   // Inlined to avoid pulling cross-module imports here.
   let sum = 0;

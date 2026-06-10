@@ -175,4 +175,33 @@ router.get('/survey-responses/:scanId', requirePrivyAuth, async (req, res) => {
   });
 });
 
+// ─── Points (partner pilot, 2026-06-10) ─────────────────────────
+// Balance + ledger for the current user. Rows arrive via the partner
+// S2S channel keyed by email and get user_id backfilled on login
+// (privy_auth claim pass), so by the time this runs the user_id
+// filter is the complete view. Same data-isolation boundary as the
+// survey-responses routes above.
+router.get('/points', requirePrivyAuth, async (req, res) => {
+  const userId = req.privyUser!.id;
+  const rows = await db
+    .select({
+      amount: schema.pointTransactions.amount,
+      reason: schema.pointTransactions.reason,
+      source: schema.pointTransactions.source,
+      createdAt: schema.pointTransactions.createdAt,
+    })
+    .from(schema.pointTransactions)
+    .where(eq(schema.pointTransactions.userId, userId))
+    .orderBy(desc(schema.pointTransactions.createdAt));
+  res.json({
+    balance: rows.reduce((s, r) => s + r.amount, 0),
+    transactions: rows.map((r) => ({
+      amount: r.amount,
+      reason: r.reason,
+      source: r.source,
+      created_at: r.createdAt.toISOString(),
+    })),
+  });
+});
+
 export default router;

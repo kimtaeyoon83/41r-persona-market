@@ -98,9 +98,14 @@ pnpm tsx scripts/usage-summary.ts          # analyze /tmp/llm-usage.jsonl
 ## Key Conventions
 
 ### Backend (apps/api)
-- 6 active routes under `src/routes/`, mounted in `src/index.ts`:
+- 7 active routes under `src/routes/`, mounted in `src/index.ts`:
   `auth.ts`, `scan.ts`, `calibration.ts`, `benchmark.ts`, `hello.ts`,
-  `me_responses.ts` (Phase 5.1 — `/api/me/survey-responses[/:scanId]`).
+  `me_responses.ts` (Phase 5.1 — `/api/me/survey-responses[/:scanId]`,
+  `/api/me/points`), `partner.ts` (geulbat pilot 2026-06-10 —
+  `POST /api/partner/geulbat/survey`, S2S gated by
+  `PARTNER_API_KEY_GEULBAT` via `middleware/partner.ts`; email is a
+  provisional identity claimed on Privy login — see
+  `middleware/privy_auth.ts::claimPartnerRows`).
 - Active services in `src/services/`: `llm.ts`, `audience_fit.ts`,
   `scan_pipeline.ts`, `site_classifier.ts`, `site_capture.ts`,
   `cohort_selection.ts`, `anthropic_client.ts`, `aarrr.ts`,

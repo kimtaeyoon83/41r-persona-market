@@ -10,7 +10,7 @@
 
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { PrivyClient, type AuthTokenClaims, type User as PrivyUser } from '@privy-io/server-auth';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { env } from '../config/env.js';
 import { logger } from '../logger.js';
@@ -65,6 +65,32 @@ function extractIdentity(user: PrivyUser): { email: string | null; wallet: strin
 }
 
 /** Upsert the Privy user into the 41R users table. */
+/**
+ * Partner-pilot claim pass (geulbat, 2026-06-10). Survey responses and
+ * point credits that arrived through the partner S2S channel land with
+ * user_id NULL + a Google-verified email. When that email logs into
+ * 41R, backfill user_id so /me/responses and the point balance show
+ * the person's own history. Guard: never claim a survey row for a scan
+ * the user already submitted to directly — that would violate the
+ * (scan_id, user_id) unique index; the Privy-authored row wins.
+ * Non-fatal by design: a claim failure must never block login.
+ */
+async function claimPartnerRows(userId: string, email: string): Promise<void> {
+  try {
+    await db.execute(sql`
+      UPDATE survey_responses SET user_id = ${userId}
+      WHERE lower(email) = lower(${email}) AND user_id IS NULL
+        AND scan_id NOT IN (
+          SELECT scan_id FROM survey_responses WHERE user_id = ${userId}
+        )`);
+    await db.execute(sql`
+      UPDATE point_transactions SET user_id = ${userId}
+      WHERE lower(email) = lower(${email}) AND user_id IS NULL`);
+  } catch (err) {
+    log.warn({ err: (err as Error).message }, 'partner row claim failed (non-fatal)');
+  }
+}
+
 async function upsertUser(claims: AuthTokenClaims, user: PrivyUser): Promise<AuthedUser> {
   const privyId = claims.userId;
   const { email, wallet } = extractIdentity(user);
@@ -85,10 +111,12 @@ async function upsertUser(claims: AuthTokenClaims, user: PrivyUser): Promise<Aut
         updatedAt: new Date(),
       })
       .where(eq(schema.users.privyId, privyId));
+    const effectiveEmail = email ?? existing.email;
+    if (effectiveEmail) await claimPartnerRows(existing.id, effectiveEmail);
     return {
       id: existing.id,
       privyId,
-      email: email ?? existing.email,
+      email: effectiveEmail,
       walletAddress: wallet ?? existing.walletAddress,
       displayName: existing.displayName,
     };
@@ -103,6 +131,7 @@ async function upsertUser(claims: AuthTokenClaims, user: PrivyUser): Promise<Aut
     })
     .returning();
   if (!inserted) throw new Error('users INSERT returned no row');
+  if (inserted.email) await claimPartnerRows(inserted.id, inserted.email);
   return {
     id: inserted.id,
     privyId,

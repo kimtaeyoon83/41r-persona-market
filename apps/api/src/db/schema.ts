@@ -543,3 +543,22 @@ export const settlements = pgTable('settlements', {
   settlementType: varchar('settlement_type', { length: 20 }).notNull().default('usdc'), // usdc | 41r
   settledAt: timestamp('settled_at').defaultNow().notNull(),
 });
+
+// ─── Partner pilot — point ledger (geulbat, 2026-06-10) ─────────────
+// Internal points credited for partner-channel survey submissions.
+// `email` is the provisional key for rows that arrive before the
+// person ever logs into 41R; the privy_auth claim flow backfills
+// `user_id` on first verified-email login. Currency/redemption policy
+// is intentionally undecided — this is an append-only ledger so any
+// future policy can be applied retroactively.
+export const pointTransactions = pgTable('point_transactions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  /** Linked 41R user. NULL until the email is claimed via Privy login. */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  /** Provisional identity key (Google-verified on the partner side). */
+  email: text('email'),
+  amount: integer('amount').notNull(),
+  reason: text('reason').notNull(), // e.g. 'survey'
+  source: text('source').notNull(), // e.g. 'geulbat'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});

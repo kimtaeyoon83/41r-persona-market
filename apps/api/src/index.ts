@@ -8,6 +8,7 @@ import scanRouter from './routes/scan.js';
 import calibrationRouter from './routes/calibration.js';
 import benchmarkRouter from './routes/benchmark.js';
 import meResponsesRouter from './routes/me_responses.js';
+import partnerRouter from './routes/partner.js';
 import { startCalibrationCron } from './services/calibration/cron.js';
 import { allowedOrigins, corsOptions } from './config/cors.js';
 import { logEnvSummary } from './config/env.js';
@@ -53,6 +54,8 @@ app.use('/api/scan', scanRouter);
 app.use('/api/calibration', calibrationRouter);
 app.use('/api/benchmark', benchmarkRouter);
 app.use('/api/me', meResponsesRouter);
+// Partner S2S ingest (geulbat pilot) — key-gated, see middleware/partner.ts
+app.use('/api/partner', partnerRouter);
 
 // Static file serving for screenshots (local dev fallback, production uses R2 CDN)
 if (process.env.NODE_ENV !== 'production') {
