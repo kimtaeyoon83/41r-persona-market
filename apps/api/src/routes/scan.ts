@@ -1964,6 +1964,9 @@ function shapeScanMeta(s: typeof schema.audienceFitScans.$inferSelect) {
     // questions and the report page can show "n custom questions"
     // without a separate fetch.
     custom_questions: s.customQuestions ?? null,
+    /** Ch1 objective page facts measured at capture (no LLM). Null on
+     *  legacy scans — the report's "measured" strip hides itself. */
+    capture_signals: s.captureSignals ?? null,
     created_at: s.createdAt.toISOString(),
     completed_at: s.completedAt ? s.completedAt.toISOString() : null,
   };

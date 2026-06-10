@@ -92,6 +92,18 @@ export type SiteContext = {
   category: string | null;
   categoryConfidence: number | null;
   oneLinePitch: string | null;
+  /** Ch1 objective page facts from capture (behavior-sim spike
+   *  transfer 2026-06-10). Grounds effort/navigability judgments so
+   *  the persona reacts to measured reality, not just the screenshot
+   *  vibe. Optional — legacy scans and capture failures omit it. */
+  pageFacts?: {
+    visibleWordCount: number;
+    linkCount: number;
+    ctaCount: number;
+    navMenuLabels: string[];
+    popupDetected: boolean;
+    loginWall: boolean;
+  } | null;
 };
 
 // ─── Prompt builder ───────────────────────────────────────────────
@@ -213,6 +225,19 @@ export function buildUserPrompt(
       lines.push(`  description: ${siteContext.oneLinePitch}`);
     }
     lines.push('  Anchor your reaction to THIS category. Do not project features (wallet, signing, on-chain UX, etc.) that this category does not include.');
+  }
+  const pf = siteContext?.pageFacts;
+  if (pf) {
+    lines.push('');
+    lines.push('Page facts (measured from the live page — objective, not opinions):');
+    lines.push(`  visible word count: ${pf.visibleWordCount}`);
+    lines.push(`  links: ${pf.linkCount} · CTA/buttons: ${pf.ctaCount}`);
+    if (pf.popupDetected) lines.push('  a popup/modal overlays the page on load');
+    if (pf.loginWall) lines.push('  the landing redirected to a login/auth page');
+    if (pf.navMenuLabels.length > 0) {
+      lines.push(`  navigation menu (verbatim): ${pf.navMenuLabels.join(' / ')}`);
+    }
+    lines.push('  Ground your effort and navigability judgments in these facts. Do not invent features beyond the screenshot and this menu list.');
   }
   lines.push('');
   lines.push('Persona profile:');

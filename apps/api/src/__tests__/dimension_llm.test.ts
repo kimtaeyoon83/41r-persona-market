@@ -245,6 +245,42 @@ describe('buildUserPrompt · Q2 site-context threading', () => {
     expect(prompt).toContain('Persona profile:');
   });
 
+  it('renders the Page facts block when pageFacts is provided (Ch1 grounding, 2026-06-10)', () => {
+    const ctx: SiteContext = {
+      category: 'E-commerce',
+      categoryConfidence: 0.9,
+      oneLinePitch: null,
+      pageFacts: {
+        visibleWordCount: 480,
+        linkCount: 72,
+        ctaCount: 9,
+        navMenuLabels: ['Shop', 'Sale', 'Support'],
+        popupDetected: true,
+        loginWall: false,
+      },
+    };
+    const prompt = buildUserPrompt(persona, 'https://example.com', undefined, ctx);
+    expect(prompt).toContain('Page facts (measured from the live page');
+    expect(prompt).toContain('visible word count: 480');
+    expect(prompt).toContain('links: 72 · CTA/buttons: 9');
+    expect(prompt).toContain('popup/modal overlays the page on load');
+    expect(prompt).not.toContain('redirected to a login/auth page');
+    expect(prompt).toContain('navigation menu (verbatim): Shop / Sale / Support');
+    // Grounding guard — companion to the Q2 anti-projection line.
+    expect(prompt).toContain('Do not invent features beyond the screenshot and this menu list');
+  });
+
+  it('omits the Page facts block when pageFacts is absent — legacy prompt stays byte-identical', () => {
+    const ctx: SiteContext = {
+      category: 'E-commerce',
+      categoryConfidence: 0.9,
+      oneLinePitch: null,
+    };
+    const prompt = buildUserPrompt(persona, 'https://example.com', undefined, ctx);
+    expect(prompt).not.toContain('Page facts');
+    expect(prompt).not.toContain('navigation menu (verbatim)');
+  });
+
   it('renders the Site context block + anti-projection guard when siteContext is provided', () => {
     const ctx: SiteContext = {
       category: 'E-commerce',

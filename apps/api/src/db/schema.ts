@@ -220,6 +220,17 @@ export const audienceFitScans = pgTable('audience_fit_scans', {
   // Site capture (Stagehand-driven, Phase 1B)
   captureScreenshotUrls: jsonb('capture_screenshot_urls').$type<string[]>(),
   captureCompletedAt: timestamp('capture_completed_at'),
+  /** Ch1-style objective page facts measured at capture time (no LLM).
+   *  Behavior-sim spike transfer (2026-06-10): grounds persona prompts
+   *  and renders the report's "measured" strip. Null on legacy scans. */
+  captureSignals: jsonb('capture_signals').$type<{
+    visible_word_count: number;
+    link_count: number;
+    cta_count: number;
+    nav_menu_labels: string[];
+    popup_detected: boolean;
+    login_wall: boolean;
+  }>(),
 
   // Synthesis output — filled at completion. All 0-100 unless noted.
   audienceFitScore: real('audience_fit_score'),

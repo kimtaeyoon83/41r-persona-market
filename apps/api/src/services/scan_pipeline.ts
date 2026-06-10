@@ -177,8 +177,12 @@ async function runScan(scanId: string): Promise<void> {
         .set({
           captureScreenshotUrls: screenshotUrls,
           captureCompletedAt: cap.capturedAt,
+          captureSignals: cap.signals ?? null,
         })
         .where(eq(schema.audienceFitScans.id, scanId));
+      // Refresh local copy (same pattern as category below) so the
+      // Mode A/B persona handlers can thread pageFacts into prompts.
+      scan.captureSignals = cap.signals ?? null;
       log.info(
         { scanId, urls: screenshotUrls.length, fromCache: cap.fromCache },
         'site capture complete'
@@ -358,6 +362,7 @@ async function runScan(scanId: string): Promise<void> {
         category: scan.category,
         categoryConfidence: scan.categoryConfidence,
         oneLinePitch: scan.oneLinePitch,
+        pageFacts: pageFactsFrom(scan.captureSignals),
       },
     });
     if (r.errored) totalErrored += 1;
@@ -551,6 +556,7 @@ async function runModeBPipeline(args: {
         category: scan.category,
         categoryConfidence: scan.categoryConfidence,
         oneLinePitch: scan.oneLinePitch,
+        pageFacts: pageFactsFrom(scan.captureSignals),
       },
     });
     if (r.errored) errored += 1;
@@ -656,6 +662,23 @@ function simulateRetentionDCurveFromD7(d7: number): DCurve {
   if (d7 >= 30) return { d1: 70, d3: 50, d7: 30, d30: 10 };
   if (d7 >= 5) return { d1: 40, d3: 15, d7: 5, d30: 1 };
   return { d1: 5, d3: 1, d7: 0, d30: 0 };
+}
+
+// Snake-case DB jsonb → camelCase SiteContext.pageFacts. Null-safe so
+// legacy scans (capture_signals = null) keep the pre-2026-06-10
+// prompt byte-identical.
+function pageFactsFrom(
+  sig: (typeof schema.audienceFitScans.$inferSelect)['captureSignals'],
+): SiteContext['pageFacts'] {
+  if (!sig) return null;
+  return {
+    visibleWordCount: sig.visible_word_count,
+    linkCount: sig.link_count,
+    ctaCount: sig.cta_count,
+    navMenuLabels: sig.nav_menu_labels ?? [],
+    popupDetected: sig.popup_detected,
+    loginWall: sig.login_wall,
+  };
 }
 
 function avgDCurve(curves: readonly DCurve[]): DCurve {

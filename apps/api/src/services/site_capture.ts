@@ -23,11 +23,41 @@ const LOCAL_DIR = '/tmp/site-captures';
 const NAV_TIMEOUT_MS = 30_000;
 const VIEWPORT = { width: 1280, height: 800 };
 
+/** Ch1-style objective page facts, measured during the capture page
+ *  load — no LLM. Behavior-sim spike transfer (2026-06-10): grounds
+ *  persona prompts (dimensions/llm.ts pageFacts section) and renders
+ *  the report's "measured" strip. */
+export type CaptureSignals = {
+  visible_word_count: number;
+  link_count: number;
+  cta_count: number;
+  nav_menu_labels: string[];
+  popup_detected: boolean;
+  login_wall: boolean;
+};
+
 export type CaptureResult = {
   urls: string[];
   capturedAt: Date;
   fromCache: boolean;
+  /** Null when extraction failed or the cache predates signals. */
+  signals: CaptureSignals | null;
 };
+
+function signalsPathFor(key: string): string {
+  // Sidecar next to the cached PNG so same-day re-scans keep signals.
+  return path.join(LOCAL_DIR, `${path.basename(key, '.png')}.signals.json`);
+}
+
+function readSignalsSidecar(key: string): CaptureSignals | null {
+  try {
+    const p = signalsPathFor(key);
+    if (!fs.existsSync(p)) return null;
+    return JSON.parse(fs.readFileSync(p, 'utf-8')) as CaptureSignals;
+  } catch {
+    return null;
+  }
+}
 
 function dateBucket(): string {
   // YYYY-MM-DD UTC — re-captures only happen across day boundaries.
@@ -84,6 +114,7 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
       urls,
       capturedAt: fs.statSync(localPath).mtime,
       fromCache: true,
+      signals: readSignalsSidecar(key),
     };
   }
 
@@ -97,6 +128,7 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
   });
   let bufFull: Buffer;
   let bufView: Buffer;
+  let signals: CaptureSignals | null = null;
   try {
     const ctx = await browser.newContext({
       viewport: VIEWPORT,
@@ -104,10 +136,27 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
     });
     const page = await ctx.newPage();
-    await page.goto(normalised, {
-      waitUntil: 'networkidle',
-      timeout: NAV_TIMEOUT_MS,
-    });
+    try {
+      await page.goto(normalised, {
+        waitUntil: 'networkidle',
+        timeout: NAV_TIMEOUT_MS,
+      });
+    } catch (err) {
+      // Sites with ever-streaming ad/analytics requests never reach
+      // networkidle (10x10.co.kr, 2026-06-10 — capture failed and the
+      // whole scan silently degraded to text-only). Retry once with
+      // domcontentloaded + a settle wait: a slightly-early screenshot
+      // beats no screenshot, no classifier, and no Ch1 signals.
+      log.warn(
+        { targetUrl: normalised, err: (err as Error).message },
+        'networkidle timeout — retrying with domcontentloaded',
+      );
+      await page.goto(normalised, {
+        waitUntil: 'domcontentloaded',
+        timeout: NAV_TIMEOUT_MS,
+      });
+      await page.waitForTimeout(2500);
+    }
     await page.waitForTimeout(500);
     // Full-page capture for personas (existing behavior).
     bufFull = await page.screenshot({ fullPage: true, type: 'png' });
@@ -116,6 +165,79 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
       type: 'png',
       clip: { x: 0, y: 0, width: VIEWPORT.width, height: VIEWPORT.height },
     });
+
+    // Ch1 objective signals — same page load, one evaluate. Failure
+    // is non-fatal: signals stay null and every consumer hides.
+    try {
+      const finalUrl = page.url();
+      const extracted = await page.evaluate(() => {
+        const text = document.body?.innerText ?? '';
+        const words = text.split(/\s+/).filter(Boolean).length;
+        const anchors = Array.from(document.querySelectorAll('a[href]')).filter((a) => {
+          const el = a as HTMLAnchorElement;
+          const t = (el.innerText || '').trim();
+          return t && el.href && !el.href.startsWith('javascript:');
+        });
+        const ctas = document.querySelectorAll(
+          'button, input[type=submit], [role=button], a.btn, a[class*="btn"]',
+        ).length;
+        // Nav menu labels — nearest nav/header/gnb region anchors,
+        // verbatim text, deduped, capped. Feeds the persona prompt's
+        // "what can you do on this site" grounding.
+        const navLabels: string[] = [];
+        const seen = new Set<string>();
+        for (const a of anchors) {
+          const el = a as HTMLAnchorElement;
+          let p: Element | null = el;
+          let inNav = false;
+          while (p) {
+            const tag = p.tagName.toLowerCase();
+            const cls = (p.className || '').toString().toLowerCase();
+            if (tag === 'nav' || tag === 'header' || cls.includes('gnb') || cls.includes('menu')) {
+              inNav = true;
+              break;
+            }
+            p = p.parentElement;
+          }
+          if (!inNav) continue;
+          const label = (el.innerText || '').trim().replace(/\s+/g, ' ');
+          if (!label || label.length > 30 || seen.has(label)) continue;
+          seen.add(label);
+          navLabels.push(label);
+          if (navLabels.length >= 15) break;
+        }
+        // Popup/modal heuristic: visible dialog roles or fixed
+        // overlays covering ≥ 25% of the viewport.
+        let popup = Boolean(
+          document.querySelector('[role=dialog]:not([hidden]), [class*="modal"]:not([hidden])'),
+        );
+        if (!popup) {
+          const vw = window.innerWidth * window.innerHeight;
+          for (const el of Array.from(document.querySelectorAll('div, section'))) {
+            const cs = getComputedStyle(el);
+            if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden')
+              continue;
+            const r = el.getBoundingClientRect();
+            if ((r.width * r.height) / vw >= 0.25) {
+              popup = true;
+              break;
+            }
+          }
+        }
+        return { words, links: anchors.length, ctas, navLabels, popup };
+      });
+      signals = {
+        visible_word_count: extracted.words,
+        link_count: extracted.links,
+        cta_count: extracted.ctas,
+        nav_menu_labels: extracted.navLabels,
+        popup_detected: extracted.popup,
+        login_wall: /login|signin|sign-in|auth|cert|sso/i.test(new URL(finalUrl).pathname),
+      };
+    } catch (err) {
+      log.warn({ targetUrl: normalised, err: (err as Error).message }, 'signal extraction failed');
+    }
+
     await ctx.close();
   } finally {
     await browser.close();
@@ -127,6 +249,13 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
   // existing fallback contract.
   fs.writeFileSync(localPath, bufFull);
   fs.writeFileSync(viewLocalPath, bufView);
+  if (signals) {
+    try {
+      fs.writeFileSync(signalsPathFor(key), JSON.stringify(signals));
+    } catch {
+      /* sidecar is best-effort — same-day cache hits just lose signals */
+    }
+  }
   log.info(
     { targetUrl: normalised, key, bytesFull: bufFull.length, bytesView: bufView.length },
     'capture written',
@@ -146,6 +275,7 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
     urls: [publicUrl, viewPublicUrl],
     capturedAt: new Date(),
     fromCache: false,
+    signals,
   };
 }
 
