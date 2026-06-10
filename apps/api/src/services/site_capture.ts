@@ -190,16 +190,24 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
           const el = a as HTMLAnchorElement;
           let p: Element | null = el;
           let inNav = false;
+          let inFooter = false;
+          // Walk the FULL ancestor chain — footers often wrap their
+          // link groups in <nav> landmarks (Spotify 2026-06-10: legal/
+          // corporate links flooded nav_menu_labels and personas read
+          // "navigation cluttered with legal links"). Footer wins.
           while (p) {
             const tag = p.tagName.toLowerCase();
             const cls = (p.className || '').toString().toLowerCase();
+            if (tag === 'footer' || cls.includes('footer')) {
+              inFooter = true;
+              break;
+            }
             if (tag === 'nav' || tag === 'header' || cls.includes('gnb') || cls.includes('menu')) {
               inNav = true;
-              break;
             }
             p = p.parentElement;
           }
-          if (!inNav) continue;
+          if (!inNav || inFooter) continue;
           const label = (el.innerText || '').trim().replace(/\s+/g, ' ');
           if (!label || label.length > 30 || seen.has(label)) continue;
           seen.add(label);
