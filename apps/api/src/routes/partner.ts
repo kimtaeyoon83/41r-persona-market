@@ -185,4 +185,96 @@ router.post('/geulbat/survey', requireGeulbatKey, async (req, res) => {
   }
 });
 
+// ─── Stream ① — person profile ───────────────────────────────────
+// One row per (source, email), upserted. Profile body is partner-
+// defined jsonb (recommended vocabulary mirrors testers.profile:
+// age_range, region, occupation, expertise[], crypto_experience...).
+const profileBody = z.object({
+  email: z.string().email().max(320),
+  consent: z.literal(true),
+  profile: z.record(z.unknown()).refine((p) => Object.keys(p).length > 0, {
+    message: 'profile must not be empty',
+  }),
+});
+
+router.post('/geulbat/profile', requireGeulbatKey, async (req, res) => {
+  try {
+    const parsed = profileBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
+      return;
+    }
+    const email = parsed.data.email.toLowerCase();
+    const [existing] = await db
+      .select({ id: schema.partnerProfiles.id })
+      .from(schema.partnerProfiles)
+      .where(
+        and(
+          eq(schema.partnerProfiles.source, 'geulbat'),
+          eq(schema.partnerProfiles.email, email),
+        ),
+      );
+    if (existing) {
+      await db
+        .update(schema.partnerProfiles)
+        .set({ profile: parsed.data.profile, updatedAt: new Date() })
+        .where(eq(schema.partnerProfiles.id, existing.id));
+    } else {
+      await db.insert(schema.partnerProfiles).values({
+        source: 'geulbat',
+        email,
+        profile: parsed.data.profile,
+      });
+    }
+    res.status(existing ? 200 : 201).json({ ok: true, created: !existing });
+  } catch (err) {
+    log.error({ err: (err as Error).message }, 'partner profile ingest failed');
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+// ─── Stream ② — behavior events (batch) ──────────────────────────
+// Partner stores raw events in its own DB and syncs in batches.
+// Event vocabulary is partner-defined; 41R aggregates downstream
+// (dwell/paths/returns → behavioral traits, Mode C ground truth).
+const behaviorBody = z.object({
+  email: z.string().email().max(320),
+  events: z
+    .array(
+      z.object({
+        session_id: z.string().max(120).optional(),
+        event_type: z.string().min(1).max(60),
+        payload: z.record(z.unknown()).optional(),
+        occurred_at: z.string().datetime(),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+
+router.post('/geulbat/behavior', requireGeulbatKey, async (req, res) => {
+  try {
+    const parsed = behaviorBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
+      return;
+    }
+    const email = parsed.data.email.toLowerCase();
+    await db.insert(schema.partnerBehaviorEvents).values(
+      parsed.data.events.map((e) => ({
+        source: 'geulbat',
+        email,
+        sessionId: e.session_id ?? null,
+        eventType: e.event_type,
+        payload: e.payload ?? null,
+        occurredAt: new Date(e.occurred_at),
+      })),
+    );
+    res.status(201).json({ ok: true, inserted: parsed.data.events.length });
+  } catch (err) {
+    log.error({ err: (err as Error).message }, 'partner behavior ingest failed');
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
 export default router;

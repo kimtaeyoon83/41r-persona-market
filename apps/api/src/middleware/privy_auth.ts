@@ -86,6 +86,12 @@ async function claimPartnerRows(userId: string, email: string): Promise<void> {
     await db.execute(sql`
       UPDATE point_transactions SET user_id = ${userId}
       WHERE lower(email) = lower(${email}) AND user_id IS NULL`);
+    await db.execute(sql`
+      UPDATE partner_profiles SET user_id = ${userId}
+      WHERE lower(email) = lower(${email}) AND user_id IS NULL`);
+    await db.execute(sql`
+      UPDATE partner_behavior_events SET user_id = ${userId}
+      WHERE lower(email) = lower(${email}) AND user_id IS NULL`);
   } catch (err) {
     log.warn({ err: (err as Error).message }, 'partner row claim failed (non-fatal)');
   }

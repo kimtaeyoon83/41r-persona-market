@@ -562,3 +562,42 @@ export const pointTransactions = pgTable('point_transactions', {
   source: text('source').notNull(), // e.g. 'geulbat'
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+// ─── Partner pilot — person profile (geulbat, 2026-06-10) ───────────
+// Stream ① of the partner data model (profile / behavior / evaluation).
+// One row per (source, email); the profile body is deliberately a
+// flexible jsonb — the partner decides its own field vocabulary
+// (recommended keys mirror the legacy testers.profile shape:
+// age_range, region, occupation, expertise[], crypto_experience,
+// ui_preference, languages[], device_types[], ...). This is the
+// demographics raw material for persona-twin generation.
+export const partnerProfiles = pgTable('partner_profiles', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  source: text('source').notNull(), // e.g. 'geulbat'
+  email: text('email').notNull(),
+  /** Linked 41R user — NULL until claimed on Privy login. */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  profile: jsonb('profile').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  uniqSourceEmail: uniqueIndex('partner_profiles_source_email_uniq').on(t.source, t.email),
+}));
+
+// ─── Partner pilot — behavior events (geulbat, 2026-06-10) ──────────
+// Stream ② — usage tracking, batch-synced from the partner's own
+// store. Event vocabulary is partner-defined (event_type + payload);
+// 41R aggregates later (dwell, paths, return visits → behavioral
+// traits for persona twins v2 + Mode C calibration ground truth).
+export const partnerBehaviorEvents = pgTable('partner_behavior_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  source: text('source').notNull(),
+  email: text('email').notNull(),
+  /** Linked 41R user — NULL until claimed on Privy login. */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  sessionId: text('session_id'),
+  eventType: text('event_type').notNull(), // e.g. 'pageview' | 'dwell' | 'leave'
+  payload: jsonb('payload'),
+  occurredAt: timestamp('occurred_at').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
