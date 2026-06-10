@@ -583,3 +583,17 @@ export const authApi = {
    *  setAuthTokenGetter() so the bearer is auto-attached. */
   getMe: () => request<MeResponse>('/api/auth/me'),
 };
+
+
+/** Partner hosted-survey submit (geulbat pilot, 2026-06-10). The
+ *  signed `pt` handoff token replaces Privy auth — identity (email +
+ *  scan id) lives inside the token, so no bearer header is needed. */
+export function submitSurveyByToken(
+  token: string,
+  body: Parameters<typeof scanApi.submitSurvey>[1],
+) {
+  return request<{ ok: boolean; first_submission: boolean; points_awarded: number }>(
+    '/api/partner/geulbat/survey-by-token',
+    { method: 'POST', body: JSON.stringify({ ...body, token }) },
+  );
+}

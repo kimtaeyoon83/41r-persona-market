@@ -20,6 +20,7 @@
 
 import { Router, type Router as RouterType } from 'express';
 import { z } from 'zod';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { requireGeulbatKey } from '../middleware/partner.js';
@@ -51,32 +52,77 @@ const partnerSurveyBody = surveyBody.extend({
   consent: z.literal(true),
 });
 
-router.post('/geulbat/survey', requireGeulbatKey, async (req, res) => {
-  try {
-    const parsed = partnerSurveyBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
-      return;
-    }
-    const body = parsed.data;
-    const email = body.email.toLowerCase();
-    if (!UUID_RE.test(body.scan_id)) {
-      res.status(404).json({ error: 'scan_not_found' });
-      return;
-    }
+// ─── Hosted-survey handoff tokens ─────────────────────────────────
+// The survey CONTENT (SUS-10, custom questions, voice prompts) is
+// 41R-owned, so the partner never rebuilds the form: its server asks
+// for a short-lived signed token, sends the user to 41R's hosted
+// survey page (?pt=<token>), and the page submits with the token in
+// place of Privy auth. HMAC secret reuses the partner key — same two-
+// party trust domain, no extra env.
+//   token = base64url({e: email, s: scanId, x: expiresEpochSec}) +
+//           '.' + hmacSHA256(payload, PARTNER_API_KEY_GEULBAT)
+const TOKEN_TTL_SEC = 30 * 60;
 
-    const [scan] = await db
-      .select()
-      .from(schema.audienceFitScans)
-      .where(eq(schema.audienceFitScans.id, body.scan_id));
-    if (!scan) {
-      res.status(404).json({ error: 'scan_not_found' });
-      return;
-    }
-    if (scan.status !== 'completed') {
-      res.status(409).json({ error: 'scan_not_completed', status: scan.status });
-      return;
-    }
+function b64url(buf: Buffer): string {
+  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function signToken(email: string, scanId: string, secret: string): { token: string; exp: number } {
+  const exp = Math.floor(Date.now() / 1000) + TOKEN_TTL_SEC;
+  const payload = b64url(Buffer.from(JSON.stringify({ e: email, s: scanId, x: exp })));
+  const sig = b64url(createHmac('sha256', secret).update(payload).digest());
+  return { token: `${payload}.${sig}`, exp };
+}
+
+function verifyToken(
+  token: string,
+  secret: string,
+): { email: string; scanId: string } | null {
+  const dot = token.lastIndexOf('.');
+  if (dot <= 0) return null;
+  const payload = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const want = b64url(createHmac('sha256', secret).update(payload).digest());
+  const a = Buffer.from(sig);
+  const b = Buffer.from(want);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  try {
+    const body = JSON.parse(
+      Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8'),
+    ) as { e?: string; s?: string; x?: number };
+    if (!body.e || !body.s || !body.x) return null;
+    if (body.x < Math.floor(Date.now() / 1000)) return null;
+    return { email: body.e, scanId: body.s };
+  } catch {
+    return null;
+  }
+}
+
+type SurveyAnswers = z.infer<typeof surveyBody>;
+
+type IngestResult =
+  | { status: 'scan_not_found' }
+  | { status: 'scan_not_completed'; scanStatus: string }
+  | { status: 'ok'; firstSubmission: boolean; pointsAwarded: number };
+
+/** Shared ingest core — used by both the S2S channel (/geulbat/survey)
+ *  and the hosted-page token channel (/geulbat/survey-by-token). */
+async function ingestGeulbatSurvey(
+  scanId: string,
+  emailRaw: string,
+  body: SurveyAnswers,
+): Promise<IngestResult> {
+  const email = emailRaw.toLowerCase();
+  if (!UUID_RE.test(scanId)) return { status: 'scan_not_found' };
+
+  const [scan] = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(eq(schema.audienceFitScans.id, scanId));
+  if (!scan) return { status: 'scan_not_found' };
+  if (scan.status !== 'completed') {
+    return { status: 'scan_not_completed', scanStatus: scan.status };
+  }
 
     // Human-side dimension scores — identical recipe to the Privy
     // survey handler so calibration rows compare apples-to-apples.
@@ -90,7 +136,7 @@ router.post('/geulbat/survey', requireGeulbatKey, async (req, res) => {
     const cohortRows = await db
       .select()
       .from(schema.scanCohortResults)
-      .where(eq(schema.scanCohortResults.scanId, body.scan_id));
+      .where(eq(schema.scanCohortResults.scanId, scanId));
     const totalN = cohortRows.reduce((s, c) => s + c.nCompleted, 0) || 1;
     const wAvg = (
       key: 'happinessMean' | 'engagementMean' | 'adoptionMean' | 'retentionMean' | 'taskSuccessMean',
@@ -138,7 +184,7 @@ router.post('/geulbat/survey', requireGeulbatKey, async (req, res) => {
       .from(schema.surveyResponses)
       .where(
         and(
-          eq(schema.surveyResponses.scanId, body.scan_id),
+          eq(schema.surveyResponses.scanId, scanId),
           eq(schema.surveyResponses.email, email),
           isNull(schema.surveyResponses.userId),
         ),
@@ -152,7 +198,7 @@ router.post('/geulbat/survey', requireGeulbatKey, async (req, res) => {
         .where(eq(schema.surveyResponses.id, existing.id));
     } else {
       await db.insert(schema.surveyResponses).values({
-        scanId: body.scan_id,
+        scanId,
         userId: null,
         email,
         ...surveyValues,
@@ -170,17 +216,119 @@ router.post('/geulbat/survey', requireGeulbatKey, async (req, res) => {
       });
     }
 
-    log.info(
-      { scanId: body.scan_id, email: email.replace(/(.{2}).*(@.*)/, '$1***$2'), firstSubmission },
-      'partner survey ingested',
-    );
-    res.status(firstSubmission ? 201 : 200).json({
+  log.info(
+    { scanId, email: email.replace(/(.{2}).*(@.*)/, '$1***$2'), firstSubmission },
+    'partner survey ingested',
+  );
+  return {
+    status: 'ok',
+    firstSubmission,
+    pointsAwarded: firstSubmission ? PILOT_SURVEY_POINTS : 0,
+  };
+}
+
+function respondIngest(res: import('express').Response, r: IngestResult): void {
+  if (r.status === 'scan_not_found') {
+    res.status(404).json({ error: 'scan_not_found' });
+  } else if (r.status === 'scan_not_completed') {
+    res.status(409).json({ error: 'scan_not_completed', status: r.scanStatus });
+  } else {
+    res.status(r.firstSubmission ? 201 : 200).json({
       ok: true,
-      first_submission: firstSubmission,
-      points_awarded: firstSubmission ? PILOT_SURVEY_POINTS : 0,
+      first_submission: r.firstSubmission,
+      points_awarded: r.pointsAwarded,
     });
+  }
+}
+
+// ─── Channel A: S2S survey forward (partner renders its own form) ──
+router.post('/geulbat/survey', requireGeulbatKey, async (req, res) => {
+  try {
+    const parsed = partnerSurveyBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
+      return;
+    }
+    const { scan_id, email, consent: _c, ...answers } = parsed.data;
+    respondIngest(res, await ingestGeulbatSurvey(scan_id, email, answers as SurveyAnswers));
   } catch (err) {
     log.error({ err: (err as Error).message }, 'partner survey ingest failed');
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+// ─── Channel B: hosted survey handoff ─────────────────────────────
+// B1 — partner server mints a token (key-gated).
+const sessionTokenBody = z.object({
+  email: z.string().email().max(320),
+  scan_id: z.string().uuid(),
+});
+
+router.post('/geulbat/session-token', requireGeulbatKey, async (req, res) => {
+  try {
+    const parsed = sessionTokenBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
+      return;
+    }
+    const { email, scan_id } = parsed.data;
+    const [scan] = await db
+      .select({ id: schema.audienceFitScans.id, status: schema.audienceFitScans.status })
+      .from(schema.audienceFitScans)
+      .where(eq(schema.audienceFitScans.id, scan_id));
+    if (!scan) {
+      res.status(404).json({ error: 'scan_not_found' });
+      return;
+    }
+    if (scan.status !== 'completed') {
+      res.status(409).json({ error: 'scan_not_completed', status: scan.status });
+      return;
+    }
+    const secret = process.env.PARTNER_API_KEY_GEULBAT!; // middleware guarantees presence
+    const { token, exp } = signToken(email.toLowerCase(), scan_id, secret);
+    const webBase = process.env.WEB_PUBLIC_URL ?? 'https://app.project-rpm.xyz';
+    res.json({
+      token,
+      expires_at: new Date(exp * 1000).toISOString(),
+      survey_url: `${webBase}/validator/survey/${scan_id}?pt=${encodeURIComponent(token)}`,
+    });
+  } catch (err) {
+    log.error({ err: (err as Error).message }, 'session token issue failed');
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+// B2 — the hosted survey page submits with the token. NO partner key:
+// this is called from the respondent's browser; the token IS the auth
+// (HMAC-signed by us, 30-min TTL, bound to one email + one scan).
+const tokenSurveyBody = surveyBody.extend({
+  token: z.string().min(20).max(2048),
+});
+
+router.post('/geulbat/survey-by-token', async (req, res) => {
+  try {
+    const secret = process.env.PARTNER_API_KEY_GEULBAT;
+    if (!secret || secret.length < 12) {
+      res.status(503).json({ error: 'partner_ingest_disabled' });
+      return;
+    }
+    const parsed = tokenSurveyBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
+      return;
+    }
+    const { token, ...answers } = parsed.data;
+    const claims = verifyToken(token, secret);
+    if (!claims) {
+      res.status(401).json({ error: 'token_invalid_or_expired' });
+      return;
+    }
+    respondIngest(
+      res,
+      await ingestGeulbatSurvey(claims.scanId, claims.email, answers as SurveyAnswers),
+    );
+  } catch (err) {
+    log.error({ err: (err as Error).message }, 'token survey ingest failed');
     res.status(500).json({ error: 'internal_error' });
   }
 });
