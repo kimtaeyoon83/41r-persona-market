@@ -592,7 +592,14 @@ export const partnerProfiles = pgTable('partner_profiles', {
 export const partnerBehaviorEvents = pgTable('partner_behavior_events', {
   id: uuid('id').defaultRandom().primaryKey(),
   source: text('source').notNull(),
-  email: text('email').notNull(),
+  /** NULL for anonymous snippet events (GA-style device-only). When
+   *  the same anon_id later identifies (data-uid token), new events
+   *  carry the email; old anon rows can be joined retroactively via
+   *  anon_id. */
+  email: text('email'),
+  /** Snippet device id (localStorage uuid) — present on snippet
+   *  events, NULL on server-side S2S batches. */
+  anonId: text('anon_id'),
   /** Linked 41R user — NULL until claimed on Privy login. */
   userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
   sessionId: text('session_id'),

@@ -18,7 +18,7 @@
 // partner's own site, so human responses line up against the AI
 // prediction for the same page — the calibration showcase pair.
 
-import { Router, type Router as RouterType } from 'express';
+import express, { Router, type Router as RouterType } from 'express';
 import { z } from 'zod';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -421,6 +421,122 @@ router.post('/geulbat/behavior', requireGeulbatKey, async (req, res) => {
     res.status(201).json({ ok: true, inserted: parsed.data.events.length });
   } catch (err) {
     log.error({ err: (err as Error).message }, 'partner behavior ingest failed');
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+
+// ─── GA-style drop-in snippet ─────────────────────────────────────
+// One script tag on the partner site, zero further code changes:
+//   <script src="https://api.project-rpm.xyz/api/partner/t.js"
+//           data-site="<site key>" defer></script>
+// Auto-captures pageview (SPA route changes via History patch),
+// dwell+scroll on leave, session boundaries (30-min idle), and ships
+// batches via sendBeacon as text/plain — a CORS "simple request", so
+// delivery needs no preflight and no CORS response headers.
+//
+// Identity: anonymous device id (localStorage) by default, GA-style.
+// For email join the partner server-renders data-uid with the same
+// HMAC token used for survey handoff (minted per page render, so the
+// 30-min TTL is irrelevant). The site key is PUBLIC (like a GA
+// measurement id) — it only routes to a source bucket; the S2S
+// partner key never appears in a browser.
+
+function siteKeySource(k: string): string | null {
+  const gb = process.env.PARTNER_SITE_KEY_GEULBAT;
+  if (gb && gb.length >= 12 && k === gb) return 'geulbat';
+  return null;
+}
+
+const SNIPPET = `(function(){
+var s=document.currentScript;if(!s)return;
+var k=s.getAttribute('data-site');if(!k)return;
+var uid=s.getAttribute('data-uid')||null;
+var api=new URL(s.src).origin+'/api/partner/t';
+function id(){try{return crypto.randomUUID()}catch(e){return 'x'+Date.now()+Math.random().toString(36).slice(2)}}
+var aid;try{aid=localStorage.getItem('_rpm_aid');if(!aid){aid=id();localStorage.setItem('_rpm_aid',aid)}}catch(e){aid='na'}
+var sid,fresh=false;try{var ls=+(sessionStorage.getItem('_rpm_ts')||0);sid=sessionStorage.getItem('_rpm_sid');
+if(!sid||Date.now()-ls>1800000){sid=id();sessionStorage.setItem('_rpm_sid',sid);fresh=true}
+sessionStorage.setItem('_rpm_ts',String(Date.now()))}catch(e){sid='na'}
+var q=[],path=location.pathname,t0=Date.now(),smax=0;
+function push(t,p){q.push({t:t,p:p||{},ts:new Date().toISOString(),sid:sid})}
+function flush(){if(!q.length)return;var b=JSON.stringify({k:k,aid:aid,uid:uid,ev:q.splice(0,50)});
+try{navigator.sendBeacon(api,new Blob([b],{type:'text/plain'}))}catch(e){
+try{fetch(api,{method:'POST',body:b,headers:{'Content-Type':'text/plain'},keepalive:true})}catch(e2){}}}
+function dwell(){push('dwell',{path:path,ms:Date.now()-t0,scroll_pct:smax})}
+function nav(np){if(np===path)return;dwell();path=np;t0=Date.now();smax=0;push('pageview',{path:np});if(q.length>=20)flush()}
+window.addEventListener('scroll',function(){var h=document.documentElement,d=h.scrollHeight-h.clientHeight;
+if(d>0){var p=Math.round(100*h.scrollTop/d);if(p>smax)smax=p}},{passive:true});
+['pushState','replaceState'].forEach(function(m){var o=history[m];history[m]=function(){o.apply(this,arguments);nav(location.pathname)}});
+window.addEventListener('popstate',function(){nav(location.pathname)});
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden'){dwell();flush();t0=Date.now()}});
+window.addEventListener('pagehide',function(){dwell();push('session_end',{});flush()});
+if(fresh)push('session_start',{entry_path:path,referrer:document.referrer||''});
+push('pageview',{path:path});
+setInterval(flush,15000);flush();
+})();`;
+
+router.get('/t.js', (_req, res) => {
+  res
+    .type('application/javascript')
+    .set('Cache-Control', 'public, max-age=3600')
+    .send(SNIPPET);
+});
+
+const beaconEvent = z.object({
+  t: z.string().min(1).max(60),
+  p: z.record(z.unknown()).optional(),
+  ts: z.string().datetime(),
+  sid: z.string().max(120).optional(),
+});
+const beaconBody = z.object({
+  k: z.string().min(12).max(128),
+  aid: z.string().max(120),
+  uid: z.string().max(2048).nullable().optional(),
+  ev: z.array(beaconEvent).min(1).max(50),
+});
+
+router.post('/t', express.text({ type: '*/*', limit: '64kb' }), async (req, res) => {
+  try {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(typeof req.body === 'string' ? req.body : '');
+    } catch {
+      res.status(400).json({ error: 'invalid_json' });
+      return;
+    }
+    const parsed = beaconBody.safeParse(raw);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_body' });
+      return;
+    }
+    const source = siteKeySource(parsed.data.k);
+    if (!source) {
+      res.status(401).json({ error: 'unknown_site_key' });
+      return;
+    }
+    // Optional identity — same HMAC token family as the survey
+    // handoff; an invalid/expired uid degrades to anonymous rather
+    // than rejecting the batch (tracking must never break the page).
+    let email: string | null = null;
+    const secret = process.env.PARTNER_API_KEY_GEULBAT;
+    if (parsed.data.uid && secret && secret.length >= 12) {
+      email = verifyToken(parsed.data.uid, secret)?.email ?? null;
+    }
+    await db.insert(schema.partnerBehaviorEvents).values(
+      parsed.data.ev.map((e) => ({
+        source,
+        email,
+        anonId: parsed.data.aid,
+        sessionId: e.sid ?? null,
+        eventType: e.t,
+        payload: e.p ?? null,
+        occurredAt: new Date(e.ts),
+      })),
+    );
+    res.status(204).end();
+  } catch (err) {
+    log.error({ err: (err as Error).message }, 'beacon ingest failed');
     res.status(500).json({ error: 'internal_error' });
   }
 });
