@@ -93,6 +93,11 @@ pnpm tsx scripts/backfill-cohort-ci.ts [--dry-run]                 # bootstrap C
 pnpm tsx scripts/backfill-site-classifier.ts [--dry-run] [--max N] # re-run classifier on placeholder scans
 pnpm tsx scripts/update-validator-voice-samples.ts                 # in-place voice rewrite for existing personas
 pnpm tsx scripts/usage-summary.ts          # analyze /tmp/llm-usage.jsonl
+pnpm tsx scripts/qa-validator-scans.ts [--max=10] [--scan=<id>]  # cross-scan QA (Layer 2):
+                                           # crypto-vocab on non-crypto, misfit rank-1 >30%,
+                                           # weighted-AARRR all-zero, numeric-vs-voice contradictions
+pnpm tsx scripts/spike-behavior-sim/capture.ts scripts/spike-behavior-sim/sites/<id>.json
+pnpm tsx scripts/spike-behavior-sim/run.ts spike/<id>/graph.json [--start=<node>] [--n=N] [--suffix=s]
 ```
 
 ## Key Conventions
@@ -469,6 +474,65 @@ The validator pipeline does not record per-persona browser sessions
 `captureScreenshotUrls` array; future per-persona replays would need
 a new pipeline.
 
+## Partner Pilot — geulbat (2026-06-10)
+
+First instance of the tester-data loop: a partner site feeds three
+streams into 41R, all keyed by Google-verified email and claimed on
+the person's first Privy login (`privy_auth.ts::claimPartnerRows`
+backfills `user_id` across all partner tables; non-fatal, never
+blocks login; skips scans the user already submitted to directly so
+the `(scan_id, user_id)` unique index holds).
+
+```
+① profile    POST /api/partner/geulbat/profile     → partner_profiles (flexible jsonb)
+② behavior   <script .../api/partner/t.js data-site=…>  → partner_behavior_events
+             (GA-style snippet: pageview/dwell/session, sendBeacon text/plain;
+              S2S POST /geulbat/behavior is the server-side fallback)
+③ survey     POST /geulbat/session-token → hosted page ?pt=<token>
+             → /geulbat/survey-by-token → survey_responses + calibration_records
+             + point_transactions (+100pt pilot, first submission only)
+```
+
+**Two key tiers — never confuse them:**
+- `PARTNER_API_KEY_GEULBAT` — S2S secret, also the HMAC secret for
+  handoff/identify tokens. Server env only.
+- `PARTNER_SITE_KEY_GEULBAT` — public like a GA measurement id; only
+  routes beacons to a source bucket.
+
+Integration guide for the geulbat repo:
+[`docs/partner-geulbat-integration.md`](docs/partner-geulbat-integration.md).
+Pending value: anchor scanId (run a 41R scan of the geulbat prod URL).
+Points policy is intentionally undecided — the ledger is append-only
+so any future policy can reprice retroactively.
+
+## Behavior Simulation (Mode C — gated, not shipped)
+
+Spec: `docs/41rpm_behavior_simulation_spec_v1.md`. Validation spike +
+v1-v7 results: `docs/41rpm_behavior_sim_spike_v0.md` (§7 carries four
+empirical findings that feed spec v1.1: trace summary is mandatory;
+indifferent AND satisfied exits both need state gates — LLMs never
+leave from boredom nor declare satisfaction; relevance must be
+Ch1-led, not self-reported). The L4 internal-state core already
+exists as a pure module: `apps/api/src/services/behavior_sim/state.ts`
+(5 state vars + 4-mode leave gate, 17 direction tests, not wired to
+any route). Agreed direction: Mode C runs ALONGSIDE Mode A/B (they
+measure different funnel stages), graph mode first, labeled
+"탐색 시뮬레이션". **Build gate: Phase 1 human think-aloud data (5
+people, NHIS protocol in the spike doc) — do not iterate the
+simulator further without it (risk: tuning toward aesthetics).**
+
+## Capture Signals (Ch1, 2026-06-10 spike transfer)
+
+`captureSite()` measures objective page facts in the capture page
+load (word/link/CTA counts, nav menu labels, popup heuristic,
+login-wall redirect) → `audience_fit_scans.capture_signals` (null on
+legacy scans — every consumer hides). They ground persona prompts
+(`SiteContext.pageFacts` → "Page facts (measured)" section; without
+pageFacts the prompt is byte-identical to pre-2026-06-10, locked by
+`dimension_llm.test.ts`) and render the report's "MEASURED · NO LLM"
+strip. Capture falls back networkidle → domcontentloaded on timeout
+(ad-heavy sites previously degraded silently to text-only scans).
+
 ## LLM Usage Tracking
 
 - Unified JSONL log at `USAGE_LOG_PATH` (default `/tmp/llm-usage.jsonl`)
@@ -526,8 +590,14 @@ a new pipeline.
 - **Settlement worker** — exponential backoff 30s → 1m → 5m → 15m cap,
   24h MAX_AGE terminal marker (`services/settlement-worker.ts`). Runs in
   background; disable via `SETTLEMENT_WORKER_DISABLED=1` for tests.
-- **DB migrations** — `apps/api/drizzle/` holds versioned SQL. Use
-  `pnpm --filter api db:migrate` for Railway deploys. `db:push` is dev-only.
+- **DB migrations** — `apps/api/drizzle/` holds versioned SQL.
+  **Production reality check (2026-06-10): the prod DB's drizzle
+  journal is EMPTY** — the schema was historically applied via
+  `db:push`, so `db:migrate` against prod would replay from 0000 and
+  fail. Until a baselining pass records 0000-0012 as applied, ship
+  prod schema changes as idempotent SQL applied manually (the
+  0009-0012 files are written idempotent — `IF NOT EXISTS` /
+  constraint guards — for exactly this). `db:push` stays dev-only.
 
 ## Environment Variables
 
@@ -560,6 +630,10 @@ CORS_ALLOWED_ORIGINS=...    # comma-separated; overrides the default allowlist
 USE_VISION=1                # Use Sonnet vision for persona response (otherwise Haiku text)
 USE_SIMULATOR=0             # Skip LLM, use synthetic responses (dev iteration)
 ADMIN_API_KEY=...           # Gates /api/admin/* (≥12 chars; absent ⇒ 404)
+PARTNER_API_KEY_GEULBAT=... # Partner S2S secret + HMAC token secret (≥12 chars; absent ⇒ 503).
+                            # SERVER-ONLY — never in client bundles or git.
+PARTNER_SITE_KEY_GEULBAT=...# Public tracking site key for the t.js snippet (like a GA id)
+WEB_PUBLIC_URL=...          # Base for partner survey_url links (default https://app.project-rpm.xyz)
 LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
 ```
 
@@ -846,6 +920,36 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   `assembleFrictionClusters` pure helper IS shared — that's the
   right level of reuse.
 
+- Ship `PARTNER_API_KEY_GEULBAT` to a browser, commit it, or accept a
+  browser-supplied email anywhere outside the two designed channels
+  (partner-key S2S routes, HMAC-token routes). The site key
+  (`PARTNER_SITE_KEY_GEULBAT`) is the only partner value allowed in
+  client markup — it is public by design, like a GA measurement id.
+- Change `POST /api/partner/t` to require `application/json`. The
+  text/plain body is what makes sendBeacon a CORS simple request (no
+  preflight) — "fixing" the content type silently drops beacons from
+  partner origins not in the CORS allowlist.
+- Extend `t.js` to capture content (text, titles, keystrokes, form
+  values). The consent copy promises paths/durations/scroll only —
+  geulbat is a WRITING app; capturing content breaks the consent
+  contract, not just privacy hygiene.
+- Mutate or recompute `point_transactions` rows. The ledger is
+  append-only precisely because the reward policy is undecided — a
+  future policy reprices by appending adjustments, never by editing.
+- Feed personas an under-specified objective fact without qualifying
+  what is NOT known. The 2026-06-10 Spotify case: a bare
+  "popup detected" fact seeded a fabricated "wallet connect required"
+  friction; the fix was "(content not identified — do not assume what
+  it asks for)". When adding new pageFacts lines, state the unknowns.
+- Re-include footer links in `nav_menu_labels` extraction (footers
+  often wrap link groups in <nav> landmarks — Spotify's legal links
+  polluted the menu list and personas reported "navigation cluttered
+  with legal links" as a top friction; that was OUR artifact).
+- Make `claimPartnerRows` fatal or remove its already-submitted-scan
+  guard. A claim failure must never block login, and claiming a scan
+  the user already answered directly would violate the
+  `(scan_id, user_id)` unique index — the Privy-authored row wins.
+
 ## Investor Dashboard Narrative
 
 The "persona ≈ human" claim only holds **within matched demographic cohorts**.
@@ -975,19 +1079,17 @@ its content, exactly the intended behavior. Lesson recorded: when
 feeding objective facts to personas, an under-specified fact is a
 hallucination seed — qualify what is NOT known.
 
-### 5. Cross-scan QA script (Layer 2 detection)
+### 5. Cross-scan QA script (Layer 2 detection) — CLOSED (2026-06-10)
 
-**Status:** Not built. The proposed `scripts/qa-validator-scans.ts`
-would pull the last N scans and flag (a) non-crypto scans with
-crypto vocabulary in friction quotes, (b) "Wrong audience" rank-1
-clusters representing >30% of personas, (c) weighted-view
-n_passing collapsing to all zeros (would catch the n_passing=0
-regression).
-
-**Unblock:** ~1 hour engineering. Useful before Phase 2 ship to
-build before/after comparisons across all historic scans.
-
-**Cost:** ~1 hour.
+**Resolution:** `scripts/qa-validator-scans.ts` shipped with the
+three planned checks plus a fourth from the behavior-sim spike's
+gate-vs-utterance pattern: (d) numeric-vs-voice contradictions
+(adoption ≥70 with strongly negative voice; abandon-level engagement
+with adoption ≥50). Validated against prod on day one: it flagged
+both 2026-06-10 Spotify scans correctly (the pre-fix wallet
+fabrication and the footer-link artifact cluster) while all four
+uniswap scans passed clean. Run it after any batch of scans; flags
+are human-review signals, not verdicts.
 
 ### 6. UI auto-flag for domain mismatch (Layer 1 detection)
 
