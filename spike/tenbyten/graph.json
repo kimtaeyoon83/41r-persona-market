@@ -1,0 +1,2007 @@
+{
+  "site": "www.10x10.co.kr",
+  "need": "다음 주에 친구 집들이에 가는데, 괜찮은 집들이 선물이 있을지 궁금해서 이 사이트에 들어왔다.",
+  "captured_at": "2026-06-10",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "nodes": [
+    {
+      "id": "home",
+      "url": "https://www.10x10.co.kr/",
+      "label": "홈",
+      "note": "cold landing",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/",
+      "screenshot": "spike/tenbyten/screens/home.png",
+      "screenshot_top": "spike/tenbyten/screens/home.top.png",
+      "signals": {
+        "visible_word_count": 1745,
+        "link_count": 69,
+        "cta_count": 188
+      },
+      "edges": [
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "할인특가",
+          "to": "sale",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "모난베어 [사은품증정](모난베어) 하트날려 15% 2,970원 텐텐배송",
+          "to": "py_prd_asp_itemid_7513946",
+          "y": 954
+        },
+        {
+          "label": "젊은이마켓 요정 불멍 무드등 모닥불 탁상 조명 수유등 취침등 3,900원",
+          "to": "py_prd_asp_itemid_7463175",
+          "y": 1942
+        },
+        {
+          "label": "포코아르 [포코아르] 토마토 미니 머그 5% 36,100원 5%쿠폰",
+          "to": "product_mug",
+          "y": 3019
+        },
+        {
+          "label": "초른 방울토마토 책갈피 9,000원",
+          "to": "py_prd_asp_itemid_7483678",
+          "y": 3019
+        },
+        {
+          "label": "최삼색 모찌떡커플 핑크 마스킹 테이프 14% 5,130 텐텐배송 5%쿠폰",
+          "to": "py_prd_asp_itemid_7518096",
+          "y": 4036
+        },
+        {
+          "label": "머그 모으는 게 제 취미거든요! ☕ 뻔-하지 않은 미니 머그 수집가",
+          "to": "event_mug",
+          "y": 10319
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 14449
+        }
+      ],
+      "off_graph_link_count": 52
+    },
+    {
+      "id": "gift_recommend",
+      "url": "https://www.10x10.co.kr/shoppingtoday/gift_recommend.asp",
+      "label": "선물포장 서비스",
+      "note": "선물포장 서비스 + 선물 상품 그리드 — 정답 경로 후보이나 라벨은 화면 텍스트 그대로",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shoppingtoday/gift_recommend.asp",
+      "screenshot": "spike/tenbyten/screens/gift_recommend.png",
+      "screenshot_top": "spike/tenbyten/screens/gift_recommend.top.png",
+      "signals": {
+        "visible_word_count": 384,
+        "link_count": 85,
+        "cta_count": 3
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "할인특가",
+          "to": "sale",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        }
+      ],
+      "off_graph_link_count": 36
+    },
+    {
+      "id": "best",
+      "url": "https://www.10x10.co.kr/award/awardlist.asp?atype=b",
+      "label": "베스트",
+      "note": "그럴듯한 선물 탐색 경로",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/award/awardlist.asp?atype=b",
+      "screenshot": "spike/tenbyten/screens/best.png",
+      "screenshot_top": "spike/tenbyten/screens/best.top.png",
+      "signals": {
+        "visible_word_count": 1464,
+        "link_count": 452,
+        "cta_count": 2
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "할인특가",
+          "to": "sale",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "[웨이투페치] 스윗 무드 노트 (2종 선택)",
+          "to": "py_prd_asp_itemid_7507359",
+          "y": 989
+        },
+        {
+          "label": "[웨이투페치] 빅 패턴 마스킹 블록 키스컷 v.4~7",
+          "to": "py_prd_asp_itemid_7498647",
+          "y": 989
+        },
+        {
+          "label": "[웨이투페치] 혼잣말 메시지 키스컷 v.2~3",
+          "to": "py_prd_asp_itemid_7487802",
+          "y": 989
+        },
+        {
+          "label": "[웨이투페치] 미니 레코드 노트 라이트 (1달용) (2종 선택)",
+          "to": "py_prd_asp_itemid_7507358",
+          "y": 1464
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 12958
+        }
+      ],
+      "off_graph_link_count": 237
+    },
+    {
+      "id": "event_list",
+      "url": "https://www.10x10.co.kr/shoppingtoday/shoppingchance_allevent.asp",
+      "label": "기획전",
+      "note": "탐색 우회로",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shoppingtoday/shoppingchance_allevent.asp",
+      "screenshot": "spike/tenbyten/screens/event_list.png",
+      "screenshot_top": "spike/tenbyten/screens/event_list.top.png",
+      "signals": {
+        "visible_word_count": 515,
+        "link_count": 133,
+        "cta_count": 2
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "할인특가",
+          "to": "sale",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 4876
+        }
+      ],
+      "off_graph_link_count": 122
+    },
+    {
+      "id": "sale",
+      "url": "https://www.10x10.co.kr/clearancesale/index.asp",
+      "label": "할인특가",
+      "note": "가격 민감 경로",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/clearancesale/index.asp",
+      "screenshot": "spike/tenbyten/screens/sale.png",
+      "screenshot_top": "spike/tenbyten/screens/sale.top.png",
+      "signals": {
+        "visible_word_count": 617,
+        "link_count": 212,
+        "cta_count": 3
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "스테들러 362C 트리플러스 텍스트서퍼 파스텔 형광펜",
+          "to": "py_prd_asp_itemid_5037472",
+          "y": 765
+        },
+        {
+          "label": "[텐텐단독] 루카랩 마시마로 스탬프",
+          "to": "py_prd_asp_itemid_5477088",
+          "y": 765
+        },
+        {
+          "label": "프러스펜 3본입(탄생석/탄생화/별자리)",
+          "to": "py_prd_asp_itemid_5739529",
+          "y": 765
+        },
+        {
+          "label": "[1+1 / 텐텐단독] 루카랩 컴포지션 펜 트레이",
+          "to": "py_prd_asp_itemid_5059848",
+          "y": 765
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 5704
+        }
+      ],
+      "off_graph_link_count": 76
+    },
+    {
+      "id": "brand",
+      "url": "https://www.10x10.co.kr/street/",
+      "label": "브랜드",
+      "note": "탐색 우회로",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/street/",
+      "screenshot": "spike/tenbyten/screens/brand.png",
+      "screenshot_top": "spike/tenbyten/screens/brand.top.png",
+      "signals": {
+        "visible_word_count": 350,
+        "link_count": 35,
+        "cta_count": 4
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "할인특가",
+          "to": "sale",
+          "y": 75
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 3230
+        }
+      ],
+      "off_graph_link_count": 25
+    },
+    {
+      "id": "category_kitchen",
+      "url": "https://www.10x10.co.kr/shopping/category_list.asp?disp=112102",
+      "label": "주방식기",
+      "note": "집들이 선물 적합 카테고리 목록",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_list.asp?disp=112102",
+      "screenshot": "spike/tenbyten/screens/category_kitchen.png",
+      "screenshot_top": "spike/tenbyten/screens/category_kitchen.top.png",
+      "signals": {
+        "visible_word_count": 531,
+        "link_count": 33,
+        "cta_count": 39
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "할인특가",
+          "to": "sale",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 3992
+        }
+      ],
+      "off_graph_link_count": 22
+    },
+    {
+      "id": "product_plate",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7426126",
+      "label": "다이집 브런치 4구 플레이트",
+      "note": "정답 후보 상품 — 집들이 선물감 테이블웨어 42,000원",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7426126",
+      "screenshot": "spike/tenbyten/screens/product_plate.png",
+      "screenshot_top": "spike/tenbyten/screens/product_plate.top.png",
+      "signals": {
+        "visible_word_count": 949,
+        "link_count": 162,
+        "cta_count": 13
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "주방식기",
+          "to": "category_kitchen",
+          "y": 185
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "[디즈니] 푸 페이스...",
+          "to": "py_prd_asp_itemid_3581230",
+          "y": 7773
+        },
+        {
+          "label": "텐텐선물추천 [피너츠]...",
+          "to": "py_prd_asp_itemid_5683139",
+          "y": 7773
+        },
+        {
+          "label": "아카시아 원목 직사각...",
+          "to": "py_prd_asp_itemid_3465944",
+          "y": 7773
+        },
+        {
+          "label": "[디즈니] 푸 접시",
+          "to": "py_prd_asp_itemid_3581267",
+          "y": 7773
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 11074
+        }
+      ],
+      "off_graph_link_count": 133
+    },
+    {
+      "id": "product_mug",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7361126",
+      "label": "포코아르 토마토 미니 머그",
+      "note": "대안 상품 36,100원",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7361126",
+      "screenshot": "spike/tenbyten/screens/product_mug.png",
+      "screenshot_top": "spike/tenbyten/screens/product_mug.top.png",
+      "signals": {
+        "visible_word_count": 897,
+        "link_count": 165,
+        "cta_count": 14
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 15476
+        }
+      ],
+      "off_graph_link_count": 140
+    },
+    {
+      "id": "cart",
+      "url": "https://www.10x10.co.kr/inipay/shoppingbag.asp",
+      "label": "장바구니",
+      "note": "구매 직전 단계 — 로그인 벽 여부 캡처로 판정",
+      "login_wall": true,
+      "final_url": "https://www.10x10.co.kr/login/loginpage.asp?vType=B&backpath=%2Finipay%2Fshoppingbag%2Easp&strGD=&strPD=",
+      "screenshot": "spike/tenbyten/screens/cart.png",
+      "screenshot_top": "spike/tenbyten/screens/cart.top.png",
+      "signals": {
+        "visible_word_count": 189,
+        "link_count": 26,
+        "cta_count": 8
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        }
+      ],
+      "off_graph_link_count": 19
+    },
+    {
+      "id": "event_mug",
+      "url": "https://www.10x10.co.kr/event/eventmain.asp?eventid=131031",
+      "label": "미니 머그 수집가 기획전",
+      "note": "선물 인접 기획전",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/event/eventmain.asp?eventid=131031",
+      "screenshot": "spike/tenbyten/screens/event_mug.png",
+      "screenshot_top": "spike/tenbyten/screens/event_mug.top.png",
+      "signals": {
+        "visible_word_count": 1295,
+        "link_count": 480,
+        "cta_count": 3
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "할인특가",
+          "to": "sale",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "Lucky Melody Cup - Blue",
+          "to": "product_melody_cup",
+          "y": 1543
+        },
+        {
+          "label": "무광 레이어드 스페클 스프머그 370ml",
+          "to": "product_soup_mug",
+          "y": 2068
+        },
+        {
+          "label": "재팬고양이 도자기 머그컵 브런치 1인세트 (접시1+머그1) 신혼 이사",
+          "to": "product_brunch_set",
+          "y": 2068
+        },
+        {
+          "label": "[포코아르] 토마토 미니 머그",
+          "to": "product_mug",
+          "y": 10627
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 16785
+        }
+      ],
+      "off_graph_link_count": 256
+    },
+    {
+      "id": "community",
+      "url": "https://www.10x10.co.kr/forums/index.asp",
+      "label": "커뮤니티",
+      "note": "distractor",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/forums/index.asp",
+      "screenshot": "spike/tenbyten/screens/community.png",
+      "screenshot_top": "spike/tenbyten/screens/community.top.png",
+      "signals": {
+        "visible_word_count": 167,
+        "link_count": 0,
+        "cta_count": 128
+      },
+      "edges": [],
+      "off_graph_link_count": 0
+    },
+    {
+      "id": "character",
+      "url": "https://www.10x10.co.kr/event/characterTown2025/index.asp",
+      "label": "캐릭터+",
+      "note": "distractor",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/event/characterTown2025/index.asp",
+      "screenshot": "spike/tenbyten/screens/character.png",
+      "screenshot_top": "spike/tenbyten/screens/character.top.png",
+      "signals": {
+        "visible_word_count": 697,
+        "link_count": 31,
+        "cta_count": 73
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "할인특가",
+          "to": "sale",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 6397
+        }
+      ],
+      "off_graph_link_count": 21
+    },
+    {
+      "id": "product_brunch_set",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7309674",
+      "label": "재팬고양이 도자기 머그컵 브런치 1인세트",
+      "note": "정답 후보 — 상품명에 '신혼 이사' 포함, event_mug에서 링크 실재",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7309674",
+      "screenshot": "spike/tenbyten/screens/product_brunch_set.png",
+      "screenshot_top": "spike/tenbyten/screens/product_brunch_set.top.png",
+      "signals": {
+        "visible_word_count": 842,
+        "link_count": 163,
+        "cta_count": 13
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 19321
+        }
+      ],
+      "off_graph_link_count": 139
+    },
+    {
+      "id": "product_melody_cup",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7488560",
+      "label": "Lucky Melody Cup - Blue",
+      "note": "event_mug 링크 실재 상품",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7488560",
+      "screenshot": "spike/tenbyten/screens/product_melody_cup.png",
+      "screenshot_top": "spike/tenbyten/screens/product_melody_cup.top.png",
+      "signals": {
+        "visible_word_count": 801,
+        "link_count": 163,
+        "cta_count": 13
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 13726
+        }
+      ],
+      "off_graph_link_count": 139
+    },
+    {
+      "id": "product_soup_mug",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7445828",
+      "label": "무광 레이어드 스페클 스프머그 370ml",
+      "note": "event_mug 링크 실재 상품",
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7445828",
+      "screenshot": "spike/tenbyten/screens/product_soup_mug.png",
+      "screenshot_top": "spike/tenbyten/screens/product_soup_mug.top.png",
+      "signals": {
+        "visible_word_count": 840,
+        "link_count": 166,
+        "cta_count": 14
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 23291
+        }
+      ],
+      "off_graph_link_count": 138
+    },
+    {
+      "id": "py_prd_asp_itemid_7513946",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7513946",
+      "label": "모난베어 [사은품증정](모난베어) 하트날려 15% 2,970원 텐텐배송",
+      "note": "auto-expanded from home",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7513946",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_7513946.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_7513946.top.png",
+      "signals": {
+        "visible_word_count": 496,
+        "link_count": 59,
+        "cta_count": 13
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 8751
+        }
+      ],
+      "off_graph_link_count": 34
+    },
+    {
+      "id": "py_prd_asp_itemid_7463175",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7463175",
+      "label": "젊은이마켓 요정 불멍 무드등 모닥불 탁상 조명 수유등 취침등 3,900원",
+      "note": "auto-expanded from home",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7463175",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_7463175.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_7463175.top.png",
+      "signals": {
+        "visible_word_count": 775,
+        "link_count": 164,
+        "cta_count": 13
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 24514
+        }
+      ],
+      "off_graph_link_count": 140
+    },
+    {
+      "id": "py_prd_asp_itemid_7483678",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7483678",
+      "label": "초른 방울토마토 책갈피 9,000원",
+      "note": "auto-expanded from home",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7483678",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_7483678.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_7483678.top.png",
+      "signals": {
+        "visible_word_count": 483,
+        "link_count": 59,
+        "cta_count": 13
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 14031
+        }
+      ],
+      "off_graph_link_count": 35
+    },
+    {
+      "id": "py_prd_asp_itemid_7518096",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7518096",
+      "label": "최삼색 모찌떡커플 핑크 마스킹 테이프 14% 5,130 텐텐배송 5%쿠폰",
+      "note": "auto-expanded from home",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7518096",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_7518096.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_7518096.top.png",
+      "signals": {
+        "visible_word_count": 469,
+        "link_count": 60,
+        "cta_count": 14
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 6389
+        }
+      ],
+      "off_graph_link_count": 34
+    },
+    {
+      "id": "py_prd_asp_itemid_7507359",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7507359",
+      "label": "[웨이투페치] 스윗 무드 노트 (2종 선택)",
+      "note": "auto-expanded from best",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7507359",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_7507359.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_7507359.top.png",
+      "signals": {
+        "visible_word_count": 536,
+        "link_count": 59,
+        "cta_count": 15
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 18395
+        }
+      ],
+      "off_graph_link_count": 33
+    },
+    {
+      "id": "py_prd_asp_itemid_7498647",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7498647",
+      "label": "[웨이투페치] 빅 패턴 마스킹 블록 키스컷 v.4~7",
+      "note": "auto-expanded from best",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7498647",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_7498647.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_7498647.top.png",
+      "signals": {
+        "visible_word_count": 580,
+        "link_count": 63,
+        "cta_count": 15
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 18416
+        }
+      ],
+      "off_graph_link_count": 33
+    },
+    {
+      "id": "py_prd_asp_itemid_7487802",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7487802",
+      "label": "[웨이투페치] 혼잣말 메시지 키스컷 v.2~3",
+      "note": "auto-expanded from best",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7487802",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_7487802.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_7487802.top.png",
+      "signals": {
+        "visible_word_count": 529,
+        "link_count": 59,
+        "cta_count": 15
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 11743
+        }
+      ],
+      "off_graph_link_count": 33
+    },
+    {
+      "id": "py_prd_asp_itemid_7507358",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7507358",
+      "label": "[웨이투페치] 미니 레코드 노트 라이트 (1달용) (2종 선택)",
+      "note": "auto-expanded from best",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7507358",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_7507358.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_7507358.top.png",
+      "signals": {
+        "visible_word_count": 498,
+        "link_count": 58,
+        "cta_count": 14
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 18448
+        }
+      ],
+      "off_graph_link_count": 34
+    },
+    {
+      "id": "py_prd_asp_itemid_5037472",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=5037472",
+      "label": "스테들러 362C 트리플러스 텍스트서퍼 파스텔 형광펜",
+      "note": "auto-expanded from sale",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=5037472",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_5037472.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_5037472.top.png",
+      "signals": {
+        "visible_word_count": 691,
+        "link_count": 61,
+        "cta_count": 13
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 13273
+        }
+      ],
+      "off_graph_link_count": 31
+    },
+    {
+      "id": "py_prd_asp_itemid_5477088",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=5477088",
+      "label": "[텐텐단독] 루카랩 마시마로 스탬프",
+      "note": "auto-expanded from sale",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=5477088",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_5477088.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_5477088.top.png",
+      "signals": {
+        "visible_word_count": 744,
+        "link_count": 71,
+        "cta_count": 17
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 24423
+        }
+      ],
+      "off_graph_link_count": 33
+    },
+    {
+      "id": "py_prd_asp_itemid_5739529",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=5739529",
+      "label": "프러스펜 3본입(탄생석/탄생화/별자리)",
+      "note": "auto-expanded from sale",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/closedprd.asp?itemid=5739529",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_5739529.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_5739529.top.png",
+      "signals": {
+        "visible_word_count": 227,
+        "link_count": 53,
+        "cta_count": 3
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "할인특가",
+          "to": "sale",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "[웨이투페치] 스윗 무드 노트 (2종 선택)",
+          "to": "py_prd_asp_itemid_7507359",
+          "y": 945
+        },
+        {
+          "label": "[웨이투페치] 빅 패턴 마스킹 블록 키스컷 v.4~7",
+          "to": "py_prd_asp_itemid_7498647",
+          "y": 945
+        },
+        {
+          "label": "[웨이투페치] 혼잣말 메시지 키스컷 v.2~3",
+          "to": "py_prd_asp_itemid_7487802",
+          "y": 945
+        },
+        {
+          "label": "[웨이투페치] 미니 레코드 노트 라이트 (1달용) (2종 선택)",
+          "to": "py_prd_asp_itemid_7507358",
+          "y": 945
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 1495
+        }
+      ],
+      "off_graph_link_count": 38
+    },
+    {
+      "id": "py_prd_asp_itemid_5059848",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=5059848",
+      "label": "[1+1 / 텐텐단독] 루카랩 컴포지션 펜 트레이",
+      "note": "auto-expanded from sale",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=5059848",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_5059848.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_5059848.top.png",
+      "signals": {
+        "visible_word_count": 703,
+        "link_count": 61,
+        "cta_count": 14
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 32749
+        }
+      ],
+      "off_graph_link_count": 33
+    },
+    {
+      "id": "py_prd_asp_itemid_3581230",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=3581230&rc=item_cate_1",
+      "label": "[디즈니] 푸 페이스...",
+      "note": "auto-expanded from product_plate",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=3581230&rc=item_cate_1",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_3581230.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_3581230.top.png",
+      "signals": {
+        "visible_word_count": 970,
+        "link_count": 170,
+        "cta_count": 17
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "주방식기",
+          "to": "category_kitchen",
+          "y": 185
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "텐텐선물추천 [피너츠]...",
+          "to": "py_prd_asp_itemid_5683139",
+          "y": 19861
+        },
+        {
+          "label": "아카시아 원목 직사각...",
+          "to": "py_prd_asp_itemid_3465944",
+          "y": 19861
+        },
+        {
+          "label": "[디즈니] 푸 접시",
+          "to": "py_prd_asp_itemid_3581267",
+          "y": 19861
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 22881
+        }
+      ],
+      "off_graph_link_count": 132
+    },
+    {
+      "id": "py_prd_asp_itemid_5683139",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=5683139&rc=item_cate_2",
+      "label": "텐텐선물추천 [피너츠]...",
+      "note": "auto-expanded from product_plate",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=5683139&rc=item_cate_2",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_5683139.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_5683139.top.png",
+      "signals": {
+        "visible_word_count": 876,
+        "link_count": 162,
+        "cta_count": 11
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "주방식기",
+          "to": "category_kitchen",
+          "y": 185
+        },
+        {
+          "label": "[디즈니] 푸 페이스...",
+          "to": "py_prd_asp_itemid_3581230",
+          "y": 22869
+        },
+        {
+          "label": "아카시아 원목 직사각...",
+          "to": "py_prd_asp_itemid_3465944",
+          "y": 22869
+        },
+        {
+          "label": "[디즈니] 푸 접시",
+          "to": "py_prd_asp_itemid_3581267",
+          "y": 22869
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 25890
+        }
+      ],
+      "off_graph_link_count": 130
+    },
+    {
+      "id": "py_prd_asp_itemid_3465944",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=3465944&rc=item_cate_3",
+      "label": "아카시아 원목 직사각...",
+      "note": "auto-expanded from product_plate",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=3465944&rc=item_cate_3",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_3465944.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_3465944.top.png",
+      "signals": {
+        "visible_word_count": 805,
+        "link_count": 160,
+        "cta_count": 13
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "주방식기",
+          "to": "category_kitchen",
+          "y": 185
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "[디즈니] 푸 페이스...",
+          "to": "py_prd_asp_itemid_3581230",
+          "y": 14604
+        },
+        {
+          "label": "텐텐선물추천 [피너츠]...",
+          "to": "py_prd_asp_itemid_5683139",
+          "y": 14604
+        },
+        {
+          "label": "[디즈니] 푸 접시",
+          "to": "py_prd_asp_itemid_3581267",
+          "y": 14604
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 17625
+        }
+      ],
+      "off_graph_link_count": 132
+    },
+    {
+      "id": "py_prd_asp_itemid_3581267",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=3581267&rc=item_cate_4",
+      "label": "[디즈니] 푸 접시",
+      "note": "auto-expanded from product_plate",
+      "auto": true,
+      "login_wall": false,
+      "final_url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=3581267&rc=item_cate_4",
+      "screenshot": "spike/tenbyten/screens/py_prd_asp_itemid_3581267.png",
+      "screenshot_top": "spike/tenbyten/screens/py_prd_asp_itemid_3581267.top.png",
+      "signals": {
+        "visible_word_count": 932,
+        "link_count": 165,
+        "cta_count": 14
+      },
+      "edges": [
+        {
+          "label": "10X10",
+          "to": "home",
+          "y": 70
+        },
+        {
+          "label": "커뮤니티",
+          "to": "community",
+          "y": 75
+        },
+        {
+          "label": "캐릭터+",
+          "to": "character",
+          "y": 75
+        },
+        {
+          "label": "기획전",
+          "to": "event_list",
+          "y": 75
+        },
+        {
+          "label": "베스트",
+          "to": "best",
+          "y": 75
+        },
+        {
+          "label": "브랜드",
+          "to": "brand",
+          "y": 75
+        },
+        {
+          "label": "주방식기",
+          "to": "category_kitchen",
+          "y": 185
+        },
+        {
+          "label": "장바구니 가기",
+          "to": "cart",
+          "y": null
+        },
+        {
+          "label": "[디즈니] 푸 페이스...",
+          "to": "py_prd_asp_itemid_3581230",
+          "y": 21182
+        },
+        {
+          "label": "텐텐선물추천 [피너츠]...",
+          "to": "py_prd_asp_itemid_5683139",
+          "y": 21182
+        },
+        {
+          "label": "아카시아 원목 직사각...",
+          "to": "py_prd_asp_itemid_3465944",
+          "y": 21182
+        },
+        {
+          "label": "선물포장 서비스",
+          "to": "gift_recommend",
+          "y": 24203
+        }
+      ],
+      "off_graph_link_count": 131
+    }
+  ]
+}

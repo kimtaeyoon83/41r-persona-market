@@ -58,3 +58,8 @@ __pycache__/
 /tmp/llm-usage.jsonl
 apps/persona-engine/sample-usage.jsonl
 *.usage.jsonl
+
+# Behavior-sim spike captures — large PNGs, regenerate via
+# scripts/spike-behavior-sim/capture.ts (graph.json + sessions stay tracked)
+spike/screens/
+spike/*/screens/
