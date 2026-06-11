@@ -81,7 +81,7 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
 pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
-pnpm --filter api test      # Run vitest (199 tests as of 2026-05-07)
+pnpm --filter api test      # Run vitest (232 tests as of 2026-06-11)
 pnpm --filter api db:generate  # Emit a new versioned migration from schema changes → apps/api/drizzle/*.sql
 pnpm --filter api db:migrate   # Apply pending migrations to DATABASE_URL (preferred for Railway deploys)
 pnpm --filter api db:push      # Dev only: push schema directly, bypassing migration files
@@ -106,7 +106,8 @@ pnpm tsx scripts/spike-behavior-sim/run.ts spike/<id>/graph.json [--start=<node>
 - 7 active routes under `src/routes/`, mounted in `src/index.ts`:
   `auth.ts`, `scan.ts`, `calibration.ts`, `benchmark.ts`, `hello.ts`,
   `me_responses.ts` (Phase 5.1 — `/api/me/survey-responses[/:scanId]`,
-  `/api/me/points`), `partner.ts` (geulbat pilot 2026-06-10 —
+  `/api/me/points`; Console S1 2026-06-11 adds `/api/me/credits`),
+  `partner.ts` (geulbat pilot 2026-06-10 —
   `POST /api/partner/geulbat/survey`, S2S gated by
   `PARTNER_API_KEY_GEULBAT` via `middleware/partner.ts`; email is a
   provisional identity claimed on Privy login — see
@@ -116,6 +117,8 @@ pnpm tsx scripts/spike-behavior-sim/run.ts spike/<id>/graph.json [--start=<node>
   `cohort_selection.ts`, `anthropic_client.ts`, `aarrr.ts`,
   `dimension_simulator.ts`, `persona_wallets.ts`, `sponsored_tx.ts`,
   `fee_payer.ts`, `r2.ts`, `health.ts`, `benchmark.ts`,
+  `credits.ts` (Console S1 2026-06-11 — founder credit ledger, see
+  Console section below),
   `human_aggregate.ts` (Phase 5 — survey_responses → AI-shape human
   report via the same dimension/friction/AARRR pipeline),
   `dimensions/` (LLM dimension scorers + friction clustering +
@@ -136,8 +139,20 @@ pnpm tsx scripts/spike-behavior-sim/run.ts spike/<id>/graph.json [--start=<node>
 ### Frontend (apps/web)
 - Next.js 14 App Router. Active routes:
   `/`, `/validator/*` (incl. `/validator/compare/[scanId]` — Phase 5),
-  `/me/wallet`, `/me/analyses`,
+  `/console` + `/console/sites/[host]` (Console S1 — site-grouped
+  founder console; `[host]` is the normalized URL host until
+  site_workspaces lands in S2; grouping helpers in
+  `app/console/_lib.ts`),
+  `/me` (tester home: points + credits + activity), `/me/points`,
+  `/me/wallet`,
   `/me/responses[/[scanId]]` (Phase 5.1 — own survey list + AI-vs-Me detail).
+  `/me/analyses` is a redirect stub → `/console` (bookmark preservation,
+  same pattern as `/validator` → `/`).
+- i18n: `lib/i18n.tsx` — lightweight en-default + ko dictionary via
+  React context, locale in localStorage (`41r-locale`), `LocaleToggle`
+  in the TopBar. Decision §12-5 of `docs/console-ia-redesign.md`: new
+  console/me screens must use `t()` from day one; no locale URL
+  routing, deliberately not next-intl.
 - Shared API URL: `import { API_BASE } from '@/lib/api'` — never hardcode.
 - API client (`lib/api.ts`): primary surface is `scanApi` for
   `/api/scan/*` routes. `signedRequest()` helper still exists for any
@@ -204,11 +219,14 @@ Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
   Don't remove it without confirming no follow-up sprint needs it.
 
 ### Testing
-- Vitest at `apps/api/src/__tests__/` — **199 tests** as of 2026-05-07.
+- Vitest at `apps/api/src/__tests__/` — **232 tests** as of 2026-06-11.
   Suites cover env validation, auth schema, audience-fit math,
   cohort selection, dimension LLM contracts (incl. the Q2 site-context
   + Q3 voice-cleanup regression locks), scan shapers, AARRR weighted
-  funnel, friction clustering, site classifier, acquisition priors.
+  funnel, friction clustering, site classifier, acquisition priors,
+  behavior-sim state core, partner auth, and Console S1 contracts
+  (`console_sprint1.test.ts` — pricing/bonus constants, anonymous demo
+  allowance, calibration soft gate, rate-limit envelope).
   LLM-touching tests mock `services/anthropic_client` via `vi.mock`
   so the prompt path runs without real API calls.
 
@@ -505,6 +523,40 @@ Pending value: anchor scanId (run a 41R scan of the geulbat prod URL).
 Points policy is intentionally undecided — the ledger is append-only
 so any future policy can reprice retroactively.
 
+## Console Sprint 1 — credits + founder console (2026-06-11)
+
+Product plan: `docs/console-ia-redesign.md` (v0.6 — decisions §12
+confirmed). S1 shipped on branch `feat/console-sprint1`:
+
+- **Credit ledger** — `credit_transactions` (migration 0013, idempotent
+  SQL) + `services/credits.ts`. Append-only, same contract as
+  point_transactions: corrections/refunds are NEW rows, never UPDATE.
+  Points (tester earn) and credits (founder spend) are separate
+  currencies on purpose — don't unify before v2.
+- **Signup bonus** — granted in `privy_auth.ts::upsertUser` via
+  `ensureSignupBonus` (non-fatal, like claimPartnerRows): $30 verified
+  identity (any non-wallet linked account) / $5 wallet-only, upgraded
+  +$25 when an email/social links later. `expires_at` recorded (90d)
+  but NOT enforced during the pilot — expiry batch ships with top-up
+  billing (v2).
+- **Scan pricing** — Mode A $2 / Mode B $1, debited in POST /api/scan
+  *before* startScanWorker under a per-user pg advisory xact lock
+  (`debitScan`); 402 `insufficient_credits` deletes the pending row.
+  Refund on failure goes through the `setStatus('failed')` choke point
+  in scan_pipeline + the worker crash handler (`refundScanDebit`,
+  idempotent).
+- **Anonymous demo** — 1 fresh scan per IP per day + same-URL 24h
+  cache reuse (returns the existing scanId with `cached: true`).
+- **Console UI** — `/console` (host-grouped sites; S2 replaces host
+  grouping with `site_workspaces`), `/console/sites/[host]` (Overview
+  hero = best-fit cohort first, score second, misfit line — keep that
+  order, it's the §0.4 honesty contract on screen), `/me` + `/me/points`
+  (first consumer of /api/me/points), TopBar `[Console · My Page]` +
+  EN/KO toggle, `/me/analyses` → `/console` redirect.
+- S2 next: `site_workspaces` table + key self-serve +
+  `requireGeulbatKey` → `requireSiteSecret` generalization (geulbat
+  env-key seeded as row 1, no downtime) + scan-complete email.
+
 ## Behavior Simulation (Mode C — gated, not shipped)
 
 Spec: `docs/41rpm_behavior_simulation_spec_v1.md`. Validation spike +
@@ -568,13 +620,16 @@ strip. Capture falls back networkidle → domcontentloaded on timeout
 - **CORS allowlist** — `config/cors.ts`. Defaults allow localhost:3000/3001,
   127.0.0.1:3000/3001, the Railway web URL. Override via
   `CORS_ALLOWED_ORIGINS` (comma-separated).
-- **Rate limiting** — REMOVED in the 2026-05-07 autotest pivot
-  cleanup. The previous `middleware/rate-limit.ts` exposed
-  `autotestRunLimiter` / `reportSubmitLimiter` / `llmGenerateLimiter`,
-  but all three target routes were removed by the validator pivot.
-  Validator routes (`/api/auth`, `/api/scan`, `/api/calibration`,
-  `/api/benchmark`) currently have NO rate limiting — see Known
-  Limitations §9 below.
+- **Rate limiting** — REBUILT in Console S1 (2026-06-11, closes Known
+  Limitations §9). `middleware/rate_limit.ts`: POST /api/scan gets
+  5/min·IP + 20/h·user (user limiter runs after optionalPrivyAuth so
+  it keys on privyUser.id), mutations (survey / human-aggregate /
+  payment) 30/min·user, and a router-wide read limiter on
+  auth/scan/calibration/benchmark/me. The partner router is
+  deliberately NOT limited (beacons are high-frequency by design).
+  In-memory stores — fine single-instance; `app.set('trust proxy', 1)`
+  in index.ts makes req.ip the real client behind Railway. Limiters
+  skip when NODE_ENV=test.
 - **Zod body validation** — `schemas/index.ts` + `validateBody()`. Every
   signed POST has a schema, applied right after `requireSignedRequest`.
 - **Env flag safety** — `config/env.ts` enforces production-only
@@ -629,10 +684,18 @@ NEXT_PUBLIC_API_URL=http://localhost:4100
 CORS_ALLOWED_ORIGINS=...    # comma-separated; overrides the default allowlist
 USE_VISION=1                # Use Sonnet vision for persona response (otherwise Haiku text)
 USE_SIMULATOR=0             # Skip LLM, use synthetic responses (dev iteration)
-ADMIN_API_KEY=...           # Gates /api/admin/* (≥12 chars; absent ⇒ 404)
+ADMIN_API_KEY=...           # Gates /api/admin/* (≥12 chars; absent ⇒ 404).
+                            # Console S1: when set, also demotes /api/calibration
+                            # to operator-only (x-admin-key) and acts as the
+                            # operator override on POST /:id/human-aggregate.
 PARTNER_API_KEY_GEULBAT=... # Partner S2S secret + HMAC token secret (≥12 chars; absent ⇒ 503).
                             # SERVER-ONLY — never in client bundles or git.
 PARTNER_SITE_KEY_GEULBAT=...# Public tracking site key for the t.js snippet (like a GA id)
+PARTNER_SITE_KEY_41R=...    # Dogfooding site key (≥12 chars) — routes beacons from
+                            # 41R's own web app to source='41r-web' (Console S1)
+NEXT_PUBLIC_TRACKING_SITE_KEY=... # Web-side mirror of PARTNER_SITE_KEY_41R; when set
+                            # together with NEXT_PUBLIC_API_URL, layout.tsx injects
+                            # the t.js snippet (public by design, GA-id semantics)
 WEB_PUBLIC_URL=...          # Base for partner survey_url links (default https://app.project-rpm.xyz)
 LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
 ```
@@ -1140,33 +1203,13 @@ seeds cannot match.
 testers > N (~50) per cohort, the synthetic seeds can be marked
 as fallback-only.
 
-### 9. Validator API routes have no rate limiting
+### 9. Validator API routes have no rate limiting — CLOSED (2026-06-11)
 
-**Symptom:** `/api/auth/*`, `/api/scan/*`, `/api/calibration/*`,
-`/api/benchmark/*` accept unlimited requests per IP/wallet. A
-single misbehaving client (or a DoS) can exhaust LLM credits,
-captureSite Playwright workers, or DB connections.
-
-**Root cause:** The previous `middleware/rate-limit.ts`
-(`autotestRunLimiter` / `reportSubmitLimiter` /
-`llmGenerateLimiter`) targeted autotest-era routes that the
-2026-05-07 pivot deleted. The middleware was removed in the
-follow-up dead-code cleanup (commit d817167) because all three
-limiters had zero call sites. Validator routes were never
-re-wired to limiters.
-
-**Cost concern:** `/api/scan` POST kicks off a ~$0.15 pipeline
-(112 personas × Sonnet vision). 100 requests/hour at the API
-costs $15/hour without rate limiting.
-
-**Unblock:** Rebuild a small rate-limit module sized for the
-validator surface area:
-  - `/api/scan` POST: 5/min per IP + 20/hour per wallet
-  - `/api/auth/nonce`: 30/min per IP
-  - everything else: 60/min per IP (cheap reads)
-Use `express-rate-limit` (already a dep) or the `keyv`-backed
-pattern. ~1 hour engineering.
-
-**Cost:** ~1 hour. Should land before any public/marketing
-traffic; until then the API is on Railway custom-domain hidden
-URLs which limits exposure but doesn't eliminate it.
+**Resolution:** Console Sprint 1 shipped `middleware/rate_limit.ts`
+(express-rate-limit): `/api/scan` POST 5/min·IP + 20/h·user,
+mutations 30/min·user, router-wide read limiter on the validator
+surface; partner beacons deliberately excluded. Cost defense is now
+two-layer: rate limits (burst/DoS, per minute/hour) + the credit
+ledger (business allowance — Mode A $2 / Mode B $1 debit per scan,
+anonymous demo capped at 1/IP/day with a 24h same-URL cache). See
+the Security section above + `docs/console-ia-redesign.md` §4.

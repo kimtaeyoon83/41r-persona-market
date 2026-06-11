@@ -445,6 +445,10 @@ router.post('/geulbat/behavior', requireGeulbatKey, async (req, res) => {
 function siteKeySource(k: string): string | null {
   const gb = process.env.PARTNER_SITE_KEY_GEULBAT;
   if (gb && gb.length >= 12 && k === gb) return 'geulbat';
+  // Dogfooding (Console Sprint 1 §5.2) — 41R's own web app carries the
+  // t.js snippet so we measure our own PLG funnel with our own pipe.
+  const own = process.env.PARTNER_SITE_KEY_41R;
+  if (own && own.length >= 12 && k === own) return '41r-web';
   return null;
 }
 
