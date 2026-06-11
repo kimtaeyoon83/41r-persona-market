@@ -523,6 +523,28 @@ export type MySurveyResponseDetail = {
   };
 };
 
+// ─── Tester points + founder credits (Console Sprint 1) ─────────
+export type MyPoints = {
+  balance: number;
+  transactions: Array<{
+    amount: number;
+    reason: string;
+    source: string;
+    created_at: string;
+  }>;
+};
+
+export type MyCredits = {
+  balance_cents: number;
+  transactions: Array<{
+    amount_cents: number;
+    reason: string;
+    ref_id: string | null;
+    expires_at: string | null;
+    created_at: string;
+  }>;
+};
+
 export const meApi = {
   /** Phase 5.1 — list of survey responses the current Privy user has
    *  submitted. Filtered server-side by user_id. */
@@ -536,6 +558,12 @@ export const meApi = {
    *  submitted to that scan. */
   getMySurveyResponse: (scanId: string) =>
     request<MySurveyResponseDetail>(`/api/me/survey-responses/${scanId}`),
+
+  /** Tester point ledger (partner pilot — earn side). */
+  getPoints: () => request<MyPoints>(`/api/me/points`),
+
+  /** Founder credit ledger (Console Sprint 1 — spend side). */
+  getCredits: () => request<MyCredits>(`/api/me/credits`),
 };
 
 // ─── Calibration API (Phase 2-C-1) ─────────────────────────────

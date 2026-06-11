@@ -32,12 +32,51 @@ import {
 } from '../services/aarrr.js';
 import { requirePrivyAuth, optionalPrivyAuth } from '../middleware/privy_auth.js';
 import {
+  scanCreateIpLimiter,
+  scanCreateUserLimiter,
+  mutationLimiter,
+} from '../middleware/rate_limit.js';
+import { isAdminRequest } from '../middleware/admin.js';
+import { debitScan, getCreditBalance, SCAN_PRICE_CENTS } from '../services/credits.js';
+import {
   buildSponsoredZeroTx,
   broadcastSignedTx,
   solscanUrl,
 } from '../services/sponsored_tx.js';
 
 const router: RouterType = Router();
+
+// ─── Anonymous demo guard (Console Sprint 1 — §3/§12 decisions) ────
+// Anonymous scans cost real LLM money (~$0.15 Mode A) with no credit
+// ledger behind them, so they're a demo: 1 fresh scan per IP per day,
+// and a repeat request for the same URL within 24h returns the
+// existing scan instead of burning a new pipeline run (decision §12-8
+// — the UI shows "analyzed n hours ago" from created_at).
+const DEMO_WINDOW_MS = 24 * 60 * 60 * 1000;
+const demoIpLastScanAt = new Map<string, number>();
+
+function pruneDemoIpMap(): void {
+  if (demoIpLastScanAt.size < 10_000) return;
+  const cutoff = Date.now() - DEMO_WINDOW_MS;
+  for (const [ip, at] of demoIpLastScanAt) {
+    if (at < cutoff) demoIpLastScanAt.delete(ip);
+  }
+}
+
+/** Exported for tests. */
+export function checkDemoIpAllowance(
+  ip: string,
+  now: number = Date.now(),
+): boolean {
+  const last = demoIpLastScanAt.get(ip);
+  return last === undefined || now - last >= DEMO_WINDOW_MS;
+}
+
+/** Exported for tests. */
+export function recordDemoIpScan(ip: string, now: number = Date.now()): void {
+  pruneDemoIpMap();
+  demoIpLastScanAt.set(ip, now);
+}
 
 const createScanBody = z.object({
   target_url: z.string().min(1).max(500),
@@ -52,7 +91,7 @@ const createScanBody = z.object({
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-router.post('/', optionalPrivyAuth, async (req, res) => {
+router.post('/', scanCreateIpLimiter, optionalPrivyAuth, scanCreateUserLimiter, async (req, res) => {
   const parsed = createScanBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
@@ -60,6 +99,46 @@ router.post('/', optionalPrivyAuth, async (req, res) => {
   }
   const { target_url, mode, target_audience_text, hypothesis, target_cohorts } =
     parsed.data;
+
+  // ── Anonymous path: demo limits (Sprint 1, decision §12-8) ──
+  if (!req.privyUser) {
+    // 24h cache — same URL recently scanned → return that scan instead
+    // of burning a new pipeline run. Reports are unlisted-public, so
+    // handing back an existing scanId leaks nothing new.
+    const windowStart = new Date(Date.now() - DEMO_WINDOW_MS);
+    const [cached] = await db
+      .select()
+      .from(schema.audienceFitScans)
+      .where(
+        and(
+          eq(schema.audienceFitScans.targetUrl, target_url),
+          sql`${schema.audienceFitScans.createdAt} >= ${windowStart}`,
+          sql`${schema.audienceFitScans.status} != 'failed'`,
+        ),
+      )
+      .orderBy(desc(schema.audienceFitScans.createdAt))
+      .limit(1);
+    if (cached) {
+      res.json({
+        scanId: cached.id,
+        status: cached.status,
+        cached: true,
+        created_at: cached.createdAt.toISOString(),
+      });
+      return;
+    }
+
+    const ip = req.ip ?? 'unknown';
+    if (!checkDemoIpAllowance(ip)) {
+      res.status(429).json({
+        error: 'demo_limit',
+        message:
+          'Anonymous demo is limited to 1 scan per day. Sign in to get $30 in free credits.',
+      });
+      return;
+    }
+    recordDemoIpScan(ip);
+  }
 
   const [scan] = await db
     .insert(schema.audienceFitScans)
@@ -82,6 +161,25 @@ router.post('/', optionalPrivyAuth, async (req, res) => {
   if (!scan) {
     res.status(500).json({ error: 'insert_failed' });
     return;
+  }
+
+  // ── Authed path: credit debit before the pipeline starts ──
+  // Price: Mode A $2 / Mode B $1 (console-ia-redesign.md §12 decision 1).
+  // Insufficient balance → remove the pending row (nothing started yet)
+  // and 402 with the numbers the UI needs for the "충전/소진" state.
+  if (req.privyUser) {
+    const ok = await debitScan(req.privyUser.id, scan.id, mode);
+    if (!ok) {
+      await db
+        .delete(schema.audienceFitScans)
+        .where(eq(schema.audienceFitScans.id, scan.id));
+      res.status(402).json({
+        error: 'insufficient_credits',
+        price_cents: SCAN_PRICE_CENTS[mode],
+        balance_cents: await getCreditBalance(req.privyUser.id),
+      });
+      return;
+    }
   }
 
   // Kick off the pipeline on the next tick. Errors are caught inside
@@ -849,7 +947,7 @@ export function computeSusScoreLocal(responses: readonly number[]): number {
   return sum * 2.5;
 }
 
-router.post('/:id/survey', requirePrivyAuth, async (req, res) => {
+router.post('/:id/survey', requirePrivyAuth, mutationLimiter, async (req, res) => {
   // Note: with `requirePrivyAuth` chained, Express's req.params.id typing
   // widens to string | string[] | undefined. Coerce to string explicitly.
   const id = String(req.params.id ?? '');
@@ -999,13 +1097,15 @@ router.post('/:id/survey', requirePrivyAuth, async (req, res) => {
 // writes the like-for-like report into audience_fit_scans.human_aggregate.
 //
 // Idempotent — re-runnable any time. Each call overwrites in-place
-// so the latest n_respondents is always the source of truth. No auth
-// gate in Phase 5 (the /survey endpoint is also unauthenticated).
-// Phase 6 will gate behind scan-ownership when survey URLs become
-// shareable from a logged-in dashboard.
-router.post('/:id/human-aggregate', async (req, res) => {
-  const { id } = req.params;
-  if (!UUID_RE.test(id ?? '')) {
+// so the latest n_respondents is always the source of truth.
+//
+// Console Sprint 1 (console-ia-redesign.md §3.2): gated by scan
+// ownership — the requester must be the Privy user that created the
+// scan. Operator override via x-admin-key (covers legacy scans whose
+// user_id is NULL — those have no owner to ask).
+router.post('/:id/human-aggregate', optionalPrivyAuth, mutationLimiter, async (req, res) => {
+  const id = String(req.params.id ?? '');
+  if (!UUID_RE.test(id)) {
     res.status(404).json({ error: 'scan_not_found' });
     return;
   }
@@ -1016,6 +1116,19 @@ router.post('/:id/human-aggregate', async (req, res) => {
   if (!scan) {
     res.status(404).json({ error: 'scan_not_found' });
     return;
+  }
+  // Operator (x-admin-key) bypasses ownership — also the only path for
+  // legacy scans whose user_id is NULL. Everyone else must be logged in
+  // AND own the scan.
+  if (!isAdminRequest(req)) {
+    if (!req.privyUser) {
+      res.status(401).json({ error: 'auth_required' });
+      return;
+    }
+    if (scan.userId === null || scan.userId !== req.privyUser.id) {
+      res.status(403).json({ error: 'not_scan_owner' });
+      return;
+    }
   }
   try {
     const aggregate = await recomputeHumanAggregate(id);
@@ -1203,7 +1316,7 @@ router.get('/:id/compare', async (req, res) => {
 // Both routes require Privy auth + scan ownership. /payment-tx will
 // lazily claim ownership if the scan was created anonymously.
 
-router.post('/:id/payment-tx', requirePrivyAuth, async (req, res) => {
+router.post('/:id/payment-tx', requirePrivyAuth, mutationLimiter, async (req, res) => {
   const u = req.privyUser!;
   if (!u.walletAddress) {
     res.status(400).json({
@@ -1260,7 +1373,7 @@ const paymentConfirmBody = z.object({
   signed_tx_base64: z.string().min(1).max(20_000),
 });
 
-router.post('/:id/payment-confirm', requirePrivyAuth, async (req, res) => {
+router.post('/:id/payment-confirm', requirePrivyAuth, mutationLimiter, async (req, res) => {
   const u = req.privyUser!;
   const id = String(req.params.id ?? '');
   if (!UUID_RE.test(id)) {

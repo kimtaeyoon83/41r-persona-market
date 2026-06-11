@@ -9,6 +9,7 @@
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { useState, type CSSProperties, type ReactNode } from "react";
+import { useI18n } from "@/lib/i18n";
 
 // ─── Theme constants ──────────────────────────────────────────────
 export const C = {
@@ -186,15 +187,37 @@ export function Btn({
 // gone), but Frame still accepts and ignores it so pages compile.
 type TopBarActive = "discovery" | "pro" | "report" | "calibration";
 
+/** Tiny EN/KO switch — decision §12-5: English default + Korean. */
+function LocaleToggle() {
+  const { locale, setLocale } = useI18n();
+  return (
+    <button
+      onClick={() => setLocale(locale === "en" ? "ko" : "en")}
+      title="Language"
+      style={{
+        background: "transparent",
+        border: `1px solid ${C.border}`,
+        borderRadius: 999,
+        padding: "4px 10px",
+        fontSize: 11,
+        fontFamily: FM,
+        color: C.textDim,
+        cursor: "pointer",
+        letterSpacing: "0.04em",
+      }}
+    >
+      {locale === "en" ? "EN" : "KO"}
+    </button>
+  );
+}
+
 export function TopBar() {
-  // Phase 4 IA cleanup — dropped Discovery / Pro mode / Report /
-  // Calibration nav items: Pro / Report were dead links (no page,
-  // and `/validator/report/demo` resolved a literal "demo" scanId);
-  // Discovery duplicated `/` (which is the real entry point); the
-  // Calibration view is reachable from the report screen footer
-  // for the audience that needs it. Result is a hairline header
-  // with just the brand mark + auth-aware actions on the right.
+  // Console Sprint 1 — logged-in nav is [Console · My Page · Sign out]
+  // (console-ia-redesign.md §2.1: both roles always visible, role is
+  // emergent; empty states are the onboarding). Stays a hairline
+  // header — no dropdowns/mega-menus (Phase 4 minimal contract).
   const { ready, authenticated, login, logout, user } = usePrivy();
+  const { t } = useI18n();
   const showAuthControls = ready;
   return (
     <div
@@ -236,10 +259,11 @@ export function TopBar() {
             color: C.textDim,
           }}
         >
+          <LocaleToggle />
           {authenticated ? (
             <>
               <Link
-                href="/me/wallet"
+                href="/console"
                 style={{
                   color: C.textDim,
                   textDecoration: "none",
@@ -247,10 +271,10 @@ export function TopBar() {
                   borderRadius: 6,
                 }}
               >
-                Wallet
+                {t("nav.console")}
               </Link>
               <Link
-                href="/me/analyses"
+                href="/me"
                 style={{
                   color: C.textDim,
                   textDecoration: "none",
@@ -258,7 +282,7 @@ export function TopBar() {
                   borderRadius: 6,
                 }}
               >
-                My Analyses
+                {t("nav.myPage")}
               </Link>
               <button
                 onClick={() => logout()}
@@ -274,7 +298,7 @@ export function TopBar() {
                   fontFamily: FS,
                 }}
               >
-                Sign out
+                {t("nav.signOut")}
               </button>
             </>
           ) : (
@@ -292,7 +316,7 @@ export function TopBar() {
                 fontWeight: 500,
               }}
             >
-              Sign in
+              {t("nav.signIn")}
             </button>
           )}
         </div>

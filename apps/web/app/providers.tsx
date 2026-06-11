@@ -15,6 +15,7 @@ import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
 import { defaultSolanaRpcsPlugin } from "@privy-io/react-auth/solana";
 import { useEffect, type ReactNode } from "react";
 import { setAuthTokenGetter } from "@/lib/api";
+import { I18nProvider } from "@/lib/i18n";
 
 // Inline default — Privy app id is client-side public (every browser
 // DevTools shows it on first page load), so committing the constant
@@ -36,7 +37,7 @@ export function Providers({ children }: { children: ReactNode }) {
           "Pages render but login does nothing.",
       );
     }
-    return <>{children}</>;
+    return <I18nProvider>{children}</I18nProvider>;
   }
 
   return (
@@ -67,7 +68,9 @@ export function Providers({ children }: { children: ReactNode }) {
         },
       }}
     >
-      <AuthBridge>{children}</AuthBridge>
+      <I18nProvider>
+        <AuthBridge>{children}</AuthBridge>
+      </I18nProvider>
     </PrivyProvider>
   );
 }

@@ -13,6 +13,7 @@ import { PrivyClient, type AuthTokenClaims, type User as PrivyUser } from '@priv
 import { eq, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { env } from '../config/env.js';
+import { ensureSignupBonus } from '../services/credits.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ service: 'privy_auth' });
@@ -62,6 +63,15 @@ function extractIdentity(user: PrivyUser): { email: string | null; wallet: strin
     }
   }
   return { email, wallet };
+}
+
+/** Verified identity = any non-wallet linked account (email, Google,
+ *  Discord, X, phone, …). Gates the signup-bonus tier: $30 verified vs
+ *  $5 wallet-only (console-ia-redesign.md §12 decision 2). */
+function hasVerifiedIdentity(user: PrivyUser): boolean {
+  return (user.linkedAccounts ?? []).some(
+    (acc) => acc.type !== 'wallet' && acc.type !== 'smart_wallet',
+  );
 }
 
 /** Upsert the Privy user into the 41R users table. */
@@ -119,6 +129,7 @@ async function upsertUser(claims: AuthTokenClaims, user: PrivyUser): Promise<Aut
       .where(eq(schema.users.privyId, privyId));
     const effectiveEmail = email ?? existing.email;
     if (effectiveEmail) await claimPartnerRows(existing.id, effectiveEmail);
+    await ensureSignupBonus(existing.id, hasVerifiedIdentity(user));
     return {
       id: existing.id,
       privyId,
@@ -138,6 +149,7 @@ async function upsertUser(claims: AuthTokenClaims, user: PrivyUser): Promise<Aut
     .returning();
   if (!inserted) throw new Error('users INSERT returned no row');
   if (inserted.email) await claimPartnerRows(inserted.id, inserted.email);
+  await ensureSignupBonus(inserted.id, hasVerifiedIdentity(user));
   return {
     id: inserted.id,
     privyId,

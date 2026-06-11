@@ -204,4 +204,34 @@ router.get('/points', requirePrivyAuth, async (req, res) => {
   });
 });
 
+// ─── Credits (Console Sprint 1) ──────────────────────────────────
+// Balance + ledger for the founder-side credit currency. Same
+// data-isolation boundary as everything above. Balance is SUM over
+// the append-only ledger; expiry is recorded but unenforced during
+// the pilot (console-ia-redesign.md §12 decision 3).
+router.get('/credits', requirePrivyAuth, async (req, res) => {
+  const userId = req.privyUser!.id;
+  const rows = await db
+    .select({
+      amountCents: schema.creditTransactions.amountCents,
+      reason: schema.creditTransactions.reason,
+      refId: schema.creditTransactions.refId,
+      expiresAt: schema.creditTransactions.expiresAt,
+      createdAt: schema.creditTransactions.createdAt,
+    })
+    .from(schema.creditTransactions)
+    .where(eq(schema.creditTransactions.userId, userId))
+    .orderBy(desc(schema.creditTransactions.createdAt));
+  res.json({
+    balance_cents: rows.reduce((s, r) => s + r.amountCents, 0),
+    transactions: rows.map((r) => ({
+      amount_cents: r.amountCents,
+      reason: r.reason,
+      ref_id: r.refId,
+      expires_at: r.expiresAt ? r.expiresAt.toISOString() : null,
+      created_at: r.createdAt.toISOString(),
+    })),
+  });
+});
+
 export default router;

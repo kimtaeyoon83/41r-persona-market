@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, date, integer, real, boolean, jsonb, uuid, varchar, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, date, integer, real, boolean, jsonb, uuid, varchar, uniqueIndex, index } from 'drizzle-orm/pg-core';
 
 // ─── Companies ───────────────────────────────────────
 export const companies = pgTable('companies', {
@@ -608,3 +608,38 @@ export const partnerBehaviorEvents = pgTable('partner_behavior_events', {
   occurredAt: timestamp('occurred_at').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+// ─── Credit ledger (Console Sprint 1, 2026-06-11) ───────────────────
+// Founder-side spend currency — separate from point_transactions
+// (tester-side earn currency); the two stay distinct on purpose so
+// each policy can move independently (docs/console-ia-redesign.md §4.3).
+// Append-only, same contract as point_transactions: never UPDATE or
+// DELETE a row; corrections/refunds/expiry are new rows. Balance is
+// SUM(amount_cents).
+//
+// Reasons in use: 'signup_bonus' (+3000, verified identity) |
+// 'signup_bonus_wallet' (+500, wallet-only signup) |
+// 'signup_bonus_upgrade' (+2500, wallet-only later links email/social)
+// | 'scan_mode_a' (-200) | 'scan_mode_b' (-100) | 'scan_refund'
+// (pipeline failed — positive, mirrors the debit) | 'manual_grant'
+// (operator top-up) | 'expiry'.
+export const creditTransactions = pgTable('credit_transactions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  /** USD cents. Grants positive, debits negative. */
+  amountCents: integer('amount_cents').notNull(),
+  reason: text('reason').notNull(),
+  /** Resource that caused the row — scan id for debits/refunds. */
+  refId: uuid('ref_id'),
+  /** Grant rows only. Recorded from day one (90-day policy) but NOT
+   *  enforced during the pilot — the expiry batch ships together with
+   *  top-up billing (v2). console-ia-redesign.md §12 decision 3. */
+  expiresAt: timestamp('expires_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  byUser: index('credit_transactions_user_idx').on(t.userId),
+  // Debit/refund lookups by scan (refund idempotency check).
+  byRef: index('credit_transactions_ref_idx').on(t.refId),
+}));

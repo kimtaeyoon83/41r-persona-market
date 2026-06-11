@@ -24,6 +24,7 @@
 import { eq } from 'drizzle-orm';
 import { STANDARD_COHORTS } from '@41rpm/shared';
 import { db, schema } from '../db/index.js';
+import { refundScanDebit } from './credits.js';
 import { logger } from '../logger.js';
 import {
   type CohortFit,
@@ -140,6 +141,7 @@ export function startScanWorker(scanId: string): void {
       } catch (markErr) {
         log.error({ err: markErr, scanId }, 'failed to mark scan as failed');
       }
+      await refundScanDebit(scanId);
     });
   });
 }
@@ -650,6 +652,11 @@ async function setStatus(scanId: string, status: string): Promise<void> {
     .update(schema.audienceFitScans)
     .set({ status })
     .where(eq(schema.audienceFitScans.id, scanId));
+  // Failed scan → give the credits back (idempotent, no-op for
+  // anonymous demo scans that never had a debit). All pipeline failure
+  // paths call setStatus('failed'), so this is the single choke point;
+  // the worker crash handler in startScanWorker covers the rest.
+  if (status === 'failed') await refundScanDebit(scanId);
 }
 
 type DCurve = { d1: number; d3: number; d7: number; d30: number };
