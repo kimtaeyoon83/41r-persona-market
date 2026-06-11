@@ -11,6 +11,7 @@ import meResponsesRouter from './routes/me_responses.js';
 import consoleRouter from './routes/console.js';
 import partnerRouter from './routes/partner.js';
 import { startCalibrationCron } from './services/calibration/cron.js';
+import { startDigestCron } from './services/notify.js';
 import { allowedOrigins, corsOptions } from './config/cors.js';
 import { logEnvSummary } from './config/env.js';
 import { readLimiter } from './middleware/rate_limit.js';
@@ -89,6 +90,9 @@ app.listen(PORT, () => {
   // Calibration Track A weekly cron — gated by
   // CALIBRATION_CRON_ENABLED env. No-op when env is unset.
   startCalibrationCron();
+
+  // Weekly digest email (Console S3) — gated by DIGEST_CRON_ENABLED.
+  startDigestCron();
 });
 
 export default app;

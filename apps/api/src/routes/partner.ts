@@ -21,7 +21,7 @@
 import express, { Router, type Router as RouterType } from 'express';
 import { z } from 'zod';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, gte, isNull, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { requireGeulbatKey } from '../middleware/partner.js';
 import {
@@ -29,6 +29,7 @@ import {
   touchWorkspaceEvent,
 } from '../services/workspaces.js';
 import { awardSurveyPoints } from '../services/rewards.js';
+import { notifySurveyMilestone } from '../services/notify.js';
 import {
   surveyBody,
   computeSusScoreLocal,
@@ -222,6 +223,8 @@ async function ingestGeulbatSurvey(
         source: 'geulbat',
         email,
       });
+      // Retention loop #2 (S3) — milestone-batched owner notification.
+      notifySurveyMilestone(scanId);
     }
 
   log.info(
@@ -450,6 +453,46 @@ router.post('/geulbat/behavior', requireGeulbatKey, async (req, res) => {
 // measurement id) — it only routes to a source bucket; the S2S
 // partner key never appears in a browser.
 
+// ─── Beacon soft-cap (Console S3, §4.3.1: 100k events/month/key) ───
+// In-memory counter per (source, month), lazily initialized from a DB
+// COUNT on first sight. Beyond the cap the batch is DROPPED but the
+// response stays 204 — tracking must never error the partner's page;
+// the console's analytics tab shows the usage gauge as the warning.
+// Single-instance semantics (same caveat as the rate limiters).
+export const MONTHLY_EVENT_SOFT_CAP = 100_000;
+const monthlyEventCounts = new Map<string, number>();
+
+function monthKey(source: string, now = new Date()): string {
+  return `${source}:${now.getUTCFullYear()}-${now.getUTCMonth()}`;
+}
+
+async function checkAndCountEvents(
+  source: string,
+  n: number,
+): Promise<boolean> {
+  const key = monthKey(source);
+  if (!monthlyEventCounts.has(key)) {
+    if (monthlyEventCounts.size > 5_000) monthlyEventCounts.clear(); // month rollover GC
+    const monthStart = new Date();
+    monthStart.setUTCDate(1);
+    monthStart.setUTCHours(0, 0, 0, 0);
+    const [row] = await db
+      .select({ n: sql`count(*)::int` })
+      .from(schema.partnerBehaviorEvents)
+      .where(
+        and(
+          eq(schema.partnerBehaviorEvents.source, source),
+          gte(schema.partnerBehaviorEvents.occurredAt, monthStart),
+        ),
+      );
+    monthlyEventCounts.set(key, Number(row?.n ?? 0));
+  }
+  const current = monthlyEventCounts.get(key)!;
+  if (current >= MONTHLY_EVENT_SOFT_CAP) return false;
+  monthlyEventCounts.set(key, current + n);
+  return true;
+}
+
 async function siteKeySource(
   k: string,
 ): Promise<{ source: string; workspaceId: string | null } | null> {
@@ -536,6 +579,13 @@ router.post('/t', express.text({ type: '*/*', limit: '64kb' }), async (req, res)
       return;
     }
     const { source, workspaceId } = resolved;
+    // Soft cap (§4.3.1) — over-cap batches are dropped silently (204):
+    // the page must never break; the console gauge is the warning.
+    const withinCap = await checkAndCountEvents(source, parsed.data.ev.length);
+    if (!withinCap) {
+      res.status(204).end();
+      return;
+    }
     // Optional identity — same HMAC token family as the survey
     // handoff; an invalid/expired uid degrades to anonymous rather
     // than rejecting the batch (tracking must never break the page).

@@ -590,6 +590,29 @@ export const consoleApi = {
       method: 'POST',
       body: JSON.stringify({ scan_id: scanId }),
     }),
+
+  /** Console S3 — measured tracking aggregates for the analytics tab. */
+  getAnalytics: (id: string, days: 7 | 30 = 7) =>
+    request<SiteAnalytics>(`/api/console/sites/${id}/analytics?days=${days}`),
+};
+
+export type SiteAnalytics = {
+  days: number;
+  kpis: {
+    visitors: number;
+    sessions: number;
+    pageviews: number;
+    avg_dwell_ms: number;
+  };
+  daily: Array<{ day: string; visitors: number; pageviews: number }>;
+  paths: Array<{
+    path: string;
+    views: number;
+    avg_dwell_ms: number;
+    avg_scroll_pct: number;
+  }>;
+  events_this_month: number;
+  monthly_soft_cap: number;
 };
 
 // ─── Tester points + founder credits (Console Sprint 1) ─────────

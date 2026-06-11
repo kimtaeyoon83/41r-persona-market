@@ -22,6 +22,7 @@ import {
   SURVEY_REWARD_CAP_PER_SCAN,
   SURVEY_REWARD_POINTS,
 } from '../services/rewards';
+import { isResponseMilestone, RESPONSE_MILESTONES } from '../services/notify';
 import { requireSiteSecret } from '../middleware/partner';
 
 describe('workspace keys (two-tier model §3.3)', () => {
@@ -62,6 +63,20 @@ describe('survey reward constants (§4.1)', () => {
   it('keeps 100pt per response and the 30/scan cap', () => {
     expect(SURVEY_REWARD_POINTS).toBe(100);
     expect(SURVEY_REWARD_CAP_PER_SCAN).toBe(30);
+  });
+});
+
+describe('response milestones (S3 retention loop #2)', () => {
+  it('fires only on exact milestone counts', () => {
+    for (const m of RESPONSE_MILESTONES) expect(isResponseMilestone(m)).toBe(true);
+    expect(isResponseMilestone(0)).toBe(false);
+    expect(isResponseMilestone(2)).toBe(false);
+    expect(isResponseMilestone(6)).toBe(false);
+    expect(isResponseMilestone(31)).toBe(false);
+  });
+
+  it('caps milestones at the reward cap (no beats past 30)', () => {
+    expect(Math.max(...RESPONSE_MILESTONES)).toBe(SURVEY_REWARD_CAP_PER_SCAN);
   });
 });
 

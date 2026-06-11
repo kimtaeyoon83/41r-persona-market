@@ -81,7 +81,7 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
 pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
-pnpm --filter api test      # Run vitest (242 tests as of 2026-06-12)
+pnpm --filter api test      # Run vitest (244 tests as of 2026-06-12)
 pnpm --filter api db:generate  # Emit a new versioned migration from schema changes → apps/api/drizzle/*.sql
 pnpm --filter api db:migrate   # Apply pending migrations to DATABASE_URL (preferred for Railway deploys)
 pnpm --filter api db:push      # Dev only: push schema directly, bypassing migration files
@@ -219,7 +219,7 @@ Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
   Don't remove it without confirming no follow-up sprint needs it.
 
 ### Testing
-- Vitest at `apps/api/src/__tests__/` — **242 tests** as of 2026-06-12.
+- Vitest at `apps/api/src/__tests__/` — **244 tests** as of 2026-06-12.
   Suites cover env validation, auth schema, audience-fit math,
   cohort selection, dimension LLM contracts (incl. the Q2 site-context
   + Q3 voice-cleanup regression locks), scan shapers, AARRR weighted
@@ -523,6 +523,32 @@ Pending value: anchor scanId (run a 41R scan of the geulbat prod URL).
 Points policy is intentionally undecided — the ledger is append-only
 so any future policy can reprice retroactively.
 
+## Console Sprint 3 — analytics + retention loops (2026-06-12)
+
+- **Analytics API** — `GET /api/console/sites/:id/analytics?days=7|30`
+  aggregates partner_behavior_events for source `ws:<id>`: KPIs
+  (distinct-anon visitors, sessions, pageviews, avg dwell ms), daily
+  series, path ranking (views/dwell/scroll), monthly usage vs the
+  100k soft cap. Direct SQL — a rollup table is the scale path.
+- **Beacon soft cap** — in-memory per-(source, month) counter, lazily
+  DB-initialized; over-cap batches are DROPPED with 204 (tracking must
+  never error the partner's page — the console usage gauge is the
+  warning). Single-instance semantics, same caveat as rate limiters.
+- **Analytics tab** (`/console/sites/[id]` ?tab) — TRACKED: KPI strip,
+  daily bars, page table, and the "Prediction vs reality" combined
+  card (MEASURED ↔ AI PREDICTED `experimental — directional only` ↔
+  HUMAN SURVEY — the flywheel §0.2 made visible; keep the labels).
+  LITE: snippet upsell framed as "verify the prediction", never
+  "replace your analytics" (Clarity is free — §0.3).
+- **Retention loop #2** — `services/notify.ts::notifySurveyMilestone`:
+  survey-response arrival email to the scan owner at exact counts
+  1/5/10/20/30 (max = reward cap). Fire-and-forget from BOTH survey
+  paths, only on first submissions.
+- **Retention loop #3** — weekly digest cron (`startDigestCron`, env
+  `DIGEST_CRON_ENABLED=1`, Mondays UTC): per-user summary of each
+  workspace's 7d scans/fit/visitors. In-process week guard only —
+  a redeploy on Monday can double-send (accepted for pilot).
+
 ## Console Sprint 2 — workspaces + key self-serve (2026-06-12)
 
 S2 shipped on the same branch. The geulbat env-key pilot keeps working
@@ -738,9 +764,11 @@ PARTNER_SITE_KEY_41R=...    # Dogfooding site key (≥12 chars) — routes beaco
 NEXT_PUBLIC_TRACKING_SITE_KEY=... # Web-side mirror of PARTNER_SITE_KEY_41R; when set
                             # together with NEXT_PUBLIC_API_URL, layout.tsx injects
                             # the t.js snippet (public by design, GA-id semantics)
-RESEND_API_KEY=...          # Console S2 — transactional email (scan-complete).
-                            # Absent ⇒ services/email.ts no-ops (local/test safe)
+RESEND_API_KEY=...          # Console S2/S3 — transactional email (scan-complete,
+                            # response milestones, weekly digest). Absent ⇒
+                            # services/email.ts no-ops (local/test safe)
 EMAIL_FROM=...              # Sender (default: 41R <noreply@project-rpm.xyz>)
+DIGEST_CRON_ENABLED=1       # Console S3 — weekly digest cron (Mondays UTC)
 WEB_PUBLIC_URL=...          # Base for partner survey_url links (default https://app.project-rpm.xyz)
 LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
 ```

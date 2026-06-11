@@ -19,11 +19,12 @@ import {
   type ConsoleSite,
   type ScanSummary,
   type ScanReport,
+  type SiteAnalytics,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { C, FM, FS, Frame, Pill } from "../../../validator/_components/ui";
 
-type Tab = "overview" | "reports" | "settings";
+type Tab = "overview" | "reports" | "analytics" | "settings";
 
 export default function SiteDetailPage() {
   const params = useParams<{ id: string }>();
@@ -160,7 +161,7 @@ export default function SiteDetailPage() {
             marginTop: 10,
           }}
         >
-          {(["overview", "reports", "settings"] as const).map((k) => (
+          {(["overview", "reports", "analytics", "settings"] as const).map((k) => (
             <button
               key={k}
               onClick={() => setTab(k)}
@@ -181,7 +182,9 @@ export default function SiteDetailPage() {
                   ? "console.overview"
                   : k === "reports"
                     ? "console.reports"
-                    : "console.settings",
+                    : k === "analytics"
+                      ? "console.analytics"
+                      : "console.settings",
               )}
             </button>
           ))}
@@ -205,6 +208,8 @@ export default function SiteDetailPage() {
           />
         ) : tab === "reports" ? (
           <Reports scans={scans} />
+        ) : tab === "analytics" ? (
+          <Analytics site={site} report={report} />
         ) : (
           <Settings site={site} copied={copied} copy={copy} onChanged={load} router={router} />
         )}
@@ -455,6 +460,376 @@ function Reports({ scans }: { scans: ScanSummary[] }) {
       <div style={{ fontSize: 11, color: C.textFaint }}>{t("console.publicNote")}</div>
     </div>
   );
+}
+
+// ─── Analytics tab (S3 — the TRACKED tier's value) ─────────────────
+// TRACKED: measured KPIs + daily trend + page ranking + the combined
+// "prediction vs reality" card (MEASURED ↔ AI experimental ↔ human
+// survey — the flywheel made visible, §0.2). LITE: upsell card framed
+// as "verify the prediction", never "replace your analytics" (§1.2 —
+// tracking is a calibration device, not the product).
+function Analytics({ site, report }: { site: ConsoleSite; report: ScanReport | null }) {
+  const { t } = useI18n();
+  const [days, setDays] = useState<7 | 30>(7);
+  const [data, setData] = useState<SiteAnalytics | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!site.tracked) return;
+    let cancelled = false;
+    consoleApi
+      .getAnalytics(site.id, days)
+      .then((d) => {
+        if (!cancelled) setData(d);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [site.id, site.tracked, days]);
+
+  if (!site.tracked) {
+    const snippet = `<script src="${API_BASE}/api/partner/t.js" data-site="${site.site_key}" async></script>`;
+    return (
+      <div
+        style={{
+          background: C.panel,
+          border: `1px dashed ${C.border}`,
+          borderRadius: 10,
+          padding: "36px 28px",
+          textAlign: "center",
+          maxWidth: 640,
+        }}
+      >
+        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+          {t("console.liteUpsellTitle")}
+        </div>
+        <div
+          style={{
+            fontSize: 12.5,
+            color: C.textDim,
+            lineHeight: 1.7,
+            maxWidth: 460,
+            margin: "0 auto 16px",
+          }}
+        >
+          {t("console.liteUpsellBody")}
+        </div>
+        <code
+          style={{
+            display: "block",
+            fontFamily: FM,
+            fontSize: 11,
+            background: "#f7f4ec",
+            border: `1px solid ${C.border}`,
+            borderRadius: 6,
+            padding: "10px 12px",
+            wordBreak: "break-all",
+            textAlign: "left",
+          }}
+        >
+          {snippet}
+        </code>
+      </div>
+    );
+  }
+
+  if (error) return <div style={{ color: C.bad, fontSize: 13 }}>{error}</div>;
+  if (!data) return <Center>{t("common.loading")}</Center>;
+
+  const aiActivation = report?.aarrr_weighted?.stages.find(
+    (s) => s.key === "activation",
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Period + usage */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {([7, 30] as const).map((d) => (
+          <button
+            key={d}
+            onClick={() => setDays(d)}
+            style={{
+              background: days === d ? C.text : "transparent",
+              color: days === d ? C.bg : C.textDim,
+              border: `1px solid ${C.border}`,
+              borderRadius: 999,
+              padding: "4px 12px",
+              fontSize: 11,
+              fontFamily: FM,
+              cursor: "pointer",
+            }}
+          >
+            {d}d
+          </button>
+        ))}
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: C.textFaint, fontFamily: FM }}>
+          {t("console.monthlyEvents")}: {data.events_this_month.toLocaleString()} /{" "}
+          {data.monthly_soft_cap.toLocaleString()}
+        </span>
+      </div>
+
+      {/* KPI strip */}
+      <div
+        className="v-grid-stack-sm"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: 10,
+        }}
+      >
+        <Kpi label={t("console.visitors")} value={data.kpis.visitors.toLocaleString()} />
+        <Kpi label={t("console.sessions")} value={data.kpis.sessions.toLocaleString()} />
+        <Kpi label={t("console.pageviews")} value={data.kpis.pageviews.toLocaleString()} />
+        <Kpi label={t("console.avgDwell")} value={fmtMs(data.kpis.avg_dwell_ms)} />
+      </div>
+
+      {/* Daily trend */}
+      {data.daily.length > 0 ? (
+        <div
+          style={{
+            background: C.panel,
+            border: `1px solid ${C.border}`,
+            borderRadius: 10,
+            padding: 16,
+          }}
+        >
+          <DailyBars daily={data.daily} />
+        </div>
+      ) : (
+        <div style={{ padding: 24, textAlign: "center", color: C.textDim, fontSize: 12 }}>
+          {t("console.noAnalytics")}
+        </div>
+      )}
+
+      {/* Page ranking */}
+      {data.paths.length > 0 && (
+        <div
+          style={{
+            background: C.panel,
+            border: `1px solid ${C.border}`,
+            borderRadius: 10,
+            padding: 16,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
+            {t("console.topPages")}
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr
+                  style={{
+                    textAlign: "left",
+                    color: C.textFaint,
+                    fontFamily: FM,
+                    fontSize: 10,
+                  }}
+                >
+                  <th style={th}>PATH</th>
+                  <th style={{ ...th, textAlign: "right" }}>{t("console.viewsCol")}</th>
+                  <th style={{ ...th, textAlign: "right" }}>{t("console.avgDwell")}</th>
+                  <th style={{ ...th, textAlign: "right" }}>{t("console.scrollCol")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.paths.map((p) => (
+                  <tr key={p.path} style={{ borderTop: `1px solid ${C.border}` }}>
+                    <td style={{ ...td, fontFamily: FM, fontSize: 11 }}>{p.path}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: FM }}>{p.views}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: FM }}>
+                      {fmtMs(p.avg_dwell_ms)}
+                    </td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: FM }}>
+                      {p.avg_scroll_pct}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Combined view — prediction vs reality (§0.2 flywheel on screen) */}
+      <div
+        style={{
+          background: C.panel,
+          border: `1px solid ${C.border}`,
+          borderRadius: 10,
+          padding: 16,
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
+          {t("console.combined")}
+        </div>
+        <div
+          className="v-grid-stack-sm"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: 10,
+          }}
+        >
+          <CombinedCol
+            label={t("console.measuredLabel")}
+            tone={C.ok}
+            rows={[
+              [t("console.visitors"), data.kpis.visitors.toLocaleString()],
+              [t("console.sessions"), data.kpis.sessions.toLocaleString()],
+              [t("console.avgDwell"), fmtMs(data.kpis.avg_dwell_ms)],
+            ]}
+          />
+          <CombinedCol
+            label={t("console.aiLabel")}
+            tone={C.exp}
+            rows={[
+              [
+                "Audience fit",
+                report?.result?.audience_fit_score != null
+                  ? String(Math.round(report.result.audience_fit_score))
+                  : "—",
+              ],
+              [
+                "Activation",
+                aiActivation ? `${Math.round(aiActivation.score)}%` : "—",
+              ],
+              [
+                "Best fit",
+                report?.result?.best.cohort_label ?? "—",
+              ],
+            ]}
+          />
+          <CombinedCol
+            label={t("console.humanLabel")}
+            tone={C.accent}
+            rows={[
+              [
+                t("console.surveyResponses"),
+                String(report?.survey_response_count ?? 0),
+              ],
+              [
+                t("console.humanCompared"),
+                report?.human_aggregate_computed ? "✓" : "—",
+              ],
+            ]}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Kpi({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        background: C.panel,
+        border: `1px solid ${C.border}`,
+        borderRadius: 10,
+        padding: 14,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          color: C.textFaint,
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+          fontFamily: FM,
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 600, fontFamily: FM }}>{value}</div>
+    </div>
+  );
+}
+
+function CombinedCol({
+  label,
+  tone,
+  rows,
+}: {
+  label: string;
+  tone: string;
+  rows: Array<[string, string]>;
+}) {
+  return (
+    <div
+      style={{
+        border: `1px solid ${C.border}`,
+        borderRadius: 8,
+        padding: 12,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 9,
+          fontFamily: FM,
+          fontWeight: 600,
+          color: tone,
+          letterSpacing: "0.06em",
+          marginBottom: 10,
+          lineHeight: 1.5,
+        }}
+      >
+        {label}
+      </div>
+      {rows.map(([k, v]) => (
+        <div
+          key={k}
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 8,
+            fontSize: 12,
+            padding: "3px 0",
+          }}
+        >
+          <span style={{ color: C.textDim }}>{k}</span>
+          <span style={{ fontFamily: FM, fontWeight: 600 }}>{v}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DailyBars({ daily }: { daily: Array<{ day: string; pageviews: number }> }) {
+  const W = 640;
+  const H = 120;
+  const max = Math.max(...daily.map((d) => d.pageviews), 1);
+  const bw = Math.min(36, (W - 8) / daily.length - 4);
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H + 18}`}
+      style={{ display: "block", width: "100%", maxWidth: W, height: "auto" }}
+    >
+      {daily.map((d, i) => {
+        const h = Math.max(2, (d.pageviews / max) * H);
+        const x = 4 + i * (bw + 4);
+        return (
+          <g key={d.day}>
+            <rect x={x} y={H - h} width={bw} height={h} rx={3} fill={C.accentSoft} stroke={C.accent} strokeWidth={1} />
+            <text x={x + bw / 2} y={H + 13} fontSize={8} fontFamily={FM} fill={C.textFaint} textAnchor="middle">
+              {d.day.slice(5)}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function fmtMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 // ─── Settings tab (S2) ─────────────────────────────────────────────

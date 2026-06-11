@@ -40,6 +40,7 @@ import { isAdminRequest } from '../middleware/admin.js';
 import { debitScan, getCreditBalance, SCAN_PRICE_CENTS } from '../services/credits.js';
 import { findWorkspaceByHost } from '../services/workspaces.js';
 import { awardSurveyPoints, isRewardAvailable } from '../services/rewards.js';
+import { notifySurveyMilestone } from '../services/notify.js';
 import {
   buildSponsoredZeroTx,
   broadcastSignedTx,
@@ -1105,6 +1106,8 @@ router.post('/:id/survey', requirePrivyAuth, mutationLimiter, async (req, res) =
       userId,
       email: req.privyUser!.email,
     });
+    // Retention loop #2 (S3) — milestone-batched owner notification.
+    notifySurveyMilestone(id);
   }
 
   res.json({

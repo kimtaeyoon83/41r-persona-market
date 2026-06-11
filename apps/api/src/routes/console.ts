@@ -7,7 +7,7 @@
 // plaintext exactly once (create / rotate) and stored as sha256.
 
 import { Router, type Router as RouterType } from 'express';
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
 import { requirePrivyAuth } from '../middleware/privy_auth.js';
@@ -296,6 +296,101 @@ router.post(
     res.json({ ok: true, secret, secret_last4: secretLast4(secret) });
   },
 );
+
+// ─── Analytics (Console Sprint 3 — the TRACKED tier's value) ───────
+// Aggregates partner_behavior_events for this workspace's beacon
+// source ('ws:<id>'). Direct SQL over the events table — fine at the
+// 100k-events/month soft cap; a rollup table is the scale path.
+// Event vocabulary comes from the t.js snippet: pageview {path},
+// dwell {path, ms, scroll_pct}, session_start, session_end.
+router.get('/sites/:id/analytics', requirePrivyAuth, async (req, res) => {
+  const id = String(req.params.id ?? '');
+  if (!UUID_RE.test(id)) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  const ws = await getWorkspaceForUser(req.privyUser!.id, id);
+  if (!ws) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  const days = req.query.days === '30' ? 30 : 7;
+  const source = `ws:${ws.id}`;
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  const ev = schema.partnerBehaviorEvents;
+  const [kpis] = await db
+    .select({
+      visitors: sql<number>`count(distinct ${ev.anonId})::int`,
+      sessions: sql<number>`count(distinct ${ev.sessionId})::int`,
+      pageviews: sql<number>`count(*) filter (where ${ev.eventType} = 'pageview')::int`,
+      avgDwellMs: sql<number>`coalesce(avg((${ev.payload}->>'ms')::numeric) filter (where ${ev.eventType} = 'dwell'), 0)::int`,
+    })
+    .from(ev)
+    .where(and(eq(ev.source, source), sql`${ev.occurredAt} >= ${cutoff}`));
+
+  const daily = await db
+    .select({
+      day: sql<string>`to_char(date_trunc('day', ${ev.occurredAt}), 'YYYY-MM-DD')`,
+      visitors: sql<number>`count(distinct ${ev.anonId})::int`,
+      pageviews: sql<number>`count(*) filter (where ${ev.eventType} = 'pageview')::int`,
+    })
+    .from(ev)
+    .where(and(eq(ev.source, source), sql`${ev.occurredAt} >= ${cutoff}`))
+    .groupBy(sql`date_trunc('day', ${ev.occurredAt})`)
+    .orderBy(sql`date_trunc('day', ${ev.occurredAt})`);
+
+  const paths = await db
+    .select({
+      path: sql<string>`coalesce(${ev.payload}->>'path', '/')`,
+      views: sql<number>`count(*) filter (where ${ev.eventType} = 'pageview')::int`,
+      avgDwellMs: sql<number>`coalesce(avg((${ev.payload}->>'ms')::numeric) filter (where ${ev.eventType} = 'dwell'), 0)::int`,
+      avgScrollPct: sql<number>`coalesce(avg((${ev.payload}->>'scroll_pct')::numeric) filter (where ${ev.eventType} = 'dwell'), 0)::int`,
+    })
+    .from(ev)
+    .where(
+      and(
+        eq(ev.source, source),
+        sql`${ev.occurredAt} >= ${cutoff}`,
+        inArray(ev.eventType, ['pageview', 'dwell']),
+      ),
+    )
+    .groupBy(sql`coalesce(${ev.payload}->>'path', '/')`)
+    .orderBy(sql`count(*) filter (where ${ev.eventType} = 'pageview') desc`)
+    .limit(20);
+
+  // Soft-cap usage (this calendar month, UTC) — §4.3.1: 100k/month.
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const [usage] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(ev)
+    .where(and(eq(ev.source, source), sql`${ev.occurredAt} >= ${monthStart}`));
+
+  res.json({
+    days,
+    kpis: {
+      visitors: kpis?.visitors ?? 0,
+      sessions: kpis?.sessions ?? 0,
+      pageviews: kpis?.pageviews ?? 0,
+      avg_dwell_ms: kpis?.avgDwellMs ?? 0,
+    },
+    daily: daily.map((d) => ({
+      day: d.day,
+      visitors: d.visitors,
+      pageviews: d.pageviews,
+    })),
+    paths: paths.map((p) => ({
+      path: p.path,
+      views: p.views,
+      avg_dwell_ms: p.avgDwellMs,
+      avg_scroll_pct: p.avgScrollPct,
+    })),
+    events_this_month: usage?.n ?? 0,
+    monthly_soft_cap: 100_000,
+  });
+});
 
 // ─── Link an unassigned scan ───────────────────────────────────────
 router.post(
