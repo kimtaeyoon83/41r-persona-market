@@ -8,6 +8,7 @@ import scanRouter from './routes/scan.js';
 import calibrationRouter from './routes/calibration.js';
 import benchmarkRouter from './routes/benchmark.js';
 import meResponsesRouter from './routes/me_responses.js';
+import consoleRouter from './routes/console.js';
 import partnerRouter from './routes/partner.js';
 import { startCalibrationCron } from './services/calibration/cron.js';
 import { allowedOrigins, corsOptions } from './config/cors.js';
@@ -67,6 +68,8 @@ app.use('/api/scan', readLimiter, scanRouter);
 app.use('/api/calibration', readLimiter, requireAdminKeyIfConfigured, calibrationRouter);
 app.use('/api/benchmark', readLimiter, benchmarkRouter);
 app.use('/api/me', readLimiter, meResponsesRouter);
+// Founder Console workspace CRUD (Console S2) — Privy-gated inside.
+app.use('/api/console', readLimiter, consoleRouter);
 // Partner S2S ingest (geulbat pilot) — key-gated, see middleware/partner.ts
 app.use('/api/partner', partnerRouter);
 

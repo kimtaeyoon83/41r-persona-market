@@ -1,77 +1,81 @@
 "use client";
 
-// /console/sites/[host] — site workspace detail (Console Sprint 1).
+// /console/sites/[id] — site workspace detail (Console Sprint 2).
 //
-// S1 ships the Overview + Reports tabs (console-ia-redesign.md §7.1):
-// hero leads with the BEST-FIT AUDIENCE (who), score second, misfit
-// cohort shown too — "who it's NOT for" is also a finding and the
-// on-screen version of the honesty contract (§0.4). Analytics +
-// Settings tabs land with site_workspaces/keys in Sprint 2-3.
-//
-// [host] is the normalized URL host (S1 grouping key — see
-// hostOf() in ../../page.tsx). Sprint 2 swaps this for a workspace id.
+// S2 swaps the S1 host-grouping param for the workspace id and adds
+// the Settings tab (keys / snippet / rotate / delete). Overview keeps
+// the §7.1 hero order: best-fit audience first, score second, misfit
+// line visible — the on-screen honesty contract (§0.4). The Analytics
+// tab (measured KPIs + combined view) lands in Sprint 3.
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { usePrivy } from "@privy-io/react-auth";
-import { scanApi, API_BASE, type ScanSummary, type ScanReport } from "@/lib/api";
+import {
+  consoleApi,
+  scanApi,
+  API_BASE,
+  type ConsoleSite,
+  type ScanSummary,
+  type ScanReport,
+} from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { C, FM, FS, Frame, Pill } from "../../../validator/_components/ui";
-import { hostOf } from "../../_lib";
+
+type Tab = "overview" | "reports" | "settings";
 
 export default function SiteDetailPage() {
-  const params = useParams<{ host: string }>();
-  const host = decodeURIComponent(params.host ?? "");
+  const params = useParams<{ id: string }>();
+  const id = params.id ?? "";
+  const router = useRouter();
   const { ready, authenticated, login } = usePrivy();
   const { t } = useI18n();
 
+  const [site, setSite] = useState<ConsoleSite | null>(null);
   const [scans, setScans] = useState<ScanSummary[] | null>(null);
   const [report, setReport] = useState<ScanReport | null>(null);
-  const [tab, setTab] = useState<"overview" | "reports">("overview");
+  const [tab, setTab] = useState<Tab>("overview");
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const res = await consoleApi.getSite(id);
+    setSite(res.workspace);
+    setScans(res.scans);
+    const latestCompleted = res.scans.find((s) => s.status === "completed");
+    if (latestCompleted) {
+      const r = await scanApi.getReport(latestCompleted.id);
+      setReport(r);
+    }
+  }, [id]);
 
   useEffect(() => {
-    if (!ready || !authenticated) return;
+    if (!ready || !authenticated || !id) return;
     let cancelled = false;
-    scanApi
-      .getMyScans()
-      .then(async (mine) => {
-        if (cancelled) return;
-        const siteScans = mine.scans
-          .filter((s) => hostOf(s.target_url) === host)
-          .sort(
-            (a, b) =>
-              new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-          );
-        setScans(siteScans);
-        const latestCompleted = siteScans.find((s) => s.status === "completed");
-        if (latestCompleted) {
-          const r = await scanApi.getReport(latestCompleted.id);
-          if (!cancelled) setReport(r);
-        }
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Failed to load");
-      });
+    load().catch((e) => {
+      if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load");
+    });
     return () => {
       cancelled = true;
     };
-  }, [ready, authenticated, host]);
+  }, [ready, authenticated, id, load]);
 
   const completedScores = useMemo(
     () =>
       (scans ?? [])
         .filter((s) => s.status === "completed" && s.audience_fit_score != null)
-        .map((s) => ({
-          at: s.completed_at ?? s.created_at,
-          score: s.audience_fit_score!,
-        }))
-        .reverse(), // oldest → newest for the sparkline
+        .map((s) => s.audience_fit_score!)
+        .reverse(),
     [scans],
   );
+
+  const copy = (text: string, key: string) => {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(key);
+      setTimeout(() => setCopied(null), 1600);
+    });
+  };
 
   if (!ready) {
     return (
@@ -112,8 +116,8 @@ export default function SiteDetailPage() {
   const delta =
     completedScores.length >= 2
       ? Math.round(
-          completedScores[completedScores.length - 1]!.score -
-            completedScores[completedScores.length - 2]!.score,
+          completedScores[completedScores.length - 1]! -
+            completedScores[completedScores.length - 2]!,
         )
       : null;
 
@@ -131,8 +135,13 @@ export default function SiteDetailPage() {
 
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
           <h1 style={{ fontSize: 26, fontWeight: 600, fontFamily: FM, margin: 0 }}>
-            {host}
+            {site?.url_host ?? "…"}
           </h1>
+          {site && (
+            <Pill tone={site.tracked ? "ok" : "neutral"} style={{ fontSize: 9 }}>
+              {site.tracked ? "● TRACKED" : "○ LITE"}
+            </Pill>
+          )}
           {report?.scan.category && <Pill>{report.scan.category}</Pill>}
         </div>
         {report?.scan.one_line_pitch && (
@@ -151,7 +160,7 @@ export default function SiteDetailPage() {
             marginTop: 10,
           }}
         >
-          {(["overview", "reports"] as const).map((k) => (
+          {(["overview", "reports", "settings"] as const).map((k) => (
             <button
               key={k}
               onClick={() => setTab(k)}
@@ -167,14 +176,20 @@ export default function SiteDetailPage() {
                 fontFamily: FS,
               }}
             >
-              {t(k === "overview" ? "console.overview" : "console.reports")}
+              {t(
+                k === "overview"
+                  ? "console.overview"
+                  : k === "reports"
+                    ? "console.reports"
+                    : "console.settings",
+              )}
             </button>
           ))}
         </div>
 
         {error && <div style={{ color: C.bad, fontSize: 13, marginBottom: 14 }}>{error}</div>}
 
-        {scans === null ? (
+        {scans === null || site === null ? (
           <Center>{t("common.loading")}</Center>
         ) : tab === "overview" ? (
           <Overview
@@ -183,18 +198,22 @@ export default function SiteDetailPage() {
             report={report}
             delta={delta}
             scores={completedScores}
-            copied={copied}
-            setCopied={setCopied}
+            copied={copied === "survey"}
+            onCopySurvey={() =>
+              latest && copy(`${window.location.origin}/validator/survey/${latest.id}`, "survey")
+            }
           />
-        ) : (
+        ) : tab === "reports" ? (
           <Reports scans={scans} />
+        ) : (
+          <Settings site={site} copied={copied} copy={copy} onChanged={load} router={router} />
         )}
       </div>
     </Frame>
   );
 }
 
-// ─── Overview tab ──────────────────────────────────────────────────
+// ─── Overview tab (S1 layout, workspace-fed) ───────────────────────
 function Overview({
   scans,
   latest,
@@ -202,15 +221,15 @@ function Overview({
   delta,
   scores,
   copied,
-  setCopied,
+  onCopySurvey,
 }: {
   scans: ScanSummary[];
   latest: ScanSummary | null;
   report: ScanReport | null;
   delta: number | null;
-  scores: { at: string; score: number }[];
+  scores: number[];
   copied: boolean;
-  setCopied: (v: boolean) => void;
+  onCopySurvey: () => void;
 }) {
   const { t } = useI18n();
   const result = report?.result ?? null;
@@ -218,15 +237,6 @@ function Overview({
     latest?.audience_fit_score != null ? Math.round(latest.audience_fit_score) : null;
   const tone =
     score == null ? C.textFaint : score >= 60 ? C.ok : score >= 40 ? C.warn : C.bad;
-
-  const copySurveyLink = () => {
-    if (!latest) return;
-    const url = `${window.location.origin}/validator/survey/${latest.id}`;
-    void navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    });
-  };
 
   if (!latest) {
     return (
@@ -238,7 +248,6 @@ function Overview({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* Hero — who first, score second (§7.1) */}
       <div
         style={{
           background: C.panel,
@@ -302,7 +311,7 @@ function Overview({
               {delta > 0 ? "▲" : "▼"} {Math.abs(delta)}
             </span>
           )}
-          {scores.length >= 2 && <Sparkline points={scores.map((s) => s.score)} />}
+          {scores.length >= 2 && <Sparkline points={scores} />}
           <div style={{ flex: 1 }} />
           <Link
             href={`/validator/detail?url=${encodeURIComponent(latest.target_url)}`}
@@ -321,7 +330,6 @@ function Overview({
         </div>
       </div>
 
-      {/* Survey status */}
       {report && (
         <div
           style={{
@@ -344,7 +352,7 @@ function Overview({
           )}
           <div style={{ flex: 1 }} />
           <button
-            onClick={copySurveyLink}
+            onClick={onCopySurvey}
             style={{
               background: C.panel,
               border: `1px solid ${C.border}`,
@@ -374,7 +382,6 @@ function Overview({
         </div>
       )}
 
-      {/* Scan history */}
       <div
         style={{
           background: C.panel,
@@ -449,6 +456,255 @@ function Reports({ scans }: { scans: ScanSummary[] }) {
     </div>
   );
 }
+
+// ─── Settings tab (S2) ─────────────────────────────────────────────
+function Settings({
+  site,
+  copied,
+  copy,
+  onChanged,
+  router,
+}: {
+  site: ConsoleSite;
+  copied: string | null;
+  copy: (text: string, key: string) => void;
+  onChanged: () => Promise<void>;
+  router: ReturnType<typeof useRouter>;
+}) {
+  const { t } = useI18n();
+  const [name, setName] = useState(site.name ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [rotated, setRotated] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const snippet = `<script src="${API_BASE}/api/partner/t.js" data-site="${site.site_key}" async></script>`;
+
+  const saveName = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await consoleApi.updateSite(site.id, { name: name || null });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1600);
+      await onChanged();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const rotate = async () => {
+    if (busy) return;
+    if (!window.confirm(t("console.rotateConfirm"))) return;
+    setBusy(true);
+    try {
+      const res = await consoleApi.rotateKey(site.id);
+      setRotated(res.secret);
+      await onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (busy) return;
+    if (!window.confirm(t("console.deleteConfirm"))) return;
+    setBusy(true);
+    try {
+      await consoleApi.deleteSite(site.id);
+      router.push("/console");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 720 }}>
+      {/* Name */}
+      <SettingsCard title={t("console.siteName")}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            style={{
+              flex: 1,
+              minWidth: 200,
+              padding: "9px 12px",
+              fontSize: 13,
+              border: `1px solid ${C.border}`,
+              borderRadius: 7,
+              background: "#fff",
+              color: C.text,
+              outline: "none",
+              fontFamily: FS,
+            }}
+          />
+          <button onClick={saveName} style={btnGhost} disabled={saving}>
+            {saved ? t("console.saved") : t("console.save")}
+          </button>
+        </div>
+      </SettingsCard>
+
+      {/* Site key */}
+      <SettingsCard title={t("console.siteKeyLabel")}>
+        <CodeRow
+          code={site.site_key}
+          action={
+            <button onClick={() => copy(site.site_key, "sitekey")} style={btnGhost}>
+              {copied === "sitekey" ? t("console.copied") : t("console.copy")}
+            </button>
+          }
+        />
+      </SettingsCard>
+
+      {/* Secret */}
+      <SettingsCard title={t("console.secretLabel")}>
+        {rotated ? (
+          <>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.warn, marginBottom: 8 }}>
+              {t("console.secretOnce")}
+            </div>
+            <CodeRow
+              code={rotated}
+              action={
+                <button onClick={() => copy(rotated, "secret")} style={btnGhost}>
+                  {copied === "secret" ? t("console.copiedSecret") : t("console.copy")}
+                </button>
+              }
+            />
+          </>
+        ) : (
+          <CodeRow
+            code={`rpm_sk_…${site.secret_last4}`}
+            action={
+              <button onClick={rotate} style={btnGhost} disabled={busy}>
+                {t("console.rotate")}
+              </button>
+            }
+          />
+        )}
+      </SettingsCard>
+
+      {/* Snippet */}
+      <SettingsCard title={t("console.snippetLabel")} sub={t("console.snippetHelp")}>
+        <CodeRow
+          code={snippet}
+          small
+          action={
+            <button onClick={() => copy(snippet, "snippet")} style={btnGhost}>
+              {copied === "snippet" ? t("console.copied") : t("console.copy")}
+            </button>
+          }
+        />
+        <div style={{ fontSize: 11, color: C.textFaint, marginTop: 8, fontFamily: FM }}>
+          {t("console.lastEvent")}:{" "}
+          {site.last_event_at ? timeAgo(site.last_event_at) : t("console.noEvents")}
+        </div>
+      </SettingsCard>
+
+      {/* Danger zone */}
+      <div
+        style={{
+          border: `1px solid #eccac4`,
+          borderRadius: 10,
+          padding: 16,
+          background: C.panel,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+        }}
+      >
+        <div style={{ flex: 1, fontSize: 12, color: C.textDim }}>
+          {t("console.deleteConfirm")}
+        </div>
+        <button
+          onClick={remove}
+          disabled={busy}
+          style={{
+            background: "transparent",
+            border: `1px solid #eccac4`,
+            color: C.bad,
+            borderRadius: 7,
+            padding: "7px 13px",
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: "pointer",
+            fontFamily: FS,
+          }}
+        >
+          {t("console.deleteSite")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SettingsCard({
+  title,
+  sub,
+  children,
+}: {
+  title: string;
+  sub?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: C.panel,
+        border: `1px solid ${C.border}`,
+        borderRadius: 10,
+        padding: 16,
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: sub ? 4 : 10 }}>{title}</div>
+      {sub && <div style={{ fontSize: 11, color: C.textDim, marginBottom: 10 }}>{sub}</div>}
+      {children}
+    </div>
+  );
+}
+
+function CodeRow({
+  code,
+  action,
+  small,
+}: {
+  code: string;
+  action: React.ReactNode;
+  small?: boolean;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <code
+        style={{
+          fontFamily: FM,
+          fontSize: small ? 11 : 12,
+          background: "#f7f4ec",
+          border: `1px solid ${C.border}`,
+          borderRadius: 6,
+          padding: "8px 10px",
+          wordBreak: "break-all",
+          flex: 1,
+          minWidth: 220,
+        }}
+      >
+        {code}
+      </code>
+      {action}
+    </div>
+  );
+}
+
+const btnGhost: React.CSSProperties = {
+  background: "transparent",
+  border: `1px solid ${C.border}`,
+  borderRadius: 7,
+  padding: "7px 13px",
+  fontSize: 12,
+  cursor: "pointer",
+  fontFamily: FS,
+  color: C.text,
+};
 
 const linkBtn: React.CSSProperties = {
   border: `1px solid ${C.border}`,
@@ -557,6 +813,16 @@ function fmtDate(iso: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
     d.getDate(),
   ).padStart(2, "0")}`;
+}
+
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  const m = Math.floor(ms / 60_000);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
 function Center({ children }: { children: React.ReactNode }) {

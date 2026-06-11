@@ -94,6 +94,8 @@ export default function SurveyPage() {
   // Null while loading, [] when the scan has none, populated otherwise.
   const [customQuestions, setCustomQuestions] = useState<CustomQuestion[] | null>(null);
   const [customAnswers, setCustomAnswers] = useState<Record<string, number | string>>({});
+  // Console S2 §12-7 — reward-cap state disclosed BEFORE answering.
+  const [rewardAvailable, setRewardAvailable] = useState(true);
 
   // Load scan custom questions (always) + the user's prior response (if
   // authenticated) on mount. The prefill turns the page into an editor
@@ -106,6 +108,7 @@ export default function SurveyPage() {
       .then((r) => {
         if (cancelled) return;
         setCustomQuestions(r.scan.custom_questions ?? []);
+        setRewardAvailable(r.survey_reward_available ?? true);
       })
       .catch(() => {
         if (!cancelled) setCustomQuestions([]);
@@ -250,6 +253,29 @@ export default function SurveyPage() {
           Use the site for a few minutes, then answer below. Your responses become
           ground-truth for measuring AI persona accuracy.
         </div>
+
+        {/* Console S2 — pre-answer reward disclosure (§12 decision 7:
+            trust over response rate). Shown before any input so the
+            respondent knows the point budget is exhausted up front. */}
+        {!rewardAvailable && (
+          <div
+            style={{
+              padding: 14,
+              marginBottom: 20,
+              background: C.warnSoft,
+              border: `1px solid #ecdcb4`,
+              borderRadius: 8,
+              fontSize: 13,
+              color: C.warn,
+              lineHeight: 1.6,
+            }}
+          >
+            This survey&apos;s point rewards have been fully claimed — your
+            response still counts, but no points will be awarded for it.
+            <br />이 설문의 포인트 보상이 모두 소진되었습니다 — 응답은
+            반영되지만 포인트는 적립되지 않습니다.
+          </div>
+        )}
 
         {/* Auth gate — Phase 5.1 replaces the email field. Anyone can
             view the form, but Submit triggers Privy login if needed.

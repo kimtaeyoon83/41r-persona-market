@@ -81,7 +81,7 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
 pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
-pnpm --filter api test      # Run vitest (232 tests as of 2026-06-11)
+pnpm --filter api test      # Run vitest (242 tests as of 2026-06-12)
 pnpm --filter api db:generate  # Emit a new versioned migration from schema changes → apps/api/drizzle/*.sql
 pnpm --filter api db:migrate   # Apply pending migrations to DATABASE_URL (preferred for Railway deploys)
 pnpm --filter api db:push      # Dev only: push schema directly, bypassing migration files
@@ -219,7 +219,7 @@ Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
   Don't remove it without confirming no follow-up sprint needs it.
 
 ### Testing
-- Vitest at `apps/api/src/__tests__/` — **232 tests** as of 2026-06-11.
+- Vitest at `apps/api/src/__tests__/` — **242 tests** as of 2026-06-12.
   Suites cover env validation, auth schema, audience-fit math,
   cohort selection, dimension LLM contracts (incl. the Q2 site-context
   + Q3 voice-cleanup regression locks), scan shapers, AARRR weighted
@@ -523,6 +523,48 @@ Pending value: anchor scanId (run a 41R scan of the geulbat prod URL).
 Points policy is intentionally undecided — the ledger is append-only
 so any future policy can reprice retroactively.
 
+## Console Sprint 2 — workspaces + key self-serve (2026-06-12)
+
+S2 shipped on the same branch. The geulbat env-key pilot keeps working
+untouched (alias contract) while everything it did manually becomes
+self-serve:
+
+- **site_workspaces** (migration 0014, idempotent) — registration =
+  per-user analysis workspace, NOT ownership: `UNIQUE(user_id,
+  url_host)`, no global host unique (N users can register the same
+  site, fully isolated). No domain verification ever — installing the
+  snippet is the natural gate. Tier is emergent: `last_event_at` set →
+  TRACKED, else LITE.
+- **Two-tier keys** (`services/workspaces.ts`): `rpm_pk_…` site key
+  (public, beacon routing only) / `rpm_sk_…` secret (S2S + HMAC,
+  sha256-hashed, plaintext shown exactly once at create/rotate).
+  Neither grants read access — leak blast radius is fake-data
+  injection only.
+- **/api/console/sites** CRUD + rotate-key + link-scan
+  (`routes/console.ts`, owner-scoped WHERE user_id). Creating a
+  workspace adopts the user's existing unassigned scans for that host;
+  new scans auto-link in POST /api/scan via `findWorkspaceByHost`.
+- **requireSiteSecret** (`middleware/partner.ts`) — accepts the env
+  geulbat key (source 'geulbat') OR any workspace secret (source
+  'ws:<id>'). `requireGeulbatKey` + /geulbat/* paths stay as the alias.
+  Beacon `siteKeySource` also resolves `rpm_pk_…` keys from the DB and
+  touches `last_event_at`.
+- **Survey rewards** (`services/rewards.ts`) — single source for both
+  the partner and direct survey paths: +100pt first submission,
+  per-scan cap 30; beyond the cap a transparent 0pt
+  'reward_cap_reached' row is appended (never silently dropped) and
+  the survey page discloses the state BEFORE answering via
+  `survey_reward_available` on the report response (§12 decision 7).
+  `point_transactions.ref_id` (scan id) backs the cap count.
+- **Scan-complete email** (`services/email.ts`) — Resend HTTP wrapper,
+  no-op without RESEND_API_KEY; fired from both pipeline completion
+  points (non-fatal). Headline is the best-fit audience, not the score.
+- **Web**: /console lists workspaces (LITE/TRACKED badge) + Unassigned
+  scans with one-click register; /console/sites/new is a 1-step form
+  whose success state shows the secret once + snippet; detail moved to
+  /console/sites/[id] with a Settings tab (keys, rotate, snippet,
+  last-event, delete — delete unlinks scans, never destroys).
+
 ## Console Sprint 1 — credits + founder console (2026-06-11)
 
 Product plan: `docs/console-ia-redesign.md` (v0.6 — decisions §12
@@ -696,6 +738,9 @@ PARTNER_SITE_KEY_41R=...    # Dogfooding site key (≥12 chars) — routes beaco
 NEXT_PUBLIC_TRACKING_SITE_KEY=... # Web-side mirror of PARTNER_SITE_KEY_41R; when set
                             # together with NEXT_PUBLIC_API_URL, layout.tsx injects
                             # the t.js snippet (public by design, GA-id semantics)
+RESEND_API_KEY=...          # Console S2 — transactional email (scan-complete).
+                            # Absent ⇒ services/email.ts no-ops (local/test safe)
+EMAIL_FROM=...              # Sender (default: 41R <noreply@project-rpm.xyz>)
 WEB_PUBLIC_URL=...          # Base for partner survey_url links (default https://app.project-rpm.xyz)
 LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
 ```

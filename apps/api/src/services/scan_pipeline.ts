@@ -25,6 +25,7 @@ import { eq } from 'drizzle-orm';
 import { STANDARD_COHORTS } from '@41rpm/shared';
 import { db, schema } from '../db/index.js';
 import { refundScanDebit } from './credits.js';
+import { sendScanCompleteEmail } from './email.js';
 import { logger } from '../logger.js';
 import {
   type CohortFit,
@@ -472,6 +473,7 @@ async function runScan(scanId: string): Promise<void> {
     },
     'scan completed'
   );
+  notifyScanComplete(scanId, result.best.cohort_label, result.audience_fit_score);
 }
 
 // ─── Mode B: single-audience pipeline ────────────────────────────
@@ -645,6 +647,44 @@ async function runModeBPipeline(args: {
     { scanId, cohortFitScore: cohortFitScore.toFixed(2), verdict, audience: parsed.label },
     'mode B scan completed'
   );
+  notifyScanComplete(scanId, parsed.label ?? null, cohortFitScore);
+}
+
+// Scan-complete notification (Console S2, retention loop #1 — §6).
+// Fire-and-forget: looks up the owner's email and sends the report
+// link. Anonymous scans (userId null) and users without an email are
+// silently skipped; email.ts itself no-ops without RESEND_API_KEY.
+function notifyScanComplete(
+  scanId: string,
+  bestCohortLabel: string | null,
+  audienceFitScore: number | null,
+): void {
+  void (async () => {
+    try {
+      const [scan] = await db
+        .select({
+          userId: schema.audienceFitScans.userId,
+          targetUrl: schema.audienceFitScans.targetUrl,
+        })
+        .from(schema.audienceFitScans)
+        .where(eq(schema.audienceFitScans.id, scanId));
+      if (!scan?.userId) return;
+      const [user] = await db
+        .select({ email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.id, scan.userId));
+      if (!user?.email) return;
+      await sendScanCompleteEmail({
+        to: user.email,
+        targetUrl: scan.targetUrl,
+        scanId,
+        bestCohortLabel,
+        audienceFitScore,
+      });
+    } catch (err) {
+      log.warn({ scanId, err }, 'scan-complete notify failed (non-fatal)');
+    }
+  })();
 }
 
 async function setStatus(scanId: string, status: string): Promise<void> {

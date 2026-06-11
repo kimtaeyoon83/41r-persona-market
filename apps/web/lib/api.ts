@@ -198,6 +198,10 @@ export type ScanReport = {
   /** Phase 5 — live count of human survey responses. Drives the
    *  "Compare with humans (n=X)" footer button on the report page. */
   survey_response_count: number;
+  /** Console S2 — false once the per-scan reward cap (30) is reached.
+   *  The survey page MUST disclose this before the respondent answers
+   *  (§12 decision 7 — trust over response rate). */
+  survey_reward_available: boolean;
   /** Phase 5 — whether human_aggregate has been computed at least
    *  once. Lets the Compare button decide whether to land directly
    *  on the comparison page or trigger a recompute first. */
@@ -361,10 +365,12 @@ export const scanApi = {
   getLive: () => request<{ scans: ScanSummary[] }>('/api/scan/live'),
 
   /** Phase 4 P4-5 — auth-gated list of scans owned by the current user.
-   *  Each summary includes payment_tx_signature + Solscan link. */
+   *  Each summary includes payment_tx_signature + Solscan link.
+   *  Console S2 adds workspace_id (null = the console's Unassigned bucket). */
   getMyScans: () =>
     request<{
       scans: Array<ScanSummary & {
+        workspace_id: string | null;
         payment_tx_signature: string | null;
         payment_solscan: string | null;
       }>;
@@ -521,6 +527,69 @@ export type MySurveyResponseDetail = {
     retention_d7: number;
     engagement: number;
   };
+};
+
+// ─── Founder Console workspaces (Console Sprint 2) ──────────────
+export type ConsoleSite = {
+  id: string;
+  url_host: string;
+  name: string | null;
+  /** Public tracking key — GA measurement-id semantics, safe in markup. */
+  site_key: string;
+  secret_last4: string;
+  /** Emergent tier: a beacon has arrived through this site_key. */
+  tracked: boolean;
+  last_event_at: string | null;
+  created_at: string;
+};
+
+export type ConsoleSiteListItem = ConsoleSite & {
+  scan_count: number;
+  latest_score: number | null;
+  prev_score: number | null;
+  latest_category: string | null;
+  best_cohort_id: string | null;
+  last_scan_at: string | null;
+};
+
+export const consoleApi = {
+  listSites: () =>
+    request<{ sites: ConsoleSiteListItem[] }>(`/api/console/sites`),
+
+  /** 1-step registration. `secret` is plaintext EXACTLY ONCE — the
+   *  server only keeps the hash. */
+  createSite: (body: { url: string; name?: string }) =>
+    request<{ workspace: ConsoleSite; secret: string }>(`/api/console/sites`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getSite: (id: string) =>
+    request<{ workspace: ConsoleSite; scans: ScanSummary[] }>(
+      `/api/console/sites/${id}`,
+    ),
+
+  updateSite: (id: string, body: { url?: string; name?: string | null }) =>
+    request<{ workspace: ConsoleSite }>(`/api/console/sites/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
+  deleteSite: (id: string) =>
+    request<{ ok: boolean }>(`/api/console/sites/${id}`, { method: 'DELETE' }),
+
+  /** Invalidates the old secret immediately; new plaintext once. */
+  rotateKey: (id: string) =>
+    request<{ ok: boolean; secret: string; secret_last4: string }>(
+      `/api/console/sites/${id}/rotate-key`,
+      { method: 'POST', body: '{}' },
+    ),
+
+  linkScan: (id: string, scanId: string) =>
+    request<{ ok: boolean }>(`/api/console/sites/${id}/link-scan`, {
+      method: 'POST',
+      body: JSON.stringify({ scan_id: scanId }),
+    }),
 };
 
 // ─── Tester points + founder credits (Console Sprint 1) ─────────

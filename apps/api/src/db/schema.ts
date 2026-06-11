@@ -216,6 +216,14 @@ export const audienceFitScans = pgTable('audience_fit_scans', {
    *  completed | failed. The Phase 0 frontend Processing screen
    *  polls/streams against transitions of this column. */
   status: varchar('status', { length: 20 }).notNull().default('pending'),
+  /** Console S2 — owning workspace. Set automatically on create when
+   *  the authed user has a workspace matching the URL host; legacy /
+   *  anonymous scans stay NULL (the console's "Unassigned" bucket).
+   *  ON DELETE SET NULL: deleting a workspace unlinks, never destroys
+   *  scan data. */
+  workspaceId: uuid('workspace_id').references(() => siteWorkspaces.id, {
+    onDelete: 'set null',
+  }),
 
   // Site capture (Stagehand-driven, Phase 1B)
   captureScreenshotUrls: jsonb('capture_screenshot_urls').$type<string[]>(),
@@ -558,8 +566,13 @@ export const pointTransactions = pgTable('point_transactions', {
   /** Provisional identity key (Google-verified on the partner side). */
   email: text('email'),
   amount: integer('amount').notNull(),
-  reason: text('reason').notNull(), // e.g. 'survey'
-  source: text('source').notNull(), // e.g. 'geulbat'
+  reason: text('reason').notNull(), // e.g. 'survey' | 'reward_cap_reached'
+  source: text('source').notNull(), // e.g. 'geulbat' | '41r'
+  /** Console S2 — resource that earned the row (scan id for survey
+   *  rewards). Backs the per-scan reward cap COUNT (30/scan, §12-7:
+   *  cap state is disclosed BEFORE answering). Nullable — legacy rows
+   *  predate it. */
+  refId: uuid('ref_id'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -608,6 +621,40 @@ export const partnerBehaviorEvents = pgTable('partner_behavior_events', {
   occurredAt: timestamp('occurred_at').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+// ─── Site workspaces (Console Sprint 2, 2026-06-11) ─────────────────
+// Registration ≠ ownership: a workspace is one user's analysis space
+// for a URL host (GA-property model, console-ia-redesign.md §1.1).
+// UNIQUE is (user_id, url_host) — deliberately NOT a global host
+// unique: N users can each register the same site, fully isolated.
+// Domain verification is permanently out of scope; being able to
+// install the t.js snippet (site_key) is the natural ownership gate.
+// Tier is emergent, not chosen: last_event_at IS NULL → LITE,
+// otherwise TRACKED.
+export const siteWorkspaces = pgTable('site_workspaces', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  /** Normalized host — scheme + www stripped, lowercased. */
+  urlHost: text('url_host').notNull(),
+  name: text('name'),
+  /** Public tracking key (GA measurement-id semantics) — routes
+   *  beacons only, grants NO read access. */
+  siteKey: text('site_key').notNull().unique(),
+  /** S2S + HMAC handoff secret — sha256 hex only; plaintext is shown
+   *  exactly once at issue/rotation. No read access either: a leaked
+   *  secret can only inject fake data, never exfiltrate (§3.3). */
+  secretHash: text('secret_hash').notNull(),
+  secretLast4: text('secret_last4').notNull(),
+  /** Last beacon received through this workspace's site_key —
+   *  TRACKED-tier flag + the "Last event: 2m ago" settings display. */
+  lastEventAt: timestamp('last_event_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  uniqUserHost: uniqueIndex('site_workspaces_user_host_uniq').on(t.userId, t.urlHost),
+}));
 
 // ─── Credit ledger (Console Sprint 1, 2026-06-11) ───────────────────
 // Founder-side spend currency — separate from point_transactions

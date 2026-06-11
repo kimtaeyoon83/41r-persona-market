@@ -99,6 +99,13 @@
       "when": 1781180206367,
       "tag": "0013_modern_bug",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1781189928155,
+      "tag": "0014_zippy_agent_zero",
+      "breakpoints": true
     }
   ]
 }

@@ -25,6 +25,11 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { requireGeulbatKey } from '../middleware/partner.js';
 import {
+  findWorkspaceBySiteKey,
+  touchWorkspaceEvent,
+} from '../services/workspaces.js';
+import { awardSurveyPoints } from '../services/rewards.js';
+import {
   surveyBody,
   computeSusScoreLocal,
   HUMAN_ENGAGEMENT_TO_SCORE,
@@ -39,7 +44,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** Pilot reward — policy intentionally undecided; ledger is append-
  *  only so a real policy can reprice retroactively. */
-const PILOT_SURVEY_POINTS = 100;
+// Reward amount + per-scan cap now live in services/rewards.ts
+// (Console S2) — single source for both the partner and direct paths.
 
 const partnerSurveyBody = surveyBody.extend({
   scan_id: z.string().uuid(),
@@ -206,13 +212,15 @@ async function ingestGeulbatSurvey(
     }
 
     // Points — credit on first submission only (edits don't re-earn).
+    // Console S2: routed through the shared reward service so the
+    // per-scan cap (30 rewarded / scan) applies here too; capped
+    // submissions append a transparent 0pt row.
+    let pointsAwarded = 0;
     if (firstSubmission) {
-      await db.insert(schema.pointTransactions).values({
-        userId: null,
-        email,
-        amount: PILOT_SURVEY_POINTS,
-        reason: 'survey',
+      pointsAwarded = await awardSurveyPoints({
+        scanId,
         source: 'geulbat',
+        email,
       });
     }
 
@@ -223,7 +231,7 @@ async function ingestGeulbatSurvey(
   return {
     status: 'ok',
     firstSubmission,
-    pointsAwarded: firstSubmission ? PILOT_SURVEY_POINTS : 0,
+    pointsAwarded,
   };
 }
 
@@ -442,13 +450,21 @@ router.post('/geulbat/behavior', requireGeulbatKey, async (req, res) => {
 // measurement id) — it only routes to a source bucket; the S2S
 // partner key never appears in a browser.
 
-function siteKeySource(k: string): string | null {
+async function siteKeySource(
+  k: string,
+): Promise<{ source: string; workspaceId: string | null } | null> {
   const gb = process.env.PARTNER_SITE_KEY_GEULBAT;
-  if (gb && gb.length >= 12 && k === gb) return 'geulbat';
+  if (gb && gb.length >= 12 && k === gb) return { source: 'geulbat', workspaceId: null };
   // Dogfooding (Console Sprint 1 §5.2) — 41R's own web app carries the
   // t.js snippet so we measure our own PLG funnel with our own pipe.
   const own = process.env.PARTNER_SITE_KEY_41R;
-  if (own && own.length >= 12 && k === own) return '41r-web';
+  if (own && own.length >= 12 && k === own) return { source: '41r-web', workspaceId: null };
+  // Console S2 — self-serve workspace site keys (rpm_pk_…). Source is
+  // 'ws:<id>' so the analytics tab can filter per workspace.
+  if (k.startsWith('rpm_pk_')) {
+    const ws = await findWorkspaceBySiteKey(k);
+    if (ws) return { source: `ws:${ws.id}`, workspaceId: ws.id };
+  }
   return null;
 }
 
@@ -514,11 +530,12 @@ router.post('/t', express.text({ type: '*/*', limit: '64kb' }), async (req, res)
       res.status(400).json({ error: 'invalid_body' });
       return;
     }
-    const source = siteKeySource(parsed.data.k);
-    if (!source) {
+    const resolved = await siteKeySource(parsed.data.k);
+    if (!resolved) {
       res.status(401).json({ error: 'unknown_site_key' });
       return;
     }
+    const { source, workspaceId } = resolved;
     // Optional identity — same HMAC token family as the survey
     // handoff; an invalid/expired uid degrades to anonymous rather
     // than rejecting the batch (tracking must never break the page).
@@ -538,6 +555,11 @@ router.post('/t', express.text({ type: '*/*', limit: '64kb' }), async (req, res)
         occurredAt: new Date(e.ts),
       })),
     );
+    // TRACKED-tier flag (Console S2) — non-fatal, beacons must never
+    // fail because of a bookkeeping update.
+    if (workspaceId) {
+      touchWorkspaceEvent(workspaceId).catch(() => {});
+    }
     res.status(204).end();
   } catch (err) {
     log.error({ err: (err as Error).message }, 'beacon ingest failed');

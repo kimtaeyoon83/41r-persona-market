@@ -18,9 +18,63 @@
 //   - match                               → next()
 
 import type { RequestHandler } from 'express';
+import { findWorkspaceBySecret, type Workspace } from '../services/workspaces.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ service: 'partner_auth' });
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      /** Set by requireSiteSecret: 'geulbat' (env-key pilot alias) or
+       *  'ws:<workspace_id>' (self-serve workspace secret). */
+      partnerSource?: string;
+      /** Present when partnerSource is a workspace. */
+      partnerWorkspace?: Workspace;
+    }
+  }
+}
+
+/**
+ * Generalized S2S gate (Console Sprint 2). Accepts EITHER the legacy
+ * env-configured geulbat key (alias preserved — zero-downtime for the
+ * live pilot) OR any workspace secret issued through the console
+ * (sha256 lookup). Attaches req.partnerSource (+ req.partnerWorkspace
+ * for workspace keys) so handlers stop hardcoding 'geulbat'.
+ *
+ * requireGeulbatKey below stays for the existing /geulbat/* routes —
+ * those paths are themselves the alias; new generic S2S surfaces
+ * should mount this middleware instead.
+ */
+export const requireSiteSecret: RequestHandler = async (req, res, next) => {
+  const got = req.header('x-partner-key');
+  if (!got) {
+    res.status(401).json({ error: 'partner_key_required', header: 'x-partner-key' });
+    return;
+  }
+  const geulbat = process.env.PARTNER_API_KEY_GEULBAT;
+  if (geulbat && geulbat.length >= 12 && got === geulbat) {
+    req.partnerSource = 'geulbat';
+    next();
+    return;
+  }
+  try {
+    const ws = await findWorkspaceBySecret(got);
+    if (ws) {
+      req.partnerSource = `ws:${ws.id}`;
+      req.partnerWorkspace = ws;
+      next();
+      return;
+    }
+  } catch (err) {
+    log.error({ err: (err as Error).message }, 'workspace secret lookup failed');
+    res.status(500).json({ error: 'internal_error' });
+    return;
+  }
+  log.warn({ ip: req.ip, path: req.path }, 'partner key mismatch');
+  res.status(403).json({ error: 'partner_key_invalid' });
+};
 
 export const requireGeulbatKey: RequestHandler = (req, res, next) => {
   const expected = process.env.PARTNER_API_KEY_GEULBAT;

@@ -38,6 +38,8 @@ import {
 } from '../middleware/rate_limit.js';
 import { isAdminRequest } from '../middleware/admin.js';
 import { debitScan, getCreditBalance, SCAN_PRICE_CENTS } from '../services/credits.js';
+import { findWorkspaceByHost } from '../services/workspaces.js';
+import { awardSurveyPoints, isRewardAvailable } from '../services/rewards.js';
 import {
   buildSponsoredZeroTx,
   broadcastSignedTx,
@@ -140,6 +142,12 @@ router.post('/', scanCreateIpLimiter, optionalPrivyAuth, scanCreateUserLimiter, 
     recordDemoIpScan(ip);
   }
 
+  // Console S2 — auto-link to the user's workspace for this host
+  // (when one exists). Anonymous scans stay unlinked forever.
+  const workspace = req.privyUser
+    ? await findWorkspaceByHost(req.privyUser.id, target_url)
+    : null;
+
   const [scan] = await db
     .insert(schema.audienceFitScans)
     .values({
@@ -153,6 +161,7 @@ router.post('/', scanCreateIpLimiter, optionalPrivyAuth, scanCreateUserLimiter, 
       // Phase 4 §1 — claim ownership when the requester is logged in.
       // Anonymous requests still allowed (legacy / pre-login demos).
       userId: req.privyUser?.id ?? null,
+      workspaceId: workspace?.id ?? null,
       status: 'pending',
       weightsVersion: 'v1.0',
     })
@@ -307,9 +316,14 @@ router.get('/me', requirePrivyAuth, async (req, res) => {
   // strips it because the public Recent feed shouldn't expose it).
   const sigByScan = new Map<string, string | null>();
   for (const s of scans) sigByScan.set(s.id, s.paymentTxSignature ?? null);
+  // Console S2 — workspace linkage so the console can split
+  // assigned vs Unassigned scans without a second round-trip.
+  const wsByScan = new Map<string, string | null>();
+  for (const s of scans) wsByScan.set(s.id, s.workspaceId ?? null);
   res.json({
     scans: summaries.map((s) => ({
       ...s,
+      workspace_id: wsByScan.get(s.id) ?? null,
       payment_tx_signature: sigByScan.get(s.id) ?? null,
       payment_solscan: sigByScan.get(s.id) ? solscanUrl(sigByScan.get(s.id)!) : null,
     })),
@@ -538,6 +552,10 @@ router.get('/:id/report', async (req, res) => {
     // Phase 5 — drives the "Compare with humans (n=X)" footer button.
     // Live count of survey_responses; resets to 0 when no submissions.
     survey_response_count: surveyResponseCount,
+    // Console S2 — pre-answer reward disclosure (§12 decision 7): the
+    // survey page must tell respondents BEFORE they answer when the
+    // per-scan reward budget (30) is exhausted.
+    survey_reward_available: completed ? await isRewardAvailable(id) : true,
     /** Whether human_aggregate has been computed at least once. The
      *  report page uses this to decide whether the Compare button
      *  goes straight to the comparison page or first triggers a
@@ -1065,6 +1083,7 @@ router.post('/:id/survey', requirePrivyAuth, mutationLimiter, async (req, res) =
         eq(schema.surveyResponses.userId, userId),
       ),
     );
+  let pointsAwarded = 0;
   if (existing) {
     await db
       .update(schema.surveyResponses)
@@ -1076,12 +1095,23 @@ router.post('/:id/survey', requirePrivyAuth, mutationLimiter, async (req, res) =
       userId,
       ...surveyValues,
     });
+    // Console S2 — direct (self-distributed) responses earn the same
+    // reward as partner-channel ones: every response is calibration
+    // fuel, 41R pays (console-ia-redesign.md §4.1). First submission
+    // only; per-scan cap 30 with a transparent 0pt row beyond it.
+    pointsAwarded = await awardSurveyPoints({
+      scanId: id,
+      source: '41r',
+      userId,
+      email: req.privyUser!.email,
+    });
   }
 
   res.json({
     ok: true,
     scanId: id,
     rows_created: dims.length,
+    points_awarded: pointsAwarded,
     summary: {
       llm,
       human,
@@ -2294,6 +2324,7 @@ function buildDemoReport() {
     // tsc won't catch missing fields, but the Compare button reads
     // these directly and renders "(n=)" if undefined.
     survey_response_count: 0,
+    survey_reward_available: true,
     human_aggregate_computed: false,
   };
 }

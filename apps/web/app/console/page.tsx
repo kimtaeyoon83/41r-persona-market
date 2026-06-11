@@ -1,46 +1,60 @@
 "use client";
 
-// /console — Founder Console site list (Console Sprint 1).
+// /console — Founder Console site list (Console Sprint 2).
 //
-// Groups the user's scans by URL host — the S1 stand-in for the
-// site_workspaces entity that lands in Sprint 2 (no DB change needed
-// for the "scan-centric → site-centric" perception shift,
-// console-ia-redesign.md §11 S1). Header shows the credit balance from
-// the append-only ledger. Copy never says "my site" — registering a
-// competitor's site is a first-class use case (§5 copy rule).
+// S2 replaces the S1 host-grouping stand-in with real site_workspaces:
+// registered sites render as cards with the emergent LITE/TRACKED
+// badge (§1.2 — a beacon arrived → TRACKED, no tier picker); the
+// user's scans that aren't linked to any workspace show in the
+// "Unassigned" section with a one-click register path. Copy never
+// says "my site" — registering a competitor's site is a first-class
+// use case (§5 copy rule).
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
-import { scanApi, meApi, type ScanSummary } from "@/lib/api";
+import {
+  consoleApi,
+  meApi,
+  scanApi,
+  type ConsoleSiteListItem,
+  type ScanSummary,
+} from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { C, FM, FS, Frame, Pill } from "../validator/_components/ui";
-import { groupScansByHost, type SiteGroup } from "./_lib";
+import { hostOf } from "./_lib";
+
+type UnassignedScan = ScanSummary & { workspace_id: string | null };
 
 export default function ConsolePage() {
   const { ready, authenticated, login } = usePrivy();
   const { t } = useI18n();
-  const [scans, setScans] = useState<ScanSummary[] | null>(null);
+  const [sites, setSites] = useState<ConsoleSiteListItem[] | null>(null);
+  const [unassigned, setUnassigned] = useState<UnassignedScan[]>([]);
   const [balanceCents, setBalanceCents] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const [siteRes, mine, credits] = await Promise.all([
+      consoleApi.listSites(),
+      scanApi.getMyScans(),
+      meApi.getCredits(),
+    ]);
+    setSites(siteRes.sites);
+    setUnassigned(mine.scans.filter((s) => !s.workspace_id));
+    setBalanceCents(credits.balance_cents);
+  }, []);
 
   useEffect(() => {
     if (!ready || !authenticated) return;
     let cancelled = false;
-    Promise.all([scanApi.getMyScans(), meApi.getCredits()])
-      .then(([mine, credits]) => {
-        if (cancelled) return;
-        setScans(mine.scans);
-        setBalanceCents(credits.balance_cents);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Failed to load");
-      });
+    load().catch((e) => {
+      if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load");
+    });
     return () => {
       cancelled = true;
     };
-  }, [ready, authenticated]);
+  }, [ready, authenticated, load]);
 
   if (!ready) {
     return (
@@ -81,19 +95,14 @@ export default function ConsolePage() {
     );
   }
 
-  const groups = scans ? groupScansByHost(scans) : null;
+  const empty = sites !== null && sites.length === 0 && unassigned.length === 0;
 
   return (
     <Frame>
       <div className="v-page-pad" style={{ maxWidth: 1080, margin: "0 auto" }}>
         <div
           className="v-row-wrap"
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            gap: 12,
-            marginBottom: 6,
-          }}
+          style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 6 }}
         >
           <h1 style={{ fontSize: 30, fontWeight: 600, fontFamily: FS, margin: 0 }}>
             {t("console.title")}
@@ -107,7 +116,7 @@ export default function ConsolePage() {
             </Link>
           )}
           <Link
-            href="/"
+            href="/console/sites/new"
             style={{
               background: C.text,
               color: C.bg,
@@ -119,7 +128,7 @@ export default function ConsolePage() {
               fontFamily: FS,
             }}
           >
-            {t("console.newAnalysis")}
+            {t("console.addSite")}
           </Link>
         </div>
         <div style={{ fontSize: 13, color: C.textDim, marginBottom: 28 }}>
@@ -130,81 +139,90 @@ export default function ConsolePage() {
           <div style={{ color: C.bad, fontSize: 13, marginBottom: 14 }}>{error}</div>
         )}
 
-        {groups === null ? (
+        {sites === null ? (
           <Center>{t("common.loading")}</Center>
-        ) : groups.length === 0 ? (
-          <div
-            style={{
-              padding: "48px 32px",
-              textAlign: "center",
-              border: `1px dashed ${C.border}`,
-              borderRadius: 10,
-              background: C.panel,
-            }}
-          >
-            <div
-              style={{
-                fontSize: 16,
-                fontWeight: 600,
-                maxWidth: 520,
-                margin: "0 auto 8px",
-                lineHeight: 1.5,
-              }}
-            >
-              {t("console.emptyTitle")}
-            </div>
-            <div style={{ fontSize: 12, color: C.textDim, marginBottom: 18 }}>
-              {t("console.emptySub")}
-            </div>
-            <Link
-              href="/"
-              style={{
-                display: "inline-block",
-                background: C.accent,
-                color: "#fff",
-                borderRadius: 8,
-                padding: "10px 20px",
-                fontSize: 13,
-                fontWeight: 600,
-                textDecoration: "none",
-              }}
-            >
-              {t("console.emptyCta")} →
-            </Link>
-          </div>
+        ) : empty ? (
+          <EmptyState />
         ) : (
-          <div
-            className="v-grid-stack-sm"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-              gap: 12,
-            }}
-          >
-            {groups.map((g) => (
-              <SiteCard key={g.host} group={g} />
-            ))}
-          </div>
+          <>
+            <div
+              className="v-grid-stack-sm"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+                gap: 12,
+              }}
+            >
+              {sites.map((s) => (
+                <SiteCard key={s.id} site={s} />
+              ))}
+            </div>
+            {unassigned.length > 0 && <UnassignedSection scans={unassigned} />}
+          </>
         )}
       </div>
     </Frame>
   );
 }
 
-function SiteCard({ group }: { group: SiteGroup }) {
+function EmptyState() {
   const { t } = useI18n();
-  const latest = group.latestCompleted;
-  const score =
-    latest?.audience_fit_score != null ? Math.round(latest.audience_fit_score) : null;
-  const prev = group.prevCompleted?.audience_fit_score;
-  const delta = score != null && prev != null ? Math.round(score - prev) : null;
+  return (
+    <div
+      style={{
+        padding: "48px 32px",
+        textAlign: "center",
+        border: `1px dashed ${C.border}`,
+        borderRadius: 10,
+        background: C.panel,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 16,
+          fontWeight: 600,
+          maxWidth: 520,
+          margin: "0 auto 8px",
+          lineHeight: 1.5,
+        }}
+      >
+        {t("console.emptyTitle")}
+      </div>
+      <div style={{ fontSize: 12, color: C.textDim, marginBottom: 18 }}>
+        {t("console.emptySub")}
+      </div>
+      <Link
+        href="/console/sites/new"
+        style={{
+          display: "inline-block",
+          background: C.accent,
+          color: "#fff",
+          borderRadius: 8,
+          padding: "10px 20px",
+          fontSize: 13,
+          fontWeight: 600,
+          textDecoration: "none",
+        }}
+      >
+        {t("console.emptyCta")} →
+      </Link>
+    </div>
+  );
+}
+
+function SiteCard({ site }: { site: ConsoleSiteListItem }) {
+  const { t } = useI18n();
+  const score = site.latest_score != null ? Math.round(site.latest_score) : null;
+  const delta =
+    score != null && site.prev_score != null
+      ? Math.round(score - site.prev_score)
+      : null;
   const tone =
     score == null ? C.textFaint : score >= 60 ? C.ok : score >= 40 ? C.warn : C.bad;
-  const newest = group.scans[0]!;
 
   return (
     <Link
-      href={`/console/sites/${encodeURIComponent(group.host)}`}
+      href={`/console/sites/${site.id}`}
       style={{
         display: "block",
         padding: 16,
@@ -217,44 +235,115 @@ function SiteCard({ group }: { group: SiteGroup }) {
     >
       <div
         style={{
-          fontSize: 14,
-          fontWeight: 600,
-          fontFamily: FM,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
           marginBottom: 10,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
         }}
       >
-        {group.host}
+        <span
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            fontFamily: FM,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            flex: 1,
+          }}
+        >
+          {site.name && site.name !== site.url_host
+            ? `${site.name} · ${site.url_host}`
+            : site.url_host}
+        </span>
+        <Pill tone={site.tracked ? "ok" : "neutral"} style={{ fontSize: 9 }}>
+          {site.tracked ? "● TRACKED" : "○ LITE"}
+        </Pill>
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 30, fontWeight: 600, fontFamily: FM, color: tone }}>
           {score ?? "—"}
         </span>
         {delta != null && delta !== 0 && (
-          <span
-            style={{ fontSize: 12, fontFamily: FM, color: delta > 0 ? C.ok : C.bad }}
-          >
+          <span style={{ fontSize: 12, fontFamily: FM, color: delta > 0 ? C.ok : C.bad }}>
             {delta > 0 ? "▲" : "▼"} {Math.abs(delta)}
           </span>
         )}
         <span style={{ fontSize: 11, color: C.textFaint, fontFamily: FM }}>
-          · {group.scans.length} {t("console.scansUnit")}
+          · {site.scan_count} {t("console.scansUnit")}
         </span>
       </div>
-      {latest?.best_cohort_label && (
-        <div style={{ fontSize: 11, color: C.textDim, marginBottom: 8 }}>
-          {t("console.bestFit")}: <b>{latest.best_cohort_label}</b>
-          {latest.best_cohort_score != null &&
-            ` (${Math.round(latest.best_cohort_score)})`}
-        </div>
-      )}
       <div style={{ fontSize: 10, color: C.textFaint, fontFamily: FM }}>
-        {t("console.lastScan")} {timeAgo(newest.completed_at ?? newest.created_at)}
-        {latest?.category ? ` · ${latest.category}` : ""}
+        {site.last_scan_at
+          ? `${t("console.lastScan")} ${timeAgo(site.last_scan_at)}`
+          : t("console.noCompleted")}
+        {site.latest_category ? ` · ${site.latest_category}` : ""}
       </div>
     </Link>
+  );
+}
+
+function UnassignedSection({ scans }: { scans: UnassignedScan[] }) {
+  const { t } = useI18n();
+  // Group by host so one register action covers all scans of a site
+  // (the server adopts matching scans on workspace create).
+  const byHost = new Map<string, UnassignedScan[]>();
+  for (const s of scans) {
+    const h = hostOf(s.target_url);
+    if (!byHost.has(h)) byHost.set(h, []);
+    byHost.get(h)!.push(s);
+  }
+  return (
+    <div style={{ marginTop: 28 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>
+        {t("console.unassigned")}
+      </div>
+      <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 10 }}>
+        {t("console.unassignedSub")}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {[...byHost.entries()].map(([host, list]) => (
+          <div
+            key={host}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "10px 14px",
+              background: C.panel,
+              border: `1px dashed ${C.border}`,
+              borderRadius: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ fontFamily: FM, fontSize: 13, fontWeight: 600 }}>{host}</span>
+            <span style={{ fontSize: 11, color: C.textFaint, fontFamily: FM }}>
+              {list.length} {t("console.scansUnit")}
+            </span>
+            <div style={{ flex: 1 }} />
+            {list[0]!.status === "completed" && (
+              <Link
+                href={`/validator/report/${list[0]!.id}`}
+                style={{ fontSize: 12, color: C.textDim, textDecoration: "none" }}
+              >
+                {t("console.openReport")}
+              </Link>
+            )}
+            <Link
+              href={`/console/sites/new?url=${encodeURIComponent(host)}`}
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: C.accent,
+                textDecoration: "none",
+              }}
+            >
+              {t("console.registerAsSite")} →
+            </Link>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
