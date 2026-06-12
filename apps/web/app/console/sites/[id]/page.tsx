@@ -169,12 +169,14 @@ export default function SiteDetailPage() {
                 background: "transparent",
                 border: "none",
                 borderBottom: tab === k ? `2px solid ${C.accent}` : "2px solid transparent",
-                padding: "8px 14px",
-                fontSize: 13,
-                fontWeight: tab === k ? 600 : 400,
-                color: tab === k ? C.text : C.textDim,
+                padding: "9px 14px",
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: tab === k ? C.text : C.textFaint,
                 cursor: "pointer",
-                fontFamily: FS,
+                fontFamily: FM,
               }}
             >
               {t(
@@ -523,7 +525,7 @@ function Analytics({ site, report }: { site: ConsoleSite; report: ScanReport | n
             display: "block",
             fontFamily: FM,
             fontSize: 11,
-            background: "#f7f4ec",
+            background: "#f4f5f6",
             border: `1px solid ${C.border}`,
             borderRadius: 6,
             padding: "10px 12px",
@@ -1055,7 +1057,7 @@ function CodeRow({
         style={{
           fontFamily: FM,
           fontSize: small ? 11 : 12,
-          background: "#f7f4ec",
+          background: "#f4f5f6",
           border: `1px solid ${C.border}`,
           borderRadius: 6,
           padding: "8px 10px",

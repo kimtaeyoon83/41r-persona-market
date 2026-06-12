@@ -201,15 +201,15 @@ function HomeInner() {
               : ""}
           </div>
 
-          {/* Mode toggle */}
+          {/* Mode toggle — squared segmented control (instrument look) */}
           <div
             style={{
               display: "inline-flex",
               gap: 4,
               marginBottom: 22,
               padding: 4,
-              background: "#f3f0e8",
-              borderRadius: 999,
+              background: "#eef0f2",
+              borderRadius: 9,
               border: `1px solid ${C.border}`,
             }}
           >
@@ -228,13 +228,14 @@ function HomeInner() {
                 style={{
                   padding: "6px 14px",
                   fontSize: 12,
-                  borderRadius: 999,
+                  borderRadius: 6,
                   background: mode === m.id ? C.panel : "transparent",
                   color: mode === m.id ? C.text : C.textDim,
                   border:
                     mode === m.id
                       ? `1px solid ${C.borderStrong}`
                       : "1px solid transparent",
+                  boxShadow: mode === m.id ? "0 1px 2px rgba(21,23,27,0.06)" : "none",
                   cursor: "pointer",
                   fontFamily: FS,
                   fontWeight: mode === m.id ? 600 : 400,
@@ -249,12 +250,14 @@ function HomeInner() {
             style={{
               display: "flex",
               gap: 0,
-              maxWidth: 520,
+              maxWidth: 560,
               margin: "0 auto",
-              border: `1.5px solid ${C.borderStrong}`,
-              borderRadius: 999,
+              border: `1px solid ${C.borderStrong}`,
+              borderRadius: 12,
               overflow: "hidden",
               background: C.panel,
+              boxShadow:
+                "0 10px 30px -12px rgba(21, 23, 27, 0.18), 0 2px 6px rgba(21, 23, 27, 0.05)",
             }}
           >
             <input
@@ -298,10 +301,10 @@ function HomeInner() {
             <div
               style={{
                 display: "flex",
-                maxWidth: 520,
+                maxWidth: 560,
                 margin: "10px auto 0",
-                border: `1.5px solid ${C.borderStrong}`,
-                borderRadius: 999,
+                border: `1px solid ${C.borderStrong}`,
+                borderRadius: 12,
                 overflow: "hidden",
                 background: C.panel,
               }}

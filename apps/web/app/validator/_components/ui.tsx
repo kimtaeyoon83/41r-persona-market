@@ -12,29 +12,30 @@ import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 
 // ─── Theme constants ──────────────────────────────────────────────
-// 2026-06-12 design refresh — "warm editorial research instrument":
-// deeper ink for type contrast, slightly warmer paper, richer
-// terracotta accent, semantic tones tuned darker so score colors hold
-// up at small sizes. The hover/elevation layer lives in globals.css
-// (.e-card / .e-cta) since inline styles can't express :hover.
+// 2026-06-12 full redesign — "Swiss instrument": cool gallery gray,
+// ink-black type, ONE signal-orange accent, squared tags, ruled
+// hairlines, oversized numerals. The look says "measuring device",
+// which is exactly the product's honesty contract (§0.4 — we publish
+// what we measure and how wrong we are). Hover/elevation lives in
+// globals.css (.e-card / .e-cta) since inline styles can't :hover.
 export const C = {
-  bg: "#f8f5ef",
-  panel: "#fffefb",
-  border: "#e8e2d6",
-  borderStrong: "#d2c9b8",
-  text: "#221f1a",
-  textDim: "#6b6457",
-  textFaint: "#9c9384",
-  accent: "#bc4a26",
-  accentSoft: "#f7e7de",
-  ok: "#2f7d4f",
-  okSoft: "#e4f0e8",
-  warn: "#a06b10",
-  warnSoft: "#faefd6",
-  bad: "#ad3b2c",
-  badSoft: "#f8e2dd",
-  exp: "#6d4fc4",
-  expSoft: "#eee9fb",
+  bg: "#f3f4f4",
+  panel: "#ffffff",
+  border: "#e4e6e8",
+  borderStrong: "#c9cdd2",
+  text: "#15171b",
+  textDim: "#5c616b",
+  textFaint: "#969ca6",
+  accent: "#e04e14",
+  accentSoft: "#fdeade",
+  ok: "#1e7d4e",
+  okSoft: "#e2f1e9",
+  warn: "#a16a07",
+  warnSoft: "#faf0d3",
+  bad: "#c03325",
+  badSoft: "#fae3df",
+  exp: "#5b51d8",
+  expSoft: "#eceafb",
 } as const;
 
 export const FS =
@@ -45,14 +46,16 @@ export const FM =
 export type Tone = "neutral" | "accent" | "ok" | "warn" | "bad" | "exp";
 
 const PILL_TONES: Record<Tone, { bg: string; fg: string; bd: string }> = {
-  neutral: { bg: "#f3f0e8", fg: C.textDim, bd: C.border },
-  accent: { bg: C.accentSoft, fg: C.accent, bd: "#ecd6ca" },
-  ok: { bg: C.okSoft, fg: C.ok, bd: "#cfe3d6" },
-  warn: { bg: C.warnSoft, fg: C.warn, bd: "#ecdcb4" },
-  bad: { bg: C.badSoft, fg: C.bad, bd: "#eccac4" },
-  exp: { bg: C.expSoft, fg: C.exp, bd: "#dcd1f0" },
+  neutral: { bg: "#eef0f2", fg: C.textDim, bd: C.border },
+  accent: { bg: C.accentSoft, fg: C.accent, bd: "#f5cdb6" },
+  ok: { bg: C.okSoft, fg: C.ok, bd: "#c4e0d0" },
+  warn: { bg: C.warnSoft, fg: C.warn, bd: "#ecdcab" },
+  bad: { bg: C.badSoft, fg: C.bad, bd: "#f0c4bc" },
+  exp: { bg: C.expSoft, fg: C.exp, bd: "#d4cef4" },
 };
 
+// Squared "instrument tag" — the redesign drops the pill silhouette;
+// statuses read as stamped labels (mono, tracked, uppercase-friendly).
 export function Pill({
   children,
   tone = "neutral",
@@ -69,14 +72,16 @@ export function Pill({
         display: "inline-flex",
         alignItems: "center",
         gap: 4,
-        padding: "2px 8px",
-        borderRadius: 999,
-        fontSize: 11,
-        fontWeight: 500,
+        padding: "2px 7px",
+        borderRadius: 5,
+        fontSize: 10.5,
+        fontWeight: 600,
+        fontFamily: FM,
+        letterSpacing: "0.04em",
         background: t.bg,
         color: t.fg,
         border: `1px solid ${t.bd}`,
-        lineHeight: 1.5,
+        lineHeight: 1.6,
         ...style,
       }}
     >
@@ -90,7 +95,7 @@ export function Bar({
   max = 100,
   color = C.accent,
   height = 6,
-  bg = "#efece4",
+  bg = "#e8eaec",
 }: {
   value: number;
   max?: number;
@@ -230,7 +235,10 @@ export function TopBar() {
       style={{
         height: 54,
         borderBottom: `1px solid ${C.border}`,
-        background: "rgba(255, 254, 251, 0.85)",
+        // Signature: 3px signal-orange rule across the very top —
+        // the "instrument" brand mark, present on every screen.
+        borderTop: `3px solid ${C.accent}`,
+        background: "rgba(255, 255, 255, 0.88)",
         backdropFilter: "blur(10px)",
         WebkitBackdropFilter: "blur(10px)",
         display: "flex",
@@ -955,7 +963,7 @@ export function PersonaBoard({
                         fontFamily: FM,
                         fontWeight: 500,
                         color: C.textFaint,
-                        background: "#f3f0e8",
+                        background: "#eef0f2",
                         padding: "1px 5px",
                         borderRadius: 3,
                         textTransform: "uppercase",
@@ -995,7 +1003,7 @@ export function PersonaBoard({
             <div
               style={{
                 padding: "6px 8px",
-                background: "#f7f4ec",
+                background: "#f4f5f6",
                 borderRadius: 5,
                 fontSize: 11,
                 fontStyle: "italic",
@@ -1013,7 +1021,7 @@ export function PersonaBoard({
                   style={{
                     fontSize: 10,
                     padding: "1px 6px",
-                    background: "#f3f0e8",
+                    background: "#eef0f2",
                     color: C.textDim,
                     borderRadius: 3,
                     fontFamily: FM,

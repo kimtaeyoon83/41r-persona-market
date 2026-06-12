@@ -203,7 +203,7 @@ function NewSiteInner() {
                   style={{
                     fontFamily: FM,
                     fontSize: 11,
-                    background: "#f7f4ec",
+                    background: "#f4f5f6",
                     border: `1px solid ${C.border}`,
                     borderRadius: 6,
                     padding: "8px 10px",
