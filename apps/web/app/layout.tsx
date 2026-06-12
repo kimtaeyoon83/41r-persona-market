@@ -56,8 +56,10 @@ export const viewport: Viewport = {
 // Dogfooding (Console Sprint 1) — 41R's own t.js on 41R's own app so
 // we measure our PLG funnel (visit → signup → first scan → …) with our
 // own tracking pipe. Renders nothing unless both envs are set, so
-// local dev without keys stays clean. The site key is public by
-// design (GA measurement-id semantics).
+// local dev without keys stays clean. Since the 2026-06-12 key
+// generalization, NEXT_PUBLIC_TRACKING_SITE_KEY carries a real
+// workspace site key (rpm_pk_…) — register app.project-rpm.xyz in the
+// console and paste its key here. Public by design (GA-id semantics).
 const TRACKING_SITE_KEY = process.env.NEXT_PUBLIC_TRACKING_SITE_KEY;
 const TRACKING_API = process.env.NEXT_PUBLIC_API_URL;
 

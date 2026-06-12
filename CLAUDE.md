@@ -81,7 +81,7 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
 pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
-pnpm --filter api test      # Run vitest (244 tests as of 2026-06-12)
+pnpm --filter api test      # Run vitest (232 tests as of 2026-06-12)
 pnpm --filter api db:generate  # Emit a new versioned migration from schema changes → apps/api/drizzle/*.sql
 pnpm --filter api db:migrate   # Apply pending migrations to DATABASE_URL (preferred for Railway deploys)
 pnpm --filter api db:push      # Dev only: push schema directly, bypassing migration files
@@ -104,13 +104,15 @@ pnpm tsx scripts/spike-behavior-sim/run.ts spike/<id>/graph.json [--start=<node>
 
 ### Backend (apps/api)
 - 7 active routes under `src/routes/`, mounted in `src/index.ts`:
-  `auth.ts`, `scan.ts`, `calibration.ts`, `benchmark.ts`, `hello.ts`,
+  `scan.ts`, `calibration.ts`, `benchmark.ts`, `hello.ts`,
+  `console.ts` (Console S2 — workspace CRUD/keys/analytics),
   `me_responses.ts` (Phase 5.1 — `/api/me/survey-responses[/:scanId]`,
   `/api/me/points`; Console S1 2026-06-11 adds `/api/me/credits`),
-  `partner.ts` (geulbat pilot 2026-06-10 —
-  `POST /api/partner/geulbat/survey`, S2S gated by
-  `PARTNER_API_KEY_GEULBAT` via `middleware/partner.ts`; email is a
-  provisional identity claimed on Privy login — see
+  `partner.ts` (workspace-keyed since 2026-06-12 —
+  `POST /api/partner/{survey,session-token,survey-by-token,profile,
+  behavior}` + `/t.js`+`/t` beacons. S2S gated by `requireSiteSecret`
+  (`middleware/partner.ts` — workspace rpm_sk_ secret, sha256 lookup);
+  email is a provisional identity claimed on Privy login — see
   `middleware/privy_auth.ts::claimPartnerRows`).
 - Active services in `src/services/`: `llm.ts`, `audience_fit.ts`,
   `scan_pipeline.ts`, `site_classifier.ts`, `site_capture.ts`,
@@ -154,10 +156,10 @@ pnpm tsx scripts/spike-behavior-sim/run.ts spike/<id>/graph.json [--start=<node>
   console/me screens must use `t()` from day one; no locale URL
   routing, deliberately not next-intl.
 - Shared API URL: `import { API_BASE } from '@/lib/api'` — never hardcode.
-- API client (`lib/api.ts`): primary surface is `scanApi` for
-  `/api/scan/*` routes. `signedRequest()` helper still exists for any
-  future wallet-signed mutation, even though most validator routes are
-  Privy-authenticated (see Auth section).
+- API client (`lib/api.ts`): surfaces are `scanApi` (/api/scan/*),
+  `consoleApi` (/api/console/*), `meApi` (/api/me/*),
+  `calibrationApi`. All authenticated calls ride the Privy bearer
+  auto-attached by `setAuthTokenGetter()` (see Auth section).
 - Auth provider: **Privy** (`@privy-io/react-auth`) wraps the app via
   `apps/web/app/providers.tsx`. Single auth layer for Email / Google /
   Phantom / Solflare / Discord / X login + optional embedded Solana
@@ -213,13 +215,15 @@ Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
   if missing/invalid token) and `optionalPrivyAuth` (attach
   `req.privyUser` when present, otherwise pass through). `/api/scan`
   uses `optional` so anonymous landing-page demos still work.
-- Legacy wallet-signed nonce path (`middleware/auth.ts` +
-  `signedRequest()` in `lib/api.ts`) is preserved for any future
-  signed mutation surface but currently has no live consumer routes.
-  Don't remove it without confirming no follow-up sprint needs it.
+- Legacy wallet-signed nonce path — REMOVED 2026-06-12 (user-approved
+  large-change cleanup). `middleware/auth.ts`, `routes/auth.ts`
+  (/api/auth/nonce + /me), `schemas/common.ts`, and the web `authApi`
+  all had zero live consumers after the Privy migration. If a future
+  surface needs wallet-signed mutations, build it fresh against the
+  then-current need — don't resurrect the nonce store.
 
 ### Testing
-- Vitest at `apps/api/src/__tests__/` — **244 tests** as of 2026-06-12.
+- Vitest at `apps/api/src/__tests__/` — **232 tests** as of 2026-06-12.
   Suites cover env validation, auth schema, audience-fit math,
   cohort selection, dimension LLM contracts (incl. the Q2 site-context
   + Q3 voice-cleanup regression locks), scan shapers, AARRR weighted
@@ -492,7 +496,31 @@ The validator pipeline does not record per-persona browser sessions
 `captureScreenshotUrls` array; future per-persona replays would need
 a new pipeline.
 
-## Partner Pilot — geulbat (2026-06-10)
+## Partner Integration — workspace-keyed (2026-06-12 rework)
+
+The geulbat env-key special-casing (`PARTNER_API_KEY_GEULBAT`,
+`PARTNER_SITE_KEY_GEULBAT`, `requireGeulbatKey`, `/api/partner/geulbat/*`
+paths) was REMOVED by user decision — geulbat had not yet implemented
+the old guide, and will register fresh through the console once the
+rebuild ships. Every partner (geulbat included) now:
+
+1. registers a workspace in the console → gets `rpm_pk_` site key +
+   `rpm_sk_` secret (shown once),
+2. uses generic S2S paths: `POST /api/partner/{survey,session-token,
+   survey-by-token,profile,behavior}` with `x-partner-key: rpm_sk_…`,
+3. embeds `/api/partner/t.js` with `data-site="rpm_pk_…"` for beacons.
+
+Handoff/identify tokens are HMAC-signed with the workspace's stored
+secret HASH (server-only signing key; payload carries the workspace id;
+rotating the secret invalidates outstanding tokens by design). Ledger
+`source` values are `ws:<workspace_id>`; historical `'geulbat'` rows
+remain valid data. Dogfooding likewise: register the 41R app itself as
+a workspace and put its rpm_pk_ key in NEXT_PUBLIC_TRACKING_SITE_KEY.
+
+The section below documents the original pilot's data model — the
+3-stream concept is unchanged, only the auth/paths moved.
+
+## Partner Pilot — geulbat (2026-06-10, auth/paths superseded above)
 
 First instance of the tester-data loop: a partner site feeds three
 streams into 41R, all keyed by Google-verified email and claimed on
@@ -551,9 +579,9 @@ so any future policy can reprice retroactively.
 
 ## Console Sprint 2 — workspaces + key self-serve (2026-06-12)
 
-S2 shipped on the same branch. The geulbat env-key pilot keeps working
-untouched (alias contract) while everything it did manually becomes
-self-serve:
+S2 shipped on the same branch. (Originally kept a geulbat env-key
+alias; that alias was removed on 2026-06-12 by user decision — see
+"Partner Integration — workspace-keyed" below.)
 
 - **site_workspaces** (migration 0014, idempotent) — registration =
   per-user analysis workspace, NOT ownership: `UNIQUE(user_id,
@@ -570,11 +598,9 @@ self-serve:
   (`routes/console.ts`, owner-scoped WHERE user_id). Creating a
   workspace adopts the user's existing unassigned scans for that host;
   new scans auto-link in POST /api/scan via `findWorkspaceByHost`.
-- **requireSiteSecret** (`middleware/partner.ts`) — accepts the env
-  geulbat key (source 'geulbat') OR any workspace secret (source
-  'ws:<id>'). `requireGeulbatKey` + /geulbat/* paths stay as the alias.
-  Beacon `siteKeySource` also resolves `rpm_pk_…` keys from the DB and
-  touches `last_event_at`.
+- **requireSiteSecret** (`middleware/partner.ts`) — workspace secrets
+  only (source 'ws:<id>'). Beacon `siteKeySource` resolves `rpm_pk_…`
+  keys from the DB and touches `last_event_at`.
 - **Survey rewards** (`services/rewards.ts`) — single source for both
   the partner and direct survey paths: +100pt first submission,
   per-scan cap 30; beyond the cap a transparent 0pt
@@ -622,7 +648,7 @@ confirmed). S1 shipped on branch `feat/console-sprint1`:
   (first consumer of /api/me/points), TopBar `[Console · My Page]` +
   EN/KO toggle, `/me/analyses` → `/console` redirect.
 - S2 next: `site_workspaces` table + key self-serve +
-  `requireGeulbatKey` → `requireSiteSecret` generalization (geulbat
+  `requireSiteSecret` generalization (geulbat
   env-key seeded as row 1, no downtime) + scan-complete email.
 
 ## Behavior Simulation (Mode C — gated, not shipped)
@@ -683,8 +709,11 @@ strip. Capture falls back networkidle → domcontentloaded on timeout
   ```
 ## Security / Observability / Settlement (Phase 0 + 1 hardening)
 
-- **Wallet signature verification** — all mutating routes gated by
-  `middleware/auth.ts` (ed25519 + single-use 5-min nonce). See §Auth above.
+- **Auth** — Privy bearer on all user-facing mutations
+  (`middleware/privy_auth.ts`); partner S2S via x-partner-key
+  (`middleware/partner.ts`); operator via x-admin-key
+  (`middleware/admin.ts`). The autotest-era wallet-signature layer was
+  removed 2026-06-12 (see §Auth above).
 - **CORS allowlist** — `config/cors.ts`. Defaults allow localhost:3000/3001,
   127.0.0.1:3000/3001, the Railway web URL. Override via
   `CORS_ALLOWED_ORIGINS` (comma-separated).
@@ -698,8 +727,9 @@ strip. Capture falls back networkidle → domcontentloaded on timeout
   In-memory stores — fine single-instance; `app.set('trust proxy', 1)`
   in index.ts makes req.ip the real client behind Railway. Limiters
   skip when NODE_ENV=test.
-- **Zod body validation** — `schemas/index.ts` + `validateBody()`. Every
-  signed POST has a schema, applied right after `requireSignedRequest`.
+- **Zod body validation** — inline `z.object(...).safeParse(req.body)`
+  per route handler (scan.ts, console.ts, partner.ts pattern). The old
+  shared `schemas/` dir went with the wallet-signature layer.
 - **Env flag safety** — `config/env.ts` enforces production-only
   invariants at boot (e.g. mandatory secrets present, dev-only
   bypass flags forced off). Boot log prints
@@ -756,14 +786,12 @@ ADMIN_API_KEY=...           # Gates /api/admin/* (≥12 chars; absent ⇒ 404).
                             # Console S1: when set, also demotes /api/calibration
                             # to operator-only (x-admin-key) and acts as the
                             # operator override on POST /:id/human-aggregate.
-PARTNER_API_KEY_GEULBAT=... # Partner S2S secret + HMAC token secret (≥12 chars; absent ⇒ 503).
-                            # SERVER-ONLY — never in client bundles or git.
-PARTNER_SITE_KEY_GEULBAT=...# Public tracking site key for the t.js snippet (like a GA id)
-PARTNER_SITE_KEY_41R=...    # Dogfooding site key (≥12 chars) — routes beacons from
-                            # 41R's own web app to source='41r-web' (Console S1)
-NEXT_PUBLIC_TRACKING_SITE_KEY=... # Web-side mirror of PARTNER_SITE_KEY_41R; when set
+NEXT_PUBLIC_TRACKING_SITE_KEY=... # Dogfooding: a real workspace's rpm_pk_ site key
+                            # (register app.project-rpm.xyz in the console). When set
                             # together with NEXT_PUBLIC_API_URL, layout.tsx injects
-                            # the t.js snippet (public by design, GA-id semantics)
+                            # the t.js snippet (public by design, GA-id semantics).
+                            # Partner env keys (PARTNER_*_GEULBAT, PARTNER_SITE_KEY_41R)
+                            # were removed 2026-06-12 — keys live in site_workspaces now.
 RESEND_API_KEY=...          # Console S2/S3 — transactional email (scan-complete,
                             # response milestones, weekly digest). Absent ⇒
                             # services/email.ts no-ops (local/test safe)
@@ -788,11 +816,9 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
 - Commit `.env`, keypair files, or API keys
 - Hardcode `localhost:4100` in frontend — use `API_BASE`
 - Use `JSON.parse()` on LLM output — use `parseJsonSafe()` from `services/llm.ts`
-- ~~Add wallet signature verification~~ — wallet signature IS required now on all
-  mutating routes. Don't disable it or bypass `requireSignedRequest` middleware.
 - Call `request()` in `lib/api.ts` with custom headers and forget about
   `Content-Type` — the helper preserves explicit headers but caller-provided
-  options must not override it. `signedRequest` already handles this.
+  options must not override it.
 - Create new .md docs without explicit request
 - Use `fs.writeFile` for screenshots in production — use `uploadToR2()` from `services/r2.ts`
 - Assume local file paths work in Docker — use env vars for all external paths
@@ -1056,11 +1082,11 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   `assembleFrictionClusters` pure helper IS shared — that's the
   right level of reuse.
 
-- Ship `PARTNER_API_KEY_GEULBAT` to a browser, commit it, or accept a
-  browser-supplied email anywhere outside the two designed channels
-  (partner-key S2S routes, HMAC-token routes). The site key
-  (`PARTNER_SITE_KEY_GEULBAT`) is the only partner value allowed in
-  client markup — it is public by design, like a GA measurement id.
+- Ship a workspace SECRET (`rpm_sk_…`) to a browser, commit it, or
+  accept a browser-supplied email anywhere outside the two designed
+  channels (partner-key S2S routes, HMAC-token routes). The site key
+  (`rpm_pk_…`) is the only partner value allowed in client markup —
+  it is public by design, like a GA measurement id.
 - Change `POST /api/partner/t` to require `application/json`. The
   text/plain body is what makes sendBeacon a CORS simple request (no
   preflight) — "fixing" the content type silently drops beacons from

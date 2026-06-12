@@ -1,5 +1,25 @@
 # 글밭 × 41R 파트너 통합 가이드
 
+> **⚠️ BREAKING — 2026-06-12 키 체계 전면 교체 (이 가이드 적용 전 필독)**
+>
+> 글밭 전용 env 키 체계가 제거되고 **콘솔 셀프서브 워크스페이스 키**로
+> 바뀌었다. 글밭 구현이 시작되기 전이므로 아래 매핑으로 읽으면 가이드의
+> 나머지(페이로드·플로우·동의 계약)는 전부 그대로 유효하다:
+>
+> | 이 문서의 표기 (구) | 실제 사용 값 (신) |
+> |---|---|
+> | `PARTNER_API_KEY_GEULBAT` (S2S 비밀키) | 41R 콘솔에서 글밭 사이트 등록 시 1회 표시되는 `rpm_sk_…` secret |
+> | `rpms_geulbat_…` (site key) | 같은 워크스페이스의 `rpm_pk_…` site key (설정 탭에서 복사) |
+> | `POST /api/partner/geulbat/survey` | `POST /api/partner/survey` |
+> | `POST /api/partner/geulbat/session-token` | `POST /api/partner/session-token` |
+> | `POST /api/partner/geulbat/survey-by-token` | `POST /api/partner/survey-by-token` |
+> | `POST /api/partner/geulbat/profile` | `POST /api/partner/profile` |
+> | `POST /api/partner/geulbat/behavior` | `POST /api/partner/behavior` |
+> | `/api/partner/t.js` + `/t` (비콘) | 동일 (data-site에 `rpm_pk_…` 사용) |
+>
+> 키 발급: 41R 콘솔 → Add site → geulbat URL 등록 → secret 1회 복사.
+> secret 재발급 시 발급된 핸드오프 토큰은 즉시 무효화된다(의도된 동작).
+
 > 글밭(geulbat) 파일럿 — 유저의 ①프로필 ②사용 행동 ③앱 평가(설문)를
 > 41R로 흘려보내고, 유저는 같은 구글 계정으로 41R에 로그인하면
 > 자기 데이터·포인트를 관리하는 구조. 41R 측 인프라는 2026-06-10

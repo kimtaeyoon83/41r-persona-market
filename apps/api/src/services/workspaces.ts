@@ -60,6 +60,16 @@ export async function getWorkspaceForUser(
   return ws ?? null;
 }
 
+/** Unscoped id lookup — for system paths that already hold a verified
+ *  reference (e.g. handoff-token verification), NOT user requests. */
+export async function getWorkspaceById(id: string): Promise<Workspace | null> {
+  const [ws] = await db
+    .select()
+    .from(schema.siteWorkspaces)
+    .where(eq(schema.siteWorkspaces.id, id));
+  return ws ?? null;
+}
+
 /** Auto-link helper — the user's workspace matching a scan URL host. */
 export async function findWorkspaceByHost(
   userId: string,

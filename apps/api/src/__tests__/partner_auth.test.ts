@@ -1,9 +1,13 @@
-// Contract tests for the partner S2S auth middleware (geulbat pilot).
-// Locks: env-unset/short → 503, missing header → 401, invalid → 403,
-// valid → next(). Mirrors admin_auth.test.ts.
+// Contract tests for the partner S2S auth middleware (workspace-keyed
+// since 2026-06-12 — the geulbat env-key alias was removed; partners
+// register via the console and use their rpm_sk_ secret).
+// Locks: missing header → 401; key without the rpm_sk_ prefix → 403
+// without ever touching the DB (findWorkspaceBySecret short-circuits
+// on prefix). The valid-secret path needs a live DB and is exercised
+// by smoke tests, not here.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { requireGeulbatKey } from '../middleware/partner';
+import { describe, expect, it, vi } from 'vitest';
+import { requireSiteSecret } from '../middleware/partner';
 import type { Request, Response, NextFunction } from 'express';
 
 function mkReq(partnerKey?: string): Partial<Request> {
@@ -13,7 +17,7 @@ function mkReq(partnerKey?: string): Partial<Request> {
       return undefined;
     },
     ip: '127.0.0.1',
-    path: '/geulbat/survey',
+    path: '/survey',
   } as Partial<Request>;
 }
 
@@ -26,60 +30,24 @@ function mkRes() {
   };
 }
 
-describe('requireGeulbatKey', () => {
-  let originalEnv: string | undefined;
-
-  beforeEach(() => {
-    originalEnv = process.env.PARTNER_API_KEY_GEULBAT;
-  });
-
-  afterEach(() => {
-    if (originalEnv === undefined) delete process.env.PARTNER_API_KEY_GEULBAT;
-    else process.env.PARTNER_API_KEY_GEULBAT = originalEnv;
-  });
-
-  it('returns 503 when the env key is unset', () => {
-    delete process.env.PARTNER_API_KEY_GEULBAT;
+describe('requireSiteSecret', () => {
+  it('returns 401 when the header is missing', async () => {
     const res = mkRes();
     const next = vi.fn() as NextFunction;
-    requireGeulbatKey(mkReq('whatever') as Request, res, next);
-    expect(res.status).toHaveBeenCalledWith(503);
-    expect(next).not.toHaveBeenCalled();
-  });
-
-  it('returns 503 when the env key is shorter than 12 chars', () => {
-    process.env.PARTNER_API_KEY_GEULBAT = 'short';
-    const res = mkRes();
-    const next = vi.fn() as NextFunction;
-    requireGeulbatKey(mkReq('short') as Request, res, next);
-    expect(res.status).toHaveBeenCalledWith(503);
-    expect(next).not.toHaveBeenCalled();
-  });
-
-  it('returns 401 when the header is missing', () => {
-    process.env.PARTNER_API_KEY_GEULBAT = 'a-valid-partner-key';
-    const res = mkRes();
-    const next = vi.fn() as NextFunction;
-    requireGeulbatKey(mkReq(undefined) as Request, res, next);
+    await requireSiteSecret(mkReq() as Request, res, next);
     expect(res.status).toHaveBeenCalledWith(401);
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('returns 403 on key mismatch', () => {
-    process.env.PARTNER_API_KEY_GEULBAT = 'a-valid-partner-key';
+  it('returns 403 for a key without the workspace-secret prefix (no DB hit)', async () => {
     const res = mkRes();
     const next = vi.fn() as NextFunction;
-    requireGeulbatKey(mkReq('wrong-key-entirely') as Request, res, next);
+    await requireSiteSecret(
+      mkReq('legacy-env-key-that-no-longer-exists') as Request,
+      res,
+      next,
+    );
     expect(res.status).toHaveBeenCalledWith(403);
     expect(next).not.toHaveBeenCalled();
-  });
-
-  it('calls next() on a matching key', () => {
-    process.env.PARTNER_API_KEY_GEULBAT = 'a-valid-partner-key';
-    const res = mkRes();
-    const next = vi.fn() as NextFunction;
-    requireGeulbatKey(mkReq('a-valid-partner-key') as Request, res, next);
-    expect(next).toHaveBeenCalled();
-    expect(res.status).not.toHaveBeenCalled();
   });
 });

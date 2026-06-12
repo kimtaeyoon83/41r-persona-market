@@ -23,9 +23,10 @@ import { z } from 'zod';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { and, eq, gte, isNull, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
-import { requireGeulbatKey } from '../middleware/partner.js';
+import { requireSiteSecret } from '../middleware/partner.js';
 import {
   findWorkspaceBySiteKey,
+  getWorkspaceById,
   touchWorkspaceEvent,
 } from '../services/workspaces.js';
 import { awardSurveyPoints } from '../services/rewards.js';
@@ -64,42 +65,72 @@ const partnerSurveyBody = surveyBody.extend({
 // 41R-owned, so the partner never rebuilds the form: its server asks
 // for a short-lived signed token, sends the user to 41R's hosted
 // survey page (?pt=<token>), and the page submits with the token in
-// place of Privy auth. HMAC secret reuses the partner key — same two-
-// party trust domain, no extra env.
-//   token = base64url({e: email, s: scanId, x: expiresEpochSec}) +
-//           '.' + hmacSHA256(payload, PARTNER_API_KEY_GEULBAT)
+// place of Privy auth.
+//
+// Signing key = the workspace's stored secret HASH. Only OUR server
+// mints and verifies tokens (the partner just relays them), so the
+// key only needs to be server-known + stable; rotating the workspace
+// secret invalidates outstanding tokens (intended). The payload
+// carries `w` (workspace id) so the verifier knows which hash to use;
+// a forged `w` simply fails the HMAC.
+//   token = base64url({e: email, s: scanId, w: wsId, x: expEpochSec})
+//           + '.' + hmacSHA256(payload, workspace.secret_hash)
 const TOKEN_TTL_SEC = 30 * 60;
 
 function b64url(buf: Buffer): string {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function signToken(email: string, scanId: string, secret: string): { token: string; exp: number } {
+function signToken(
+  email: string,
+  scanId: string,
+  wsId: string,
+  signingKey: string,
+): { token: string; exp: number } {
   const exp = Math.floor(Date.now() / 1000) + TOKEN_TTL_SEC;
-  const payload = b64url(Buffer.from(JSON.stringify({ e: email, s: scanId, x: exp })));
-  const sig = b64url(createHmac('sha256', secret).update(payload).digest());
+  const payload = b64url(
+    Buffer.from(JSON.stringify({ e: email, s: scanId, w: wsId, x: exp })),
+  );
+  const sig = b64url(createHmac('sha256', signingKey).update(payload).digest());
   return { token: `${payload}.${sig}`, exp };
 }
 
-function verifyToken(
-  token: string,
-  secret: string,
-): { email: string; scanId: string } | null {
+type TokenClaims = { email: string; scanId: string; wsId: string };
+
+/** Unverified read of the workspace id — used to look up the signing
+ *  key. Safe: verifyToken re-checks the HMAC with that key. */
+function peekTokenWorkspace(token: string): string | null {
+  const dot = token.lastIndexOf('.');
+  if (dot <= 0) return null;
+  try {
+    const body = JSON.parse(
+      Buffer.from(
+        token.slice(0, dot).replace(/-/g, '+').replace(/_/g, '/'),
+        'base64',
+      ).toString('utf-8'),
+    ) as { w?: string };
+    return body.w ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function verifyToken(token: string, signingKey: string): TokenClaims | null {
   const dot = token.lastIndexOf('.');
   if (dot <= 0) return null;
   const payload = token.slice(0, dot);
   const sig = token.slice(dot + 1);
-  const want = b64url(createHmac('sha256', secret).update(payload).digest());
+  const want = b64url(createHmac('sha256', signingKey).update(payload).digest());
   const a = Buffer.from(sig);
   const b = Buffer.from(want);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   try {
     const body = JSON.parse(
       Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8'),
-    ) as { e?: string; s?: string; x?: number };
-    if (!body.e || !body.s || !body.x) return null;
+    ) as { e?: string; s?: string; w?: string; x?: number };
+    if (!body.e || !body.s || !body.w || !body.x) return null;
     if (body.x < Math.floor(Date.now() / 1000)) return null;
-    return { email: body.e, scanId: body.s };
+    return { email: body.e, scanId: body.s, wsId: body.w };
   } catch {
     return null;
   }
@@ -112,12 +143,14 @@ type IngestResult =
   | { status: 'scan_not_completed'; scanStatus: string }
   | { status: 'ok'; firstSubmission: boolean; pointsAwarded: number };
 
-/** Shared ingest core — used by both the S2S channel (/geulbat/survey)
- *  and the hosted-page token channel (/geulbat/survey-by-token). */
-async function ingestGeulbatSurvey(
+/** Shared ingest core — used by both the S2S channel (/survey) and
+ *  the hosted-page token channel (/survey-by-token). `source` is the
+ *  workspace tag ('ws:<id>') for ledger/profile attribution. */
+async function ingestPartnerSurvey(
   scanId: string,
   emailRaw: string,
   body: SurveyAnswers,
+  source: string,
 ): Promise<IngestResult> {
   const email = emailRaw.toLowerCase();
   if (!UUID_RE.test(scanId)) return { status: 'scan_not_found' };
@@ -220,7 +253,7 @@ async function ingestGeulbatSurvey(
     if (firstSubmission) {
       pointsAwarded = await awardSurveyPoints({
         scanId,
-        source: 'geulbat',
+        source,
         email,
       });
       // Retention loop #2 (S3) — milestone-batched owner notification.
@@ -253,7 +286,7 @@ function respondIngest(res: import('express').Response, r: IngestResult): void {
 }
 
 // ─── Channel A: S2S survey forward (partner renders its own form) ──
-router.post('/geulbat/survey', requireGeulbatKey, async (req, res) => {
+router.post('/survey', requireSiteSecret, async (req, res) => {
   try {
     const parsed = partnerSurveyBody.safeParse(req.body);
     if (!parsed.success) {
@@ -261,7 +294,10 @@ router.post('/geulbat/survey', requireGeulbatKey, async (req, res) => {
       return;
     }
     const { scan_id, email, consent: _c, ...answers } = parsed.data;
-    respondIngest(res, await ingestGeulbatSurvey(scan_id, email, answers as SurveyAnswers));
+    respondIngest(
+      res,
+      await ingestPartnerSurvey(scan_id, email, answers as SurveyAnswers, req.partnerSource!),
+    );
   } catch (err) {
     log.error({ err: (err as Error).message }, 'partner survey ingest failed');
     res.status(500).json({ error: 'internal_error' });
@@ -275,7 +311,7 @@ const sessionTokenBody = z.object({
   scan_id: z.string().uuid(),
 });
 
-router.post('/geulbat/session-token', requireGeulbatKey, async (req, res) => {
+router.post('/session-token', requireSiteSecret, async (req, res) => {
   try {
     const parsed = sessionTokenBody.safeParse(req.body);
     if (!parsed.success) {
@@ -295,8 +331,8 @@ router.post('/geulbat/session-token', requireGeulbatKey, async (req, res) => {
       res.status(409).json({ error: 'scan_not_completed', status: scan.status });
       return;
     }
-    const secret = process.env.PARTNER_API_KEY_GEULBAT!; // middleware guarantees presence
-    const { token, exp } = signToken(email.toLowerCase(), scan_id, secret);
+    const ws = req.partnerWorkspace!; // middleware guarantees presence
+    const { token, exp } = signToken(email.toLowerCase(), scan_id, ws.id, ws.secretHash);
     const webBase = process.env.WEB_PUBLIC_URL ?? 'https://app.project-rpm.xyz';
     res.json({
       token,
@@ -316,27 +352,31 @@ const tokenSurveyBody = surveyBody.extend({
   token: z.string().min(20).max(2048),
 });
 
-router.post('/geulbat/survey-by-token', async (req, res) => {
+router.post('/survey-by-token', async (req, res) => {
   try {
-    const secret = process.env.PARTNER_API_KEY_GEULBAT;
-    if (!secret || secret.length < 12) {
-      res.status(503).json({ error: 'partner_ingest_disabled' });
-      return;
-    }
     const parsed = tokenSurveyBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
       return;
     }
     const { token, ...answers } = parsed.data;
-    const claims = verifyToken(token, secret);
+    // Unverified peek tells us WHICH workspace's key to verify with;
+    // a forged workspace id fails the HMAC below.
+    const wsId = peekTokenWorkspace(token);
+    const ws = wsId ? await getWorkspaceById(wsId) : null;
+    const claims = ws ? verifyToken(token, ws.secretHash) : null;
     if (!claims) {
       res.status(401).json({ error: 'token_invalid_or_expired' });
       return;
     }
     respondIngest(
       res,
-      await ingestGeulbatSurvey(claims.scanId, claims.email, answers as SurveyAnswers),
+      await ingestPartnerSurvey(
+        claims.scanId,
+        claims.email,
+        answers as SurveyAnswers,
+        `ws:${ws!.id}`,
+      ),
     );
   } catch (err) {
     log.error({ err: (err as Error).message }, 'token survey ingest failed');
@@ -356,20 +396,21 @@ const profileBody = z.object({
   }),
 });
 
-router.post('/geulbat/profile', requireGeulbatKey, async (req, res) => {
+router.post('/profile', requireSiteSecret, async (req, res) => {
   try {
     const parsed = profileBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
       return;
     }
+    const source = req.partnerSource!;
     const email = parsed.data.email.toLowerCase();
     const [existing] = await db
       .select({ id: schema.partnerProfiles.id })
       .from(schema.partnerProfiles)
       .where(
         and(
-          eq(schema.partnerProfiles.source, 'geulbat'),
+          eq(schema.partnerProfiles.source, source),
           eq(schema.partnerProfiles.email, email),
         ),
       );
@@ -380,7 +421,7 @@ router.post('/geulbat/profile', requireGeulbatKey, async (req, res) => {
         .where(eq(schema.partnerProfiles.id, existing.id));
     } else {
       await db.insert(schema.partnerProfiles).values({
-        source: 'geulbat',
+        source,
         email,
         profile: parsed.data.profile,
       });
@@ -411,7 +452,7 @@ const behaviorBody = z.object({
     .max(500),
 });
 
-router.post('/geulbat/behavior', requireGeulbatKey, async (req, res) => {
+router.post('/behavior', requireSiteSecret, async (req, res) => {
   try {
     const parsed = behaviorBody.safeParse(req.body);
     if (!parsed.success) {
@@ -421,7 +462,7 @@ router.post('/geulbat/behavior', requireGeulbatKey, async (req, res) => {
     const email = parsed.data.email.toLowerCase();
     await db.insert(schema.partnerBehaviorEvents).values(
       parsed.data.events.map((e) => ({
-        source: 'geulbat',
+        source: req.partnerSource!,
         email,
         sessionId: e.session_id ?? null,
         eventType: e.event_type,
@@ -493,22 +534,16 @@ async function checkAndCountEvents(
   return true;
 }
 
+// Beacon keys are workspace site keys only (env-key special cases for
+// geulbat/41R were removed 2026-06-12 — dogfooding now just sets
+// NEXT_PUBLIC_TRACKING_SITE_KEY to a real workspace's rpm_pk_ key).
 async function siteKeySource(
   k: string,
-): Promise<{ source: string; workspaceId: string | null } | null> {
-  const gb = process.env.PARTNER_SITE_KEY_GEULBAT;
-  if (gb && gb.length >= 12 && k === gb) return { source: 'geulbat', workspaceId: null };
-  // Dogfooding (Console Sprint 1 §5.2) — 41R's own web app carries the
-  // t.js snippet so we measure our own PLG funnel with our own pipe.
-  const own = process.env.PARTNER_SITE_KEY_41R;
-  if (own && own.length >= 12 && k === own) return { source: '41r-web', workspaceId: null };
-  // Console S2 — self-serve workspace site keys (rpm_pk_…). Source is
-  // 'ws:<id>' so the analytics tab can filter per workspace.
-  if (k.startsWith('rpm_pk_')) {
-    const ws = await findWorkspaceBySiteKey(k);
-    if (ws) return { source: `ws:${ws.id}`, workspaceId: ws.id };
-  }
-  return null;
+): Promise<{ source: string; workspaceId: string; secretHash: string } | null> {
+  if (!k.startsWith('rpm_pk_')) return null;
+  const ws = await findWorkspaceBySiteKey(k);
+  if (!ws) return null;
+  return { source: `ws:${ws.id}`, workspaceId: ws.id, secretHash: ws.secretHash };
 }
 
 const SNIPPET = `(function(){
@@ -578,7 +613,7 @@ router.post('/t', express.text({ type: '*/*', limit: '64kb' }), async (req, res)
       res.status(401).json({ error: 'unknown_site_key' });
       return;
     }
-    const { source, workspaceId } = resolved;
+    const { source, workspaceId, secretHash } = resolved;
     // Soft cap (§4.3.1) — over-cap batches are dropped silently (204):
     // the page must never break; the console gauge is the warning.
     const withinCap = await checkAndCountEvents(source, parsed.data.ev.length);
@@ -587,12 +622,12 @@ router.post('/t', express.text({ type: '*/*', limit: '64kb' }), async (req, res)
       return;
     }
     // Optional identity — same HMAC token family as the survey
-    // handoff; an invalid/expired uid degrades to anonymous rather
-    // than rejecting the batch (tracking must never break the page).
+    // handoff, signed with this workspace's key; an invalid/expired
+    // uid degrades to anonymous rather than rejecting the batch
+    // (tracking must never break the page).
     let email: string | null = null;
-    const secret = process.env.PARTNER_API_KEY_GEULBAT;
-    if (parsed.data.uid && secret && secret.length >= 12) {
-      email = verifyToken(parsed.data.uid, secret)?.email ?? null;
+    if (parsed.data.uid) {
+      email = verifyToken(parsed.data.uid, secretHash)?.email ?? null;
     }
     await db.insert(schema.partnerBehaviorEvents).values(
       parsed.data.ev.map((e) => ({
@@ -607,9 +642,7 @@ router.post('/t', express.text({ type: '*/*', limit: '64kb' }), async (req, res)
     );
     // TRACKED-tier flag (Console S2) — non-fatal, beacons must never
     // fail because of a bookkeeping update.
-    if (workspaceId) {
-      touchWorkspaceEvent(workspaceId).catch(() => {});
-    }
+    touchWorkspaceEvent(workspaceId).catch(() => {});
     res.status(204).end();
   } catch (err) {
     log.error({ err: (err as Error).message }, 'beacon ingest failed');

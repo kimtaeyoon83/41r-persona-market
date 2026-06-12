@@ -2,13 +2,11 @@
 //
 // Locks: workspace key formats + hashing (two-tier key model §3.3),
 // host normalization (must match the web's hostOf — same rule, two
-// runtimes), survey reward constants (§4.1: 100pt, cap 30/scan), and
-// the requireSiteSecret env-alias path (geulbat zero-downtime
-// contract). DB-bound paths (workspace secret lookup, cap counting)
-// run against a live DB only.
+// runtimes), and survey reward constants (§4.1: 100pt, cap 30/scan).
+// DB-bound paths (workspace secret lookup, cap counting) run against
+// a live DB only.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Request, Response } from 'express';
+import { describe, expect, it } from 'vitest';
 import {
   SECRET_PREFIX,
   SITE_KEY_PREFIX,
@@ -23,7 +21,6 @@ import {
   SURVEY_REWARD_POINTS,
 } from '../services/rewards';
 import { isResponseMilestone, RESPONSE_MILESTONES } from '../services/notify';
-import { requireSiteSecret } from '../middleware/partner';
 
 describe('workspace keys (two-tier model §3.3)', () => {
   it('generates distinct prefixed keys', () => {
@@ -80,45 +77,6 @@ describe('response milestones (S3 retention loop #2)', () => {
   });
 });
 
-describe('requireSiteSecret — geulbat env alias (zero-downtime contract)', () => {
-  let originalKey: string | undefined;
-  beforeEach(() => {
-    originalKey = process.env.PARTNER_API_KEY_GEULBAT;
-    process.env.PARTNER_API_KEY_GEULBAT = 'geulbat-pilot-secret-key';
-  });
-  afterEach(() => {
-    if (originalKey === undefined) delete process.env.PARTNER_API_KEY_GEULBAT;
-    else process.env.PARTNER_API_KEY_GEULBAT = originalKey;
-  });
-
-  function mkReq(key?: string): Request {
-    return {
-      header: (name: string) => (name === 'x-partner-key' ? key : undefined),
-      ip: '127.0.0.1',
-      path: '/x',
-    } as unknown as Request;
-  }
-  function mkRes() {
-    const json = vi.fn();
-    const status = vi.fn(() => ({ json }));
-    return { res: { status } as unknown as Response, status };
-  }
-
-  it('accepts the env geulbat key without touching the DB', async () => {
-    const next = vi.fn();
-    const req = mkReq('geulbat-pilot-secret-key');
-    const { res, status } = mkRes();
-    await requireSiteSecret(req, res, next);
-    expect(next).toHaveBeenCalled();
-    expect(req.partnerSource).toBe('geulbat');
-    expect(status).not.toHaveBeenCalled();
-  });
-
-  it('401s without a key header', async () => {
-    const next = vi.fn();
-    const { res, status } = mkRes();
-    await requireSiteSecret(mkReq(), res, next);
-    expect(next).not.toHaveBeenCalled();
-    expect(status).toHaveBeenCalledWith(401);
-  });
-});
+// (The geulbat env-alias contract test lived here until 2026-06-12 —
+// the alias itself was removed; requireSiteSecret coverage moved to
+// partner_auth.test.ts, workspace-keyed only.)

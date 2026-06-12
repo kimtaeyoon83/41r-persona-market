@@ -2,7 +2,6 @@ import express, { type Express } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
-import authRouter from './routes/auth.js';
 import helloRouter from './routes/hello.js';
 import scanRouter from './routes/scan.js';
 import calibrationRouter from './routes/calibration.js';
@@ -61,7 +60,6 @@ app.get('/api/health', async (req, res) => {
 // readLimiter is the router-wide baseline; POST /api/scan carries its
 // own stricter limiters inside routes/scan.ts. The partner router is
 // excluded — beacons are high-frequency by design.
-app.use('/api/auth', readLimiter, authRouter);
 app.use('/api/hello', readLimiter, helloRouter);
 app.use('/api/scan', readLimiter, scanRouter);
 // Calibration is an operator/dev surface — demoted to operator-only
