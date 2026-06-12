@@ -145,7 +145,7 @@ function HomeInner() {
               marginBottom: 12,
             }}
           >
-            41R Audience-Fit Validator
+            41R · AI Persona Audience Discovery
           </div>
           <h1
             style={{
@@ -161,8 +161,8 @@ function HomeInner() {
           >
             {mode === "A" ? (
               <>
-                See how your audience{" "}
-                <span style={{ color: C.accent }}>actually reacts</span>.
+                Find your <span style={{ color: C.accent }}>customers</span> —
+                before launch.
               </>
             ) : (
               <>
@@ -180,7 +180,7 @@ function HomeInner() {
             }}
           >
             {mode === "A"
-              ? "112 representative personas across 8 cohorts react to your site. Cohort fit · 5-dimension breakdown · friction map · cohort × dimension matrix."
+              ? "Drop a URL. 112 AI personas react to it and tell you who your product is for — your best-fit audience, who bounces, and why. No traffic, no test users needed."
               : "Tell us who you're targeting. ~50 matching personas run a pass/conditional/fail check."}
           </div>
           <div
@@ -194,7 +194,7 @@ function HomeInner() {
             }}
           >
             {mode === "A"
-              ? "Audience research panel — not a traffic predictor."
+              ? "Audience research panel — not a traffic predictor. Predictions are calibrated against real surveys and visitors."
               : ""}
           </div>
 
@@ -335,9 +335,36 @@ function HomeInner() {
             }}
           >
             {mode === "A"
-              ? "Free during beta · ~6 min · 113 personas across 8 cohorts"
-              : "Free during beta · ~2 min · up to 50 personas matching audience"}
+              ? "~6 min · 112 personas across 8 cohorts · $30 free credit on signup ≈ 15 analyses"
+              : "~2 min · up to 50 personas matching audience · $30 free credit on signup"}
           </div>
+        </div>
+
+        {/* ─── Why 41R (vs GA / user-testing panels — §0.3 fights we win) ─── */}
+        <div
+          className="v-grid-stack-sm"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+            gap: 12,
+            marginBottom: 48,
+          }}
+        >
+          <ValueCard
+            n="01"
+            title="Works with zero traffic"
+            body="Analytics needs visitors. 41R's persona panel reacts to your page itself — get audience-fit signal pre-launch, pre-marketing."
+          />
+          <ValueCard
+            n="02"
+            title="Works on any URL"
+            body="Yours, a competitor's, an idea you're sizing up. If it has a URL, you can see who it resonates with."
+          />
+          <ValueCard
+            n="03"
+            title="Predictions meet reality"
+            body="Share a survey, install the tracking snippet — every real response calibrates the personas. We show you where they're right and wrong."
+          />
         </div>
 
         {/* ─── Live Now ─── */}
@@ -355,7 +382,7 @@ function HomeInner() {
         {/* ─── Top PMF Leaderboard ─── */}
         {feedsLoaded && top.length > 0 && (
           <div style={{ marginBottom: 48 }}>
-            <SectionHeader label="TOP PMF · LEADERBOARD" />
+            <SectionHeader label="TOP AUDIENCE FIT · LEADERBOARD" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
               {top.map((s, i) => (
                 <ScanCard key={s.id} scan={s} rank={i + 1} variant="top" />
@@ -396,26 +423,54 @@ function HomeInner() {
             justifyContent: "space-between",
           }}
         >
-          <span>41R · Devnet · Phase 4 Internal Testing</span>
+          <span>41R · find your customers before launch</span>
           <span style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
             <Link
               href="/validator/how-it-works"
               style={{ color: C.textDim, textDecoration: "none" }}
             >
-              How it works →
+              How it works — no black box →
             </Link>
             {authenticated && (
               <Link
-                href="/me/analyses"
+                href="/console"
                 style={{ color: C.textDim, textDecoration: "none" }}
               >
-                My Analyses →
+                Console →
               </Link>
             )}
           </span>
         </div>
       </div>
     </Frame>
+  );
+}
+
+function ValueCard({ n, title, body }: { n: string; title: string; body: string }) {
+  return (
+    <div
+      style={{
+        background: C.panel,
+        border: `1px solid ${C.border}`,
+        borderRadius: 10,
+        padding: 18,
+        textAlign: "left",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontFamily: FM,
+          color: C.accent,
+          letterSpacing: "0.1em",
+          marginBottom: 8,
+        }}
+      >
+        {n}
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 12, color: C.textDim, lineHeight: 1.65 }}>{body}</div>
+    </div>
   );
 }
 
