@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { usePrivy } from "@privy-io/react-auth";
+import { useAuth } from "@/lib/auth";
 import {
   consoleApi,
   scanApi,
@@ -30,7 +30,7 @@ export default function SiteDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id ?? "";
   const router = useRouter();
-  const { ready, authenticated, login } = usePrivy();
+  const { ready, authenticated, login } = useAuth();
   const { t } = useI18n();
 
   const [site, setSite] = useState<ConsoleSite | null>(null);

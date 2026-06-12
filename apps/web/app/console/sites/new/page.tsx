@@ -11,7 +11,7 @@
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { usePrivy } from "@privy-io/react-auth";
+import { useAuth } from "@/lib/auth";
 import { consoleApi, API_BASE, type ConsoleSite } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { C, FM, FS, Frame } from "../../../validator/_components/ui";
@@ -27,7 +27,7 @@ export default function NewSitePage() {
 function NewSiteInner() {
   const router = useRouter();
   const params = useSearchParams();
-  const { ready, authenticated, login } = usePrivy();
+  const { ready, authenticated, login } = useAuth();
   const { t } = useI18n();
 
   const [url, setUrl] = useState(params.get("url") ?? "");

@@ -9,6 +9,13 @@ export function setAuthTokenGetter(fn: (() => Promise<string | null>) | null): v
   _getAuthToken = fn;
 }
 
+// E2E dev bypass (see lib/auth.ts) — attaches the dev identity header
+// the API honors only with its own DEV_AUTH_BYPASS=1 and never in prod.
+const DEV_BYPASS_HEADER: Record<string, string> =
+  process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === '1'
+    ? { 'x-dev-user-email': 'e2e@41r.local' }
+    : {};
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   // Spread options *first* so explicit headers merge on top — otherwise
   // `...options` at the end wipes the Content-Type we just set and the
@@ -19,6 +26,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers: {
       'Content-Type': 'application/json',
       'ngrok-skip-browser-warning': '1',
+      ...DEV_BYPASS_HEADER,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },

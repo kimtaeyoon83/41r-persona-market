@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { usePrivy } from "@privy-io/react-auth";
+import { useAuth } from "@/lib/auth";
 import {
   consoleApi,
   meApi,
@@ -27,7 +27,7 @@ import { hostOf } from "./_lib";
 type UnassignedScan = ScanSummary & { workspace_id: string | null };
 
 export default function ConsolePage() {
-  const { ready, authenticated, login } = usePrivy();
+  const { ready, authenticated, login } = useAuth();
   const { t } = useI18n();
   const [sites, setSites] = useState<ConsoleSiteListItem[] | null>(null);
   const [unassigned, setUnassigned] = useState<UnassignedScan[]>([]);

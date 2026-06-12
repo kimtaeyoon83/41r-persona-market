@@ -159,6 +159,42 @@ async function upsertUser(claims: AuthTokenClaims, user: PrivyUser): Promise<Aut
   };
 }
 
+// ─── Dev auth bypass (E2E, 2026-06-12) ──────────────────────────────
+// DEV_AUTH_BYPASS=1 + `x-dev-user-email` header → synthesizes an
+// authed user (upserted into users keyed by privy_id `dev:<email>`,
+// signup bonus included) without touching Privy. STRICTLY dev/test:
+// hard-refused when NODE_ENV=production regardless of the env flag,
+// so a leaked flag can never open prod. Used by local E2E runs where
+// the Privy browser modal can't be driven headlessly.
+async function devBypassUser(req: Request): Promise<AuthedUser | null> {
+  if (process.env.NODE_ENV === 'production') return null;
+  if (process.env.DEV_AUTH_BYPASS !== '1') return null;
+  const email = req.header('x-dev-user-email');
+  if (!email || !email.includes('@')) return null;
+  const privyId = `dev:${email.toLowerCase()}`;
+  const [existing] = await db
+    .select()
+    .from(schema.users)
+    .where(eq(schema.users.privyId, privyId));
+  let row = existing;
+  if (!row) {
+    const [inserted] = await db
+      .insert(schema.users)
+      .values({ privyId, email: email.toLowerCase(), walletAddress: null })
+      .returning();
+    row = inserted!;
+  }
+  await ensureSignupBonus(row.id, true);
+  log.warn({ email }, 'DEV_AUTH_BYPASS user attached (never in production)');
+  return {
+    id: row.id,
+    privyId,
+    email: row.email,
+    walletAddress: row.walletAddress,
+    displayName: row.displayName,
+  };
+}
+
 /**
  * Soft variant — if a valid Privy token is present, attaches
  * `req.privyUser` and continues. If absent / invalid, just calls
@@ -170,6 +206,12 @@ export const optionalPrivyAuth: RequestHandler = async (
   _res: Response,
   next: NextFunction,
 ) => {
+  const bypass = await devBypassUser(req).catch(() => null);
+  if (bypass) {
+    req.privyUser = bypass;
+    next();
+    return;
+  }
   const client = getPrivyClient();
   if (!client) {
     next();
@@ -208,6 +250,12 @@ export const requirePrivyAuth: RequestHandler = async (
   res: Response,
   next: NextFunction,
 ) => {
+  const bypass = await devBypassUser(req).catch(() => null);
+  if (bypass) {
+    req.privyUser = bypass;
+    next();
+    return;
+  }
   const client = getPrivyClient();
   if (!client) {
     res.status(503).json({ error: 'privy_not_configured' });

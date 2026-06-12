@@ -10,13 +10,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePrivy } from "@privy-io/react-auth";
+import { useAuth } from "@/lib/auth";
 import { meApi, type MyPoints, type MyCredits } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { C, FM, FS, Frame } from "../validator/_components/ui";
 
 export default function MyPage() {
-  const { ready, authenticated, login } = usePrivy();
+  const { ready, authenticated, login } = useAuth();
   const { t } = useI18n();
   const [points, setPoints] = useState<MyPoints | null>(null);
   const [credits, setCredits] = useState<MyCredits | null>(null);

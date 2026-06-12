@@ -7,8 +7,8 @@
 // pathname bypass and does NOT touch globals.css.
 
 import Link from "next/link";
-import { usePrivy } from "@privy-io/react-auth";
 import { useState, type CSSProperties, type ReactNode } from "react";
+import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 
 // ─── Theme constants ──────────────────────────────────────────────
@@ -216,7 +216,7 @@ export function TopBar() {
   // (console-ia-redesign.md §2.1: both roles always visible, role is
   // emergent; empty states are the onboarding). Stays a hairline
   // header — no dropdowns/mega-menus (Phase 4 minimal contract).
-  const { ready, authenticated, login, logout, user } = usePrivy();
+  const { ready, authenticated, login, logout, identityLabel } = useAuth();
   const { t } = useI18n();
   const showAuthControls = ready;
   return (
@@ -286,7 +286,7 @@ export function TopBar() {
               </Link>
               <button
                 onClick={() => logout()}
-                title={user?.email?.address ?? user?.wallet?.address ?? "Sign out"}
+                title={identityLabel ?? "Sign out"}
                 style={{
                   background: "transparent",
                   border: `1px solid ${C.border}`,
