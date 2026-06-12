@@ -10,39 +10,47 @@
 // says "my site" — registering a competitor's site is a first-class
 // use case (§5 copy rule).
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import {
   consoleApi,
-  meApi,
   scanApi,
   type ConsoleSiteListItem,
   type ScanSummary,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { C, FM, FS, Frame, Pill } from "../validator/_components/ui";
+import { ConsoleShell } from "./_components/shell";
 import { hostOf } from "./_lib";
 
 type UnassignedScan = ScanSummary & { workspace_id: string | null };
 
 export default function ConsolePage() {
+  // ConsoleShell reads useSearchParams — Next requires a Suspense
+  // boundary above it for prerendering.
+  return (
+    <Suspense fallback={null}>
+      <ConsoleInner />
+    </Suspense>
+  );
+}
+
+function ConsoleInner() {
   const { ready, authenticated, login } = useAuth();
   const { t } = useI18n();
   const [sites, setSites] = useState<ConsoleSiteListItem[] | null>(null);
   const [unassigned, setUnassigned] = useState<UnassignedScan[]>([]);
-  const [balanceCents, setBalanceCents] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Credit balance moved to the ConsoleShell sidebar footer.
   const load = useCallback(async () => {
-    const [siteRes, mine, credits] = await Promise.all([
+    const [siteRes, mine] = await Promise.all([
       consoleApi.listSites(),
       scanApi.getMyScans(),
-      meApi.getCredits(),
     ]);
     setSites(siteRes.sites);
     setUnassigned(mine.scans.filter((s) => !s.workspace_id));
-    setBalanceCents(credits.balance_cents);
   }, []);
 
   useEffect(() => {
@@ -98,71 +106,62 @@ export default function ConsolePage() {
   const empty = sites !== null && sites.length === 0 && unassigned.length === 0;
 
   return (
-    <Frame>
-      <div className="v-page-pad" style={{ maxWidth: 1080, margin: "0 auto" }}>
-        <div
-          className="v-row-wrap"
-          style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 6 }}
+    <ConsoleShell>
+      <div
+        className="v-row-wrap"
+        style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}
+      >
+        <h1 style={{ fontSize: 24, fontWeight: 650, fontFamily: FS, margin: 0, letterSpacing: "-0.02em" }}>
+          {t("console.title")}
+        </h1>
+        <div style={{ flex: 1 }} />
+        <Link
+          href="/console/sites/new"
+          className="e-cta"
+          style={{
+            background: C.accent,
+            color: "#fff",
+            borderRadius: 8,
+            padding: "8px 16px",
+            fontSize: 12,
+            fontWeight: 600,
+            textDecoration: "none",
+            fontFamily: FS,
+          }}
         >
-          <h1 style={{ fontSize: 30, fontWeight: 600, fontFamily: FS, margin: 0 }}>
-            {t("console.title")}
-          </h1>
-          <div style={{ flex: 1 }} />
-          {balanceCents != null && (
-            <Link href="/me" style={{ textDecoration: "none" }}>
-              <Pill tone="accent" style={{ fontFamily: FM, fontSize: 12 }}>
-                ${(balanceCents / 100).toFixed(2)} · {t("console.creditsLeft")}
-              </Pill>
-            </Link>
-          )}
-          <Link
-            href="/console/sites/new"
-            className="e-cta"
+          {t("console.addSite")}
+        </Link>
+      </div>
+      <div style={{ fontSize: 12.5, color: C.textDim, marginBottom: 24 }}>
+        {t("console.subtitle")}
+      </div>
+
+      {error && (
+        <div style={{ color: C.bad, fontSize: 13, marginBottom: 14 }}>{error}</div>
+      )}
+
+      {sites === null ? (
+        <Center>{t("common.loading")}</Center>
+      ) : empty ? (
+        <EmptyState />
+      ) : (
+        <>
+          <div
+            className="v-grid-stack-sm"
             style={{
-              background: C.accent,
-              color: "#fff",
-              borderRadius: 999,
-              padding: "8px 16px",
-              fontSize: 12,
-              fontWeight: 600,
-              textDecoration: "none",
-              fontFamily: FS,
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+              gap: 12,
             }}
           >
-            {t("console.addSite")}
-          </Link>
-        </div>
-        <div style={{ fontSize: 13, color: C.textDim, marginBottom: 28 }}>
-          {t("console.subtitle")}
-        </div>
-
-        {error && (
-          <div style={{ color: C.bad, fontSize: 13, marginBottom: 14 }}>{error}</div>
-        )}
-
-        {sites === null ? (
-          <Center>{t("common.loading")}</Center>
-        ) : empty ? (
-          <EmptyState />
-        ) : (
-          <>
-            <div
-              className="v-grid-stack-sm"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-                gap: 12,
-              }}
-            >
-              {sites.map((s) => (
-                <SiteCard key={s.id} site={s} />
-              ))}
-            </div>
-            {unassigned.length > 0 && <UnassignedSection scans={unassigned} />}
-          </>
-        )}
-      </div>
-    </Frame>
+            {sites.map((s) => (
+              <SiteCard key={s.id} site={s} />
+            ))}
+          </div>
+          {unassigned.length > 0 && <UnassignedSection scans={unassigned} />}
+        </>
+      )}
+    </ConsoleShell>
   );
 }
 

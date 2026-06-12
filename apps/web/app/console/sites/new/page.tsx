@@ -9,12 +9,12 @@
 // box, then hands off to the site detail.
 
 import { Suspense, useState } from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { consoleApi, API_BASE, type ConsoleSite } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import { C, FM, FS, Frame } from "../../../validator/_components/ui";
+import { C, FM, FS } from "../../../validator/_components/ui";
+import { ConsoleShell } from "../../_components/shell";
 
 export default function NewSitePage() {
   return (
@@ -68,16 +68,8 @@ function NewSiteInner() {
     : "";
 
   return (
-    <Frame>
-      <div className="v-page-pad" style={{ maxWidth: 640, margin: "0 auto" }}>
-        <div style={{ marginBottom: 22 }}>
-          <Link
-            href="/console"
-            style={{ fontSize: 12, color: C.textFaint, fontFamily: FM, textDecoration: "none" }}
-          >
-            ← {t("console.title")}
-          </Link>
-        </div>
+    <ConsoleShell>
+      <div style={{ maxWidth: 640 }}>
 
         {!created ? (
           <>
@@ -239,7 +231,7 @@ function NewSiteInner() {
           </>
         )}
       </div>
-    </Frame>
+    </ConsoleShell>
   );
 }
 

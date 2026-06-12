@@ -8,9 +8,9 @@
 // line visible — the on-screen honesty contract (§0.4). The Analytics
 // tab (measured KPIs + combined view) lands in Sprint 3.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import {
   consoleApi,
@@ -23,22 +23,43 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { C, FM, FS, Frame, Pill } from "../../../validator/_components/ui";
+import { ConsoleShell } from "../../_components/shell";
 
 type Tab = "overview" | "reports" | "analytics" | "settings";
+const TAB_KEYS: readonly Tab[] = ["overview", "reports", "analytics", "settings"];
 
 export default function SiteDetailPage() {
+  // useSearchParams (tab sync with the shell sidebar) needs a Suspense
+  // boundary for prerendering.
+  return (
+    <Suspense fallback={null}>
+      <SiteDetailInner />
+    </Suspense>
+  );
+}
+
+function SiteDetailInner() {
   const params = useParams<{ id: string }>();
   const id = params.id ?? "";
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { ready, authenticated, login } = useAuth();
   const { t } = useI18n();
 
   const [site, setSite] = useState<ConsoleSite | null>(null);
   const [scans, setScans] = useState<ScanSummary[] | null>(null);
   const [report, setReport] = useState<ScanReport | null>(null);
-  const [tab, setTab] = useState<Tab>("overview");
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+
+  // Tab lives in the URL (?tab=) so the shell sidebar's subnav and
+  // the in-page tab bar stay in lockstep.
+  const rawTab = searchParams.get("tab") as Tab | null;
+  const tab: Tab = rawTab && TAB_KEYS.includes(rawTab) ? rawTab : "overview";
+  const setTab = (k: Tab) =>
+    router.replace(`/console/sites/${id}${k === "overview" ? "" : `?tab=${k}`}`, {
+      scroll: false,
+    });
 
   const load = useCallback(async () => {
     const res = await consoleApi.getSite(id);
@@ -123,19 +144,10 @@ export default function SiteDetailPage() {
       : null;
 
   return (
-    <Frame>
-      <div className="v-page-pad" style={{ maxWidth: 1080, margin: "0 auto" }}>
-        <div style={{ marginBottom: 22 }}>
-          <Link
-            href="/console"
-            style={{ fontSize: 12, color: C.textFaint, fontFamily: FM, textDecoration: "none" }}
-          >
-            ← {t("console.title")}
-          </Link>
-        </div>
-
+    <ConsoleShell>
+      <>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
-          <h1 style={{ fontSize: 26, fontWeight: 600, fontFamily: FM, margin: 0 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 650, fontFamily: FM, margin: 0, letterSpacing: "-0.01em" }}>
             {site?.url_host ?? "…"}
           </h1>
           {site && (
@@ -215,8 +227,8 @@ export default function SiteDetailPage() {
         ) : (
           <Settings site={site} copied={copied} copy={copy} onChanged={load} router={router} />
         )}
-      </div>
-    </Frame>
+      </>
+    </ConsoleShell>
   );
 }
 
