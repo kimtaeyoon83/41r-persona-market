@@ -257,7 +257,7 @@ function Overview({
         style={{
           background: C.panel,
           border: `1px solid ${C.border}`,
-          borderRadius: 10,
+          borderRadius: 14,
           padding: 20,
         }}
       >
@@ -320,11 +320,12 @@ function Overview({
           <div style={{ flex: 1 }} />
           <Link
             href={`/validator/detail?url=${encodeURIComponent(latest.target_url)}`}
+            className="e-cta"
             style={{
               background: C.accent,
               color: "#fff",
-              borderRadius: 7,
-              padding: "7px 13px",
+              borderRadius: 9,
+              padding: "8px 15px",
               fontSize: 12,
               fontWeight: 600,
               textDecoration: "none",
@@ -340,7 +341,7 @@ function Overview({
           style={{
             background: C.panel,
             border: `1px solid ${C.border}`,
-            borderRadius: 10,
+            borderRadius: 14,
             padding: 16,
             display: "flex",
             alignItems: "center",
@@ -391,7 +392,7 @@ function Overview({
         style={{
           background: C.panel,
           border: `1px solid ${C.border}`,
-          borderRadius: 10,
+          borderRadius: 14,
           padding: 16,
         }}
       >
@@ -425,7 +426,7 @@ function Reports({ scans }: { scans: ScanSummary[] }) {
           style={{
             background: C.panel,
             border: `1px solid ${C.border}`,
-            borderRadius: 10,
+            borderRadius: 14,
             padding: 14,
             display: "flex",
             alignItems: "center",
@@ -497,7 +498,7 @@ function Analytics({ site, report }: { site: ConsoleSite; report: ScanReport | n
         style={{
           background: C.panel,
           border: `1px dashed ${C.border}`,
-          borderRadius: 10,
+          borderRadius: 14,
           padding: "36px 28px",
           textAlign: "center",
           maxWidth: 640,
@@ -593,7 +594,7 @@ function Analytics({ site, report }: { site: ConsoleSite; report: ScanReport | n
           style={{
             background: C.panel,
             border: `1px solid ${C.border}`,
-            borderRadius: 10,
+            borderRadius: 14,
             padding: 16,
           }}
         >
@@ -611,7 +612,7 @@ function Analytics({ site, report }: { site: ConsoleSite; report: ScanReport | n
           style={{
             background: C.panel,
             border: `1px solid ${C.border}`,
-            borderRadius: 10,
+            borderRadius: 14,
             padding: 16,
           }}
         >
@@ -659,7 +660,7 @@ function Analytics({ site, report }: { site: ConsoleSite; report: ScanReport | n
         style={{
           background: C.panel,
           border: `1px solid ${C.border}`,
-          borderRadius: 10,
+          borderRadius: 14,
           padding: 16,
         }}
       >
@@ -729,7 +730,7 @@ function Kpi({ label, value }: { label: string; value: string }) {
       style={{
         background: C.panel,
         border: `1px solid ${C.border}`,
-        borderRadius: 10,
+        borderRadius: 14,
         padding: 14,
       }}
     >
@@ -981,7 +982,7 @@ function Settings({
       <div
         style={{
           border: `1px solid #eccac4`,
-          borderRadius: 10,
+          borderRadius: 14,
           padding: 16,
           background: C.panel,
           display: "flex",
@@ -1028,7 +1029,7 @@ function SettingsCard({
       style={{
         background: C.panel,
         border: `1px solid ${C.border}`,
-        borderRadius: 10,
+        borderRadius: 14,
         padding: 16,
       }}
     >

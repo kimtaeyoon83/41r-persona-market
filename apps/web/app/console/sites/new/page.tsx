@@ -145,7 +145,7 @@ function NewSiteInner() {
                 padding: 16,
                 background: C.warnSoft,
                 border: "1px solid #ecdcb4",
-                borderRadius: 10,
+                borderRadius: 14,
                 marginTop: 16,
                 marginBottom: 14,
               }}
@@ -188,7 +188,7 @@ function NewSiteInner() {
                 padding: 16,
                 background: C.panel,
                 border: `1px solid ${C.border}`,
-                borderRadius: 10,
+                borderRadius: 14,
                 marginBottom: 18,
               }}
             >

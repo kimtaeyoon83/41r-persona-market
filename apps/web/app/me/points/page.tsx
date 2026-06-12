@@ -222,7 +222,7 @@ function LedgerCard({ children }: { children: React.ReactNode }) {
       style={{
         background: C.panel,
         border: `1px solid ${C.border}`,
-        borderRadius: 10,
+        borderRadius: 14,
         padding: 12,
         overflowX: "auto",
       }}

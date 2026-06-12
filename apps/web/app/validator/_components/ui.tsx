@@ -12,24 +12,29 @@ import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 
 // ─── Theme constants ──────────────────────────────────────────────
+// 2026-06-12 design refresh — "warm editorial research instrument":
+// deeper ink for type contrast, slightly warmer paper, richer
+// terracotta accent, semantic tones tuned darker so score colors hold
+// up at small sizes. The hover/elevation layer lives in globals.css
+// (.e-card / .e-cta) since inline styles can't express :hover.
 export const C = {
-  bg: "#fbfaf7",
-  panel: "#ffffff",
-  border: "#ebe8e0",
-  borderStrong: "#d9d4c7",
-  text: "#2c2a26",
-  textDim: "#6f6a60",
-  textFaint: "#9a9489",
-  accent: "#c96442",
-  accentSoft: "#f5e9e2",
-  ok: "#3f8f5f",
-  okSoft: "#e6f1ea",
-  warn: "#b87a16",
-  warnSoft: "#fbf0d9",
-  bad: "#b34538",
-  badSoft: "#f8e3df",
-  exp: "#7a5cc4",
-  expSoft: "#efeafb",
+  bg: "#f8f5ef",
+  panel: "#fffefb",
+  border: "#e8e2d6",
+  borderStrong: "#d2c9b8",
+  text: "#221f1a",
+  textDim: "#6b6457",
+  textFaint: "#9c9384",
+  accent: "#bc4a26",
+  accentSoft: "#f7e7de",
+  ok: "#2f7d4f",
+  okSoft: "#e4f0e8",
+  warn: "#a06b10",
+  warnSoft: "#faefd6",
+  bad: "#ad3b2c",
+  badSoft: "#f8e2dd",
+  exp: "#6d4fc4",
+  expSoft: "#eee9fb",
 } as const;
 
 export const FS =
@@ -128,10 +133,11 @@ export function Card({
 }) {
   return (
     <div
+      className="e-card"
       style={{
         background: C.panel,
         border: `1px solid ${C.border}`,
-        borderRadius: 10,
+        borderRadius: 14,
         padding,
         ...style,
       }}
@@ -222,14 +228,19 @@ export function TopBar() {
   return (
     <div
       style={{
-        height: 52,
+        height: 54,
         borderBottom: `1px solid ${C.border}`,
-        background: C.panel,
+        background: "rgba(255, 254, 251, 0.85)",
+        backdropFilter: "blur(10px)",
+        WebkitBackdropFilter: "blur(10px)",
         display: "flex",
         alignItems: "center",
         padding: "0 clamp(14px, 4vw, 24px)",
         gap: 16,
         flexShrink: 0,
+        position: "sticky",
+        top: 0,
+        zIndex: 40,
       }}
     >
       <Link

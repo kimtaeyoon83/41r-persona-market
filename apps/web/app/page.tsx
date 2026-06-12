@@ -149,20 +149,23 @@ function HomeInner() {
           </div>
           <h1
             style={{
-              fontSize: "clamp(26px, 6vw, 44px)",
-              fontWeight: 600,
-              lineHeight: 1.15,
-              letterSpacing: "-0.025em",
+              fontSize: "clamp(30px, 6.5vw, 54px)",
+              fontWeight: 650,
+              lineHeight: 1.12,
+              letterSpacing: "-0.03em",
               margin: 0,
-              marginBottom: 14,
+              marginBottom: 16,
               color: C.text,
               fontFamily: FS,
             }}
           >
             {mode === "A" ? (
               <>
-                Find your <span style={{ color: C.accent }}>customers</span> —
-                before launch.
+                Find your{" "}
+                <span className="e-hero-accent" style={{ color: C.accent }}>
+                  customers
+                </span>{" "}
+                — before launch.
               </>
             ) : (
               <>
@@ -274,12 +277,13 @@ function HomeInner() {
             <button
               onClick={onAnalyze}
               disabled={submitting || !url.trim()}
+              className="e-cta"
               style={{
-                padding: "14px 24px",
+                padding: "14px 26px",
                 fontSize: 13,
                 fontWeight: 600,
-                background: submitting || !url.trim() ? C.textFaint : C.text,
-                color: C.bg,
+                background: submitting || !url.trim() ? C.textFaint : C.accent,
+                color: "#fff",
                 border: "none",
                 cursor: submitting || !url.trim() ? "not-allowed" : "pointer",
                 fontFamily: FS,
@@ -449,11 +453,12 @@ function HomeInner() {
 function ValueCard({ n, title, body }: { n: string; title: string; body: string }) {
   return (
     <div
+      className="e-card"
       style={{
         background: C.panel,
         border: `1px solid ${C.border}`,
-        borderRadius: 10,
-        padding: 18,
+        borderRadius: 14,
+        padding: 20,
         textAlign: "left",
       }}
     >
@@ -522,12 +527,13 @@ function ScanCard({
   return (
     <Link
       href={`/validator/report/${scan.id}`}
+      className="e-card"
       style={{
         display: "block",
-        padding: 14,
+        padding: 16,
         background: C.panel,
         border: `1px solid ${C.border}`,
-        borderRadius: 8,
+        borderRadius: 14,
         textDecoration: "none",
         color: C.text,
         position: "relative",

@@ -123,7 +123,7 @@ export default function MyPage() {
           style={{
             background: C.panel,
             border: `1px solid ${C.border}`,
-            borderRadius: 10,
+            borderRadius: 14,
             padding: 16,
             marginBottom: 20,
           }}
@@ -163,7 +163,7 @@ function BalanceCard({
       style={{
         background: C.panel,
         border: `1px solid ${C.border}`,
-        borderRadius: 10,
+        borderRadius: 14,
         padding: 18,
       }}
     >
@@ -250,11 +250,12 @@ function QuickLink({ href, label }: { href: string; label: string }) {
   return (
     <Link
       href={href}
+      className="e-card"
       style={{
         border: `1px solid ${C.border}`,
         background: C.panel,
-        borderRadius: 8,
-        padding: "9px 16px",
+        borderRadius: 10,
+        padding: "10px 18px",
         fontSize: 13,
         textDecoration: "none",
         color: C.text,

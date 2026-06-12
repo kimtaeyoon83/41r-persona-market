@@ -441,3 +441,49 @@ body::before {
     align-items: stretch;
   }
 }
+
+/* ─── E-series — 2026-06-12 design refresh (console + landing) ──────
+   Hover/elevation layer for the warm-editorial theme in
+   validator/_components/ui.tsx (inline styles can't express :hover).
+   .e-card  — paper card with hairline + lift on hover
+   .e-cta   — primary action: accent darken + press feedback
+   .e-row   — list row hover tint
+   Load-bearing for the design pass; safe to extend, don't repurpose. */
+.e-card {
+  box-shadow: 0 1px 2px rgba(34, 31, 26, 0.04);
+  transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
+}
+a.e-card:hover,
+.e-card-link:hover {
+  box-shadow: 0 10px 28px -10px rgba(34, 31, 26, 0.16), 0 2px 6px rgba(34, 31, 26, 0.05);
+  transform: translateY(-2px);
+  border-color: #d2c9b8 !important;
+}
+.e-cta {
+  transition: background-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 2px rgba(188, 74, 38, 0.25);
+}
+.e-cta:hover:not(:disabled) {
+  background-color: #a23e1f !important;
+  box-shadow: 0 6px 18px -6px rgba(188, 74, 38, 0.45);
+}
+.e-cta:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.e-cta-ink {
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+.e-cta-ink:hover:not(:disabled) {
+  background-color: #3d3830 !important;
+}
+.e-row {
+  transition: background-color 0.12s ease;
+}
+.e-row:hover {
+  background-color: rgba(34, 31, 26, 0.025);
+}
+.e-hero-accent {
+  background-image: linear-gradient(transparent 68%, #f3d4c5 68%);
+  border-radius: 2px;
+  padding: 0 2px;
+}

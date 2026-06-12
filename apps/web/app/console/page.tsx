@@ -117,11 +117,12 @@ export default function ConsolePage() {
           )}
           <Link
             href="/console/sites/new"
+            className="e-cta"
             style={{
-              background: C.text,
-              color: C.bg,
+              background: C.accent,
+              color: "#fff",
               borderRadius: 999,
-              padding: "7px 14px",
+              padding: "8px 16px",
               fontSize: 12,
               fontWeight: 600,
               textDecoration: "none",
@@ -173,7 +174,7 @@ function EmptyState() {
         padding: "48px 32px",
         textAlign: "center",
         border: `1px dashed ${C.border}`,
-        borderRadius: 10,
+        borderRadius: 14,
         background: C.panel,
       }}
     >
@@ -193,12 +194,13 @@ function EmptyState() {
       </div>
       <Link
         href="/console/sites/new"
+        className="e-cta"
         style={{
           display: "inline-block",
           background: C.accent,
           color: "#fff",
-          borderRadius: 8,
-          padding: "10px 20px",
+          borderRadius: 10,
+          padding: "11px 22px",
           fontSize: 13,
           fontWeight: 600,
           textDecoration: "none",
@@ -223,12 +225,13 @@ function SiteCard({ site }: { site: ConsoleSiteListItem }) {
   return (
     <Link
       href={`/console/sites/${site.id}`}
+      className="e-card"
       style={{
         display: "block",
-        padding: 16,
+        padding: 18,
         background: C.panel,
         border: `1px solid ${C.border}`,
-        borderRadius: 10,
+        borderRadius: 14,
         textDecoration: "none",
         color: C.text,
       }}
