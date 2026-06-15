@@ -18,6 +18,7 @@ import {
   useWallets as useSolanaWallets,
 } from "@privy-io/react-auth/solana";
 import { scanApi, type ScanSummary } from "@/lib/api";
+import { checkTargetUrl } from "@/lib/url";
 import { performSponsoredPayment } from "@/lib/sponsored-payment";
 import { C, FM, FS, Frame, Pill } from "./validator/_components/ui";
 
@@ -82,13 +83,24 @@ function HomeInner() {
       setError("Enter a URL to analyze");
       return;
     }
+    // Security gate (2026-06-15) — block hostile / non-public URLs
+    // before they leave the browser (server re-validates authoritatively).
+    const check = checkTargetUrl(trimmedUrl);
+    if (!check.ok) {
+      setError(
+        check.reason === "private_host"
+          ? "That looks like an internal or private address — enter a public website."
+          : "Enter a valid website URL (http or https).",
+      );
+      return;
+    }
     if (!authenticated) {
       if (!ready) return;
       login();
       return;
     }
     if (mode === "A") {
-      router.push(`/validator/detail?url=${encodeURIComponent(trimmedUrl)}`);
+      router.push(`/validator/detail?url=${encodeURIComponent(check.normalized)}`);
       return;
     }
     const trimmedAudience = audience.trim();
@@ -99,7 +111,7 @@ function HomeInner() {
     setSubmitting(true);
     try {
       const { scanId } = await scanApi.createScan({
-        target_url: trimmedUrl,
+        target_url: check.normalized,
         mode: "B",
         target_audience_text: trimmedAudience,
       });

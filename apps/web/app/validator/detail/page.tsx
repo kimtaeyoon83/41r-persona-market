@@ -9,6 +9,7 @@ import {
   useWallets as useSolanaWallets,
 } from "@privy-io/react-auth/solana";
 import { scanApi } from "@/lib/api";
+import { checkTargetUrl } from "@/lib/url";
 import { performSponsoredPayment } from "@/lib/sponsored-payment";
 import { Btn, C, Card, FM, Frame } from "../_components/ui";
 
@@ -81,6 +82,17 @@ function DetailInner() {
 
   const startAnalysis = async (skipInputs = false) => {
     if (submitting) return;
+    // Security gate (2026-06-15) — `url` arrives from the query string;
+    // validate before spending a scan. Server re-validates authoritatively.
+    const check = checkTargetUrl(url);
+    if (!check.ok) {
+      setError(
+        check.reason === "private_host"
+          ? "That looks like an internal or private address — enter a public website."
+          : "Enter a valid website URL (http or https).",
+      );
+      return;
+    }
     setSubmitting(true);
     setSubmitStage("creating");
     setError(null);
@@ -89,7 +101,7 @@ function DetailInner() {
       //    claimed lazily by /payment-tx if/when authenticated).
       const cohorts = skipInputs ? [] : buildTargetCohorts();
       const { scanId } = await scanApi.createScan({
-        target_url: url,
+        target_url: check.normalized,
         mode: 'A',
         hypothesis: skipInputs ? undefined : buildHypothesisText(),
         target_cohorts: cohorts.length > 0 ? cohorts : undefined,

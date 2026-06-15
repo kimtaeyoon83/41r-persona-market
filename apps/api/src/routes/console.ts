@@ -21,6 +21,7 @@ import {
   secretLast4,
   type Workspace,
 } from '../services/workspaces.js';
+import { validateTargetUrl } from '../services/url_guard.js';
 
 const router: RouterType = Router();
 
@@ -112,11 +113,15 @@ router.post('/sites', requirePrivyAuth, mutationLimiter, async (req, res) => {
     return;
   }
   const userId = req.privyUser!.id;
-  const urlHost = normalizeHost(parsed.data.url);
-  if (!urlHost || !urlHost.includes('.')) {
-    res.status(400).json({ error: 'invalid_url' });
+  // Security gate (2026-06-15) — same guard the scan route uses, so a
+  // workspace can never be created for a private/hostile host (its
+  // beacon source + host-matching must be a clean public hostname).
+  const guard = validateTargetUrl(parsed.data.url);
+  if (!guard.ok) {
+    res.status(400).json({ error: 'invalid_url', reason: guard.reason });
     return;
   }
+  const urlHost = normalizeHost(guard.url);
 
   const secret = generateSecret();
   try {
@@ -236,12 +241,12 @@ router.patch('/sites/:id', requirePrivyAuth, mutationLimiter, async (req, res) =
     updatedAt: new Date(),
   };
   if (parsed.data.url) {
-    const host = normalizeHost(parsed.data.url);
-    if (!host || !host.includes('.')) {
-      res.status(400).json({ error: 'invalid_url' });
+    const guard = validateTargetUrl(parsed.data.url);
+    if (!guard.ok) {
+      res.status(400).json({ error: 'invalid_url', reason: guard.reason });
       return;
     }
-    update.urlHost = host;
+    update.urlHost = normalizeHost(guard.url);
   }
   if (parsed.data.name !== undefined) update.name = parsed.data.name;
   const [updated] = await db

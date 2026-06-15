@@ -39,6 +39,7 @@ import {
 import { isAdminRequest } from '../middleware/admin.js';
 import { debitScan, getCreditBalance, SCAN_PRICE_CENTS } from '../services/credits.js';
 import { findWorkspaceByHost } from '../services/workspaces.js';
+import { validateTargetUrl } from '../services/url_guard.js';
 import { awardSurveyPoints, isRewardAvailable } from '../services/rewards.js';
 import { notifySurveyMilestone } from '../services/notify.js';
 import {
@@ -103,6 +104,19 @@ router.post('/', scanCreateIpLimiter, optionalPrivyAuth, scanCreateUserLimiter, 
   const { target_url, mode, target_audience_text, hypothesis, target_cohorts } =
     parsed.data;
 
+  // ── Security gate (2026-06-15) ──
+  // The target URL is navigated to by a headless browser (SSRF) and
+  // echoed into reports/prompts. Reject hostile / non-public values
+  // BEFORE the cache lookup, credit debit, or pipeline kickoff. Store
+  // the normalized canonical form so a `javascript:`/internal host
+  // never lands in the DB.
+  const guard = validateTargetUrl(target_url);
+  if (!guard.ok) {
+    res.status(400).json({ error: 'invalid_url', reason: guard.reason });
+    return;
+  }
+  const safeUrl = guard.url;
+
   // ── Anonymous path: demo limits (Sprint 1, decision §12-8) ──
   if (!req.privyUser) {
     // 24h cache — same URL recently scanned → return that scan instead
@@ -114,7 +128,7 @@ router.post('/', scanCreateIpLimiter, optionalPrivyAuth, scanCreateUserLimiter, 
       .from(schema.audienceFitScans)
       .where(
         and(
-          eq(schema.audienceFitScans.targetUrl, target_url),
+          eq(schema.audienceFitScans.targetUrl, safeUrl),
           sql`${schema.audienceFitScans.createdAt} >= ${windowStart}`,
           sql`${schema.audienceFitScans.status} != 'failed'`,
         ),
@@ -146,13 +160,13 @@ router.post('/', scanCreateIpLimiter, optionalPrivyAuth, scanCreateUserLimiter, 
   // Console S2 — auto-link to the user's workspace for this host
   // (when one exists). Anonymous scans stay unlinked forever.
   const workspace = req.privyUser
-    ? await findWorkspaceByHost(req.privyUser.id, target_url)
+    ? await findWorkspaceByHost(req.privyUser.id, safeUrl)
     : null;
 
   const [scan] = await db
     .insert(schema.audienceFitScans)
     .values({
-      targetUrl: target_url,
+      targetUrl: safeUrl,
       mode,
       targetAudienceText: target_audience_text ?? null,
       hypothesis: hypothesis ?? null,

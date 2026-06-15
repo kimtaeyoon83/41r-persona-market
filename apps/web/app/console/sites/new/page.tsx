@@ -13,6 +13,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { consoleApi, API_BASE, type ConsoleSite } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { checkTargetUrl } from "@/lib/url";
 import { C, FM, FS } from "../../../validator/_components/ui";
 import { ConsoleShell } from "../../_components/shell";
 
@@ -44,10 +45,17 @@ function NewSiteInner() {
       if (ready) login();
       return;
     }
+    // Security gate (2026-06-15) — reject hostile / non-public hosts
+    // before registration; server re-validates authoritatively.
+    const check = checkTargetUrl(url);
+    if (!check.ok) {
+      setError(t(check.reason === "private_host" ? "url.private" : "url.invalid"));
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
-      const res = await consoleApi.createSite({ url: url.trim() });
+      const res = await consoleApi.createSite({ url: check.normalized });
       setCreated(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");

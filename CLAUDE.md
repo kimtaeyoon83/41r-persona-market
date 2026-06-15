@@ -81,7 +81,7 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
 pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
-pnpm --filter api test      # Run vitest (232 tests as of 2026-06-12)
+pnpm --filter api test      # Run vitest (272 tests as of 2026-06-12)
 pnpm --filter api db:generate  # Emit a new versioned migration from schema changes → apps/api/drizzle/*.sql
 pnpm --filter api db:migrate   # Apply pending migrations to DATABASE_URL (preferred for Railway deploys)
 pnpm --filter api db:push      # Dev only: push schema directly, bypassing migration files
@@ -223,7 +223,7 @@ Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
   then-current need — don't resurrect the nonce store.
 
 ### Testing
-- Vitest at `apps/api/src/__tests__/` — **232 tests** as of 2026-06-12.
+- Vitest at `apps/api/src/__tests__/` — **272 tests** as of 2026-06-12.
   Suites cover env validation, auth schema, audience-fit math,
   cohort selection, dimension LLM contracts (incl. the Q2 site-context
   + Q3 voice-cleanup regression locks), scan shapers, AARRR weighted
@@ -714,6 +714,23 @@ strip. Capture falls back networkidle → domcontentloaded on timeout
   (`middleware/partner.ts`); operator via x-admin-key
   (`middleware/admin.ts`). The autotest-era wallet-signature layer was
   removed 2026-06-12 (see §Auth above).
+- **Target-URL guard (SSRF + injection)** — `services/url_guard.ts`
+  (2026-06-15). The site URL is hostile input: captureSite() points a
+  headless Chromium at it (SSRF) and it's echoed into reports/prompts.
+  `validateTargetUrl()` is the synchronous gate — http(s) scheme only;
+  no credentials; no control/script chars (`<>"'\`` etc., raw — encoded
+  `%3C` passes); host must be a public hostname or public IP. Rejects
+  every private/loopback/link-local (incl. 169.254.169.254 metadata),
+  ULA, CGNAT, multicast, single-label, reserved-suffix (.local/.internal/
+  …), and numeric/hex IP-coercion form (2130706433, 0x7f000001, 127.1).
+  Wired at POST /api/scan + console site create/patch (stores the
+  normalized canonical URL; junk/`javascript:` never reaches the DB).
+  `resolvesToPublicHost()` is the async defense-in-depth in captureSite:
+  resolves the host right before navigating and refuses any private
+  answer (DNS-rebinding / internal-CNAME). Frontend mirror is
+  `apps/web/lib/url.ts::checkTargetUrl` (instant UX block on landing /
+  detail / console-new; server stays authoritative — keep the two rule
+  sets in sync). Matrix locked by `__tests__/url_guard.test.ts`.
 - **CORS allowlist** — `config/cors.ts`. Defaults allow localhost:3000/3001,
   127.0.0.1:3000/3001, the Railway web URL. Override via
   `CORS_ALLOWED_ORIGINS` (comma-separated).

@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { logger } from '../logger.js';
 import { uploadToR2 } from './r2.js';
+import { validateTargetUrl, resolvesToPublicHost } from './url_guard.js';
 
 const log = logger.child({ service: 'site_capture' });
 
@@ -84,10 +85,16 @@ function localPathFor(key: string): string {
 }
 
 export async function captureSite(targetUrl: string): Promise<CaptureResult> {
-  // Normalise protocol — accept "yoursite.com" → "https://yoursite.com"
-  const normalised = /^https?:\/\//i.test(targetUrl)
-    ? targetUrl
-    : `https://${targetUrl}`;
+  // Security gate (2026-06-15) — defense in depth. The /api/scan route
+  // already validated before storing, but this is the function that
+  // actually points a headless browser at the URL (SSRF), so it
+  // re-validates: any private/hostile target throws here too, and the
+  // pipeline marks the scan failed rather than navigating.
+  const guard = validateTargetUrl(targetUrl);
+  if (!guard.ok) {
+    throw new Error(`unsafe_target_url:${guard.reason}`);
+  }
+  const normalised = guard.url;
 
   const key = captureKey(normalised);
   const localPath = localPathFor(key);
@@ -116,6 +123,14 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
       fromCache: true,
       signals: readSignalsSidecar(key),
     };
+  }
+
+  // SSRF defense-in-depth (2026-06-15) — resolve the hostname right
+  // before navigating and refuse if it maps to a private IP. Catches
+  // DNS rebinding / internal CNAMEs (public-looking host → 10.0.0.5)
+  // that the static validateTargetUrl above can't see.
+  if (!(await resolvesToPublicHost(guard.host))) {
+    throw new Error('unsafe_target_url:private_host_resolved');
   }
 
   fs.mkdirSync(LOCAL_DIR, { recursive: true });

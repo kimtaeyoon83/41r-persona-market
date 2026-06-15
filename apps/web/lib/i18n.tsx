@@ -33,6 +33,8 @@ const en = {
   "common.signInTitle": "Sign in to continue",
   "common.signInBody": "Sign up and get $30 in free credits — about 15 scans.",
   "common.retry": "Retry",
+  "url.invalid": "Enter a valid website URL (http or https).",
+  "url.private": "That looks like an internal or private address — enter a public website.",
 
   "console.title": "Sites",
   "console.subtitle": "Your analyses, grouped by site.",
@@ -148,6 +150,8 @@ const ko: Record<MessageKey, string> = {
   "common.signInTitle": "로그인이 필요합니다",
   "common.signInBody": "가입하면 $30 크레딧 — 약 15회 스캔이 무료입니다.",
   "common.retry": "다시 시도",
+  "url.invalid": "유효한 웹사이트 URL을 입력하세요 (http 또는 https).",
+  "url.private": "내부·사설 주소처럼 보입니다 — 공개 웹사이트 주소를 입력하세요.",
 
   "console.title": "사이트",
   "console.subtitle": "내 분석을 사이트 단위로 모아 봅니다.",
