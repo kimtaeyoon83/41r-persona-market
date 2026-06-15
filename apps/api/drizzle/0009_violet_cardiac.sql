@@ -1,0 +1,2 @@
+ALTER TABLE "audience_fit_scans" ADD COLUMN "capture_signals" jsonb;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "survey_responses_scan_user_uniq" ON "survey_responses" USING btree ("scan_id","user_id");

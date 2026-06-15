@@ -18,6 +18,7 @@ import {
   useWallets as useSolanaWallets,
 } from "@privy-io/react-auth/solana";
 import { scanApi, type ScanSummary } from "@/lib/api";
+import { checkTargetUrl } from "@/lib/url";
 import { performSponsoredPayment } from "@/lib/sponsored-payment";
 import { C, FM, FS, Frame, Pill } from "./validator/_components/ui";
 
@@ -82,13 +83,24 @@ function HomeInner() {
       setError("Enter a URL to analyze");
       return;
     }
+    // Security gate (2026-06-15) — block hostile / non-public URLs
+    // before they leave the browser (server re-validates authoritatively).
+    const check = checkTargetUrl(trimmedUrl);
+    if (!check.ok) {
+      setError(
+        check.reason === "private_host"
+          ? "That looks like an internal or private address — enter a public website."
+          : "Enter a valid website URL (http or https).",
+      );
+      return;
+    }
     if (!authenticated) {
       if (!ready) return;
       login();
       return;
     }
     if (mode === "A") {
-      router.push(`/validator/detail?url=${encodeURIComponent(trimmedUrl)}`);
+      router.push(`/validator/detail?url=${encodeURIComponent(check.normalized)}`);
       return;
     }
     const trimmedAudience = audience.trim();
@@ -99,7 +111,7 @@ function HomeInner() {
     setSubmitting(true);
     try {
       const { scanId } = await scanApi.createScan({
-        target_url: trimmedUrl,
+        target_url: check.normalized,
         mode: "B",
         target_audience_text: trimmedAudience,
       });
@@ -145,24 +157,27 @@ function HomeInner() {
               marginBottom: 12,
             }}
           >
-            41R Audience-Fit Validator
+            41R · AI Persona Audience Discovery
           </div>
           <h1
             style={{
-              fontSize: "clamp(26px, 6vw, 44px)",
-              fontWeight: 600,
-              lineHeight: 1.15,
-              letterSpacing: "-0.025em",
+              fontSize: "clamp(30px, 6.5vw, 54px)",
+              fontWeight: 650,
+              lineHeight: 1.12,
+              letterSpacing: "-0.03em",
               margin: 0,
-              marginBottom: 14,
+              marginBottom: 16,
               color: C.text,
               fontFamily: FS,
             }}
           >
             {mode === "A" ? (
               <>
-                See how your audience{" "}
-                <span style={{ color: C.accent }}>actually reacts</span>.
+                Find your{" "}
+                <span className="e-hero-accent" style={{ color: C.accent }}>
+                  customers
+                </span>{" "}
+                — before launch.
               </>
             ) : (
               <>
@@ -180,7 +195,7 @@ function HomeInner() {
             }}
           >
             {mode === "A"
-              ? "112 representative personas across 8 cohorts react to your site. Cohort fit · 5-dimension breakdown · friction map · cohort × dimension matrix."
+              ? "Drop a URL. 112 AI personas react to it and tell you who your product is for — your best-fit audience, who bounces, and why. No traffic, no test users needed."
               : "Tell us who you're targeting. ~50 matching personas run a pass/conditional/fail check."}
           </div>
           <div
@@ -194,19 +209,19 @@ function HomeInner() {
             }}
           >
             {mode === "A"
-              ? "Audience research panel — not a traffic predictor."
+              ? "Audience research panel — not a traffic predictor. Predictions are calibrated against real surveys and visitors."
               : ""}
           </div>
 
-          {/* Mode toggle */}
+          {/* Mode toggle — squared segmented control (instrument look) */}
           <div
             style={{
               display: "inline-flex",
               gap: 4,
               marginBottom: 22,
               padding: 4,
-              background: "#f3f0e8",
-              borderRadius: 999,
+              background: "#eef0f2",
+              borderRadius: 9,
               border: `1px solid ${C.border}`,
             }}
           >
@@ -225,13 +240,14 @@ function HomeInner() {
                 style={{
                   padding: "6px 14px",
                   fontSize: 12,
-                  borderRadius: 999,
+                  borderRadius: 6,
                   background: mode === m.id ? C.panel : "transparent",
                   color: mode === m.id ? C.text : C.textDim,
                   border:
                     mode === m.id
                       ? `1px solid ${C.borderStrong}`
                       : "1px solid transparent",
+                  boxShadow: mode === m.id ? "0 1px 2px rgba(21,23,27,0.06)" : "none",
                   cursor: "pointer",
                   fontFamily: FS,
                   fontWeight: mode === m.id ? 600 : 400,
@@ -246,12 +262,14 @@ function HomeInner() {
             style={{
               display: "flex",
               gap: 0,
-              maxWidth: 520,
+              maxWidth: 560,
               margin: "0 auto",
-              border: `1.5px solid ${C.borderStrong}`,
-              borderRadius: 999,
+              border: `1px solid ${C.borderStrong}`,
+              borderRadius: 12,
               overflow: "hidden",
               background: C.panel,
+              boxShadow:
+                "0 10px 30px -12px rgba(21, 23, 27, 0.18), 0 2px 6px rgba(21, 23, 27, 0.05)",
             }}
           >
             <input
@@ -274,12 +292,13 @@ function HomeInner() {
             <button
               onClick={onAnalyze}
               disabled={submitting || !url.trim()}
+              className="e-cta"
               style={{
-                padding: "14px 24px",
+                padding: "14px 26px",
                 fontSize: 13,
                 fontWeight: 600,
-                background: submitting || !url.trim() ? C.textFaint : C.text,
-                color: C.bg,
+                background: submitting || !url.trim() ? C.textFaint : C.accent,
+                color: "#fff",
                 border: "none",
                 cursor: submitting || !url.trim() ? "not-allowed" : "pointer",
                 fontFamily: FS,
@@ -294,10 +313,10 @@ function HomeInner() {
             <div
               style={{
                 display: "flex",
-                maxWidth: 520,
+                maxWidth: 560,
                 margin: "10px auto 0",
-                border: `1.5px solid ${C.borderStrong}`,
-                borderRadius: 999,
+                border: `1px solid ${C.borderStrong}`,
+                borderRadius: 12,
                 overflow: "hidden",
                 background: C.panel,
               }}
@@ -335,9 +354,36 @@ function HomeInner() {
             }}
           >
             {mode === "A"
-              ? "Free during beta · ~6 min · 113 personas across 8 cohorts"
-              : "Free during beta · ~2 min · up to 50 personas matching audience"}
+              ? "~6 min · 112 personas across 8 cohorts · $30 free credit on signup ≈ 15 analyses"
+              : "~2 min · up to 50 personas matching audience · $30 free credit on signup"}
           </div>
+        </div>
+
+        {/* ─── Why 41R (vs GA / user-testing panels — §0.3 fights we win) ─── */}
+        <div
+          className="v-grid-stack-sm"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+            gap: 12,
+            marginBottom: 48,
+          }}
+        >
+          <ValueCard
+            n="01"
+            title="Works with zero traffic"
+            body="Analytics needs visitors. 41R's persona panel reacts to your page itself — get audience-fit signal pre-launch, pre-marketing."
+          />
+          <ValueCard
+            n="02"
+            title="Works on any URL"
+            body="Yours, a competitor's, an idea you're sizing up. If it has a URL, you can see who it resonates with."
+          />
+          <ValueCard
+            n="03"
+            title="Predictions meet reality"
+            body="Share a survey, install the tracking snippet — every real response calibrates the personas. We show you where they're right and wrong."
+          />
         </div>
 
         {/* ─── Live Now ─── */}
@@ -355,7 +401,7 @@ function HomeInner() {
         {/* ─── Top PMF Leaderboard ─── */}
         {feedsLoaded && top.length > 0 && (
           <div style={{ marginBottom: 48 }}>
-            <SectionHeader label="TOP PMF · LEADERBOARD" />
+            <SectionHeader label="TOP AUDIENCE FIT · LEADERBOARD" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
               {top.map((s, i) => (
                 <ScanCard key={s.id} scan={s} rank={i + 1} variant="top" />
@@ -396,26 +442,55 @@ function HomeInner() {
             justifyContent: "space-between",
           }}
         >
-          <span>41R · Devnet · Phase 4 Internal Testing</span>
+          <span>41R · find your customers before launch</span>
           <span style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
             <Link
               href="/validator/how-it-works"
               style={{ color: C.textDim, textDecoration: "none" }}
             >
-              How it works →
+              How it works — no black box →
             </Link>
             {authenticated && (
               <Link
-                href="/me/analyses"
+                href="/console"
                 style={{ color: C.textDim, textDecoration: "none" }}
               >
-                My Analyses →
+                Console →
               </Link>
             )}
           </span>
         </div>
       </div>
     </Frame>
+  );
+}
+
+function ValueCard({ n, title, body }: { n: string; title: string; body: string }) {
+  return (
+    <div
+      className="e-card"
+      style={{
+        background: C.panel,
+        border: `1px solid ${C.border}`,
+        borderRadius: 14,
+        padding: 20,
+        textAlign: "left",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontFamily: FM,
+          color: C.accent,
+          letterSpacing: "0.1em",
+          marginBottom: 8,
+        }}
+      >
+        {n}
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 12, color: C.textDim, lineHeight: 1.65 }}>{body}</div>
+    </div>
   );
 }
 
@@ -467,12 +542,13 @@ function ScanCard({
   return (
     <Link
       href={`/validator/report/${scan.id}`}
+      className="e-card"
       style={{
         display: "block",
-        padding: 14,
+        padding: 16,
         background: C.panel,
         border: `1px solid ${C.border}`,
-        borderRadius: 8,
+        borderRadius: 14,
         textDecoration: "none",
         color: C.text,
         position: "relative",

@@ -7,28 +7,35 @@
 // pathname bypass and does NOT touch globals.css.
 
 import Link from "next/link";
-import { usePrivy } from "@privy-io/react-auth";
 import { useState, type CSSProperties, type ReactNode } from "react";
+import { useAuth } from "@/lib/auth";
+import { useI18n } from "@/lib/i18n";
 
 // ─── Theme constants ──────────────────────────────────────────────
+// 2026-06-12 full redesign — "Swiss instrument": cool gallery gray,
+// ink-black type, ONE signal-orange accent, squared tags, ruled
+// hairlines, oversized numerals. The look says "measuring device",
+// which is exactly the product's honesty contract (§0.4 — we publish
+// what we measure and how wrong we are). Hover/elevation lives in
+// globals.css (.e-card / .e-cta) since inline styles can't :hover.
 export const C = {
-  bg: "#fbfaf7",
+  bg: "#f3f4f4",
   panel: "#ffffff",
-  border: "#ebe8e0",
-  borderStrong: "#d9d4c7",
-  text: "#2c2a26",
-  textDim: "#6f6a60",
-  textFaint: "#9a9489",
-  accent: "#c96442",
-  accentSoft: "#f5e9e2",
-  ok: "#3f8f5f",
-  okSoft: "#e6f1ea",
-  warn: "#b87a16",
-  warnSoft: "#fbf0d9",
-  bad: "#b34538",
-  badSoft: "#f8e3df",
-  exp: "#7a5cc4",
-  expSoft: "#efeafb",
+  border: "#e4e6e8",
+  borderStrong: "#c9cdd2",
+  text: "#15171b",
+  textDim: "#5c616b",
+  textFaint: "#969ca6",
+  accent: "#e04e14",
+  accentSoft: "#fdeade",
+  ok: "#1e7d4e",
+  okSoft: "#e2f1e9",
+  warn: "#a16a07",
+  warnSoft: "#faf0d3",
+  bad: "#c03325",
+  badSoft: "#fae3df",
+  exp: "#5b51d8",
+  expSoft: "#eceafb",
 } as const;
 
 export const FS =
@@ -39,14 +46,16 @@ export const FM =
 export type Tone = "neutral" | "accent" | "ok" | "warn" | "bad" | "exp";
 
 const PILL_TONES: Record<Tone, { bg: string; fg: string; bd: string }> = {
-  neutral: { bg: "#f3f0e8", fg: C.textDim, bd: C.border },
-  accent: { bg: C.accentSoft, fg: C.accent, bd: "#ecd6ca" },
-  ok: { bg: C.okSoft, fg: C.ok, bd: "#cfe3d6" },
-  warn: { bg: C.warnSoft, fg: C.warn, bd: "#ecdcb4" },
-  bad: { bg: C.badSoft, fg: C.bad, bd: "#eccac4" },
-  exp: { bg: C.expSoft, fg: C.exp, bd: "#dcd1f0" },
+  neutral: { bg: "#eef0f2", fg: C.textDim, bd: C.border },
+  accent: { bg: C.accentSoft, fg: C.accent, bd: "#f5cdb6" },
+  ok: { bg: C.okSoft, fg: C.ok, bd: "#c4e0d0" },
+  warn: { bg: C.warnSoft, fg: C.warn, bd: "#ecdcab" },
+  bad: { bg: C.badSoft, fg: C.bad, bd: "#f0c4bc" },
+  exp: { bg: C.expSoft, fg: C.exp, bd: "#d4cef4" },
 };
 
+// Squared "instrument tag" — the redesign drops the pill silhouette;
+// statuses read as stamped labels (mono, tracked, uppercase-friendly).
 export function Pill({
   children,
   tone = "neutral",
@@ -63,14 +72,16 @@ export function Pill({
         display: "inline-flex",
         alignItems: "center",
         gap: 4,
-        padding: "2px 8px",
-        borderRadius: 999,
-        fontSize: 11,
-        fontWeight: 500,
+        padding: "2px 7px",
+        borderRadius: 5,
+        fontSize: 10.5,
+        fontWeight: 600,
+        fontFamily: FM,
+        letterSpacing: "0.04em",
         background: t.bg,
         color: t.fg,
         border: `1px solid ${t.bd}`,
-        lineHeight: 1.5,
+        lineHeight: 1.6,
         ...style,
       }}
     >
@@ -84,7 +95,7 @@ export function Bar({
   max = 100,
   color = C.accent,
   height = 6,
-  bg = "#efece4",
+  bg = "#e8eaec",
 }: {
   value: number;
   max?: number;
@@ -127,10 +138,11 @@ export function Card({
 }) {
   return (
     <div
+      className="e-card"
       style={{
         background: C.panel,
         border: `1px solid ${C.border}`,
-        borderRadius: 10,
+        borderRadius: 14,
         padding,
         ...style,
       }}
@@ -186,27 +198,57 @@ export function Btn({
 // gone), but Frame still accepts and ignores it so pages compile.
 type TopBarActive = "discovery" | "pro" | "report" | "calibration";
 
+/** Tiny EN/KO switch — decision §12-5: English default + Korean. */
+function LocaleToggle() {
+  const { locale, setLocale } = useI18n();
+  return (
+    <button
+      onClick={() => setLocale(locale === "en" ? "ko" : "en")}
+      title="Language"
+      style={{
+        background: "transparent",
+        border: `1px solid ${C.border}`,
+        borderRadius: 999,
+        padding: "4px 10px",
+        fontSize: 11,
+        fontFamily: FM,
+        color: C.textDim,
+        cursor: "pointer",
+        letterSpacing: "0.04em",
+      }}
+    >
+      {locale === "en" ? "EN" : "KO"}
+    </button>
+  );
+}
+
 export function TopBar() {
-  // Phase 4 IA cleanup — dropped Discovery / Pro mode / Report /
-  // Calibration nav items: Pro / Report were dead links (no page,
-  // and `/validator/report/demo` resolved a literal "demo" scanId);
-  // Discovery duplicated `/` (which is the real entry point); the
-  // Calibration view is reachable from the report screen footer
-  // for the audience that needs it. Result is a hairline header
-  // with just the brand mark + auth-aware actions on the right.
-  const { ready, authenticated, login, logout, user } = usePrivy();
+  // Console Sprint 1 — logged-in nav is [Console · My Page · Sign out]
+  // (console-ia-redesign.md §2.1: both roles always visible, role is
+  // emergent; empty states are the onboarding). Stays a hairline
+  // header — no dropdowns/mega-menus (Phase 4 minimal contract).
+  const { ready, authenticated, login, logout, identityLabel } = useAuth();
+  const { t } = useI18n();
   const showAuthControls = ready;
   return (
     <div
       style={{
-        height: 52,
+        height: 54,
         borderBottom: `1px solid ${C.border}`,
-        background: C.panel,
+        // Signature: 3px signal-orange rule across the very top —
+        // the "instrument" brand mark, present on every screen.
+        borderTop: `3px solid ${C.accent}`,
+        background: "rgba(255, 255, 255, 0.88)",
+        backdropFilter: "blur(10px)",
+        WebkitBackdropFilter: "blur(10px)",
         display: "flex",
         alignItems: "center",
         padding: "0 clamp(14px, 4vw, 24px)",
         gap: 16,
         flexShrink: 0,
+        position: "sticky",
+        top: 0,
+        zIndex: 40,
       }}
     >
       <Link
@@ -236,10 +278,11 @@ export function TopBar() {
             color: C.textDim,
           }}
         >
+          <LocaleToggle />
           {authenticated ? (
             <>
               <Link
-                href="/me/wallet"
+                href="/console"
                 style={{
                   color: C.textDim,
                   textDecoration: "none",
@@ -247,10 +290,10 @@ export function TopBar() {
                   borderRadius: 6,
                 }}
               >
-                Wallet
+                {t("nav.console")}
               </Link>
               <Link
-                href="/me/analyses"
+                href="/me"
                 style={{
                   color: C.textDim,
                   textDecoration: "none",
@@ -258,11 +301,11 @@ export function TopBar() {
                   borderRadius: 6,
                 }}
               >
-                My Analyses
+                {t("nav.myPage")}
               </Link>
               <button
                 onClick={() => logout()}
-                title={user?.email?.address ?? user?.wallet?.address ?? "Sign out"}
+                title={identityLabel ?? "Sign out"}
                 style={{
                   background: "transparent",
                   border: `1px solid ${C.border}`,
@@ -274,7 +317,7 @@ export function TopBar() {
                   fontFamily: FS,
                 }}
               >
-                Sign out
+                {t("nav.signOut")}
               </button>
             </>
           ) : (
@@ -292,7 +335,7 @@ export function TopBar() {
                 fontWeight: 500,
               }}
             >
-              Sign in
+              {t("nav.signIn")}
             </button>
           )}
         </div>
@@ -920,7 +963,7 @@ export function PersonaBoard({
                         fontFamily: FM,
                         fontWeight: 500,
                         color: C.textFaint,
-                        background: "#f3f0e8",
+                        background: "#eef0f2",
                         padding: "1px 5px",
                         borderRadius: 3,
                         textTransform: "uppercase",
@@ -960,7 +1003,7 @@ export function PersonaBoard({
             <div
               style={{
                 padding: "6px 8px",
-                background: "#f7f4ec",
+                background: "#f4f5f6",
                 borderRadius: 5,
                 fontSize: 11,
                 fontStyle: "italic",
@@ -978,7 +1021,7 @@ export function PersonaBoard({
                   style={{
                     fontSize: 10,
                     padding: "1px 6px",
-                    background: "#f3f0e8",
+                    background: "#eef0f2",
                     color: C.textDim,
                     borderRadius: 3,
                     fontFamily: FM,

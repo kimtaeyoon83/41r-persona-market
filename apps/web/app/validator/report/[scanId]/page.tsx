@@ -198,6 +198,48 @@ export default function ValidatorReportPage() {
                 &ldquo;{r.scan.one_line_pitch}&rdquo;
               </div>
             )}
+            {/* Ch1 objective signals strip (2026-06-10 behavior-sim
+                spike transfer) — deterministic page facts, no LLM.
+                Hidden entirely on legacy scans (capture_signals null),
+                same conditional pattern as the pitch above. */}
+            {r.scan.capture_signals && (
+              <div
+                style={{
+                  marginTop: 10,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontFamily: FM,
+                    letterSpacing: "0.08em",
+                    color: C.textFaint,
+                    textTransform: "uppercase",
+                  }}
+                  title="Measured from the live page at capture time — deterministic, no LLM judgment."
+                >
+                  Measured · no LLM
+                </span>
+                <Pill>{r.scan.capture_signals.visible_word_count.toLocaleString()} words</Pill>
+                <Pill>{r.scan.capture_signals.cta_count} CTAs</Pill>
+                <Pill>{r.scan.capture_signals.link_count} links</Pill>
+                {r.scan.capture_signals.nav_menu_labels.length > 0 && (
+                  <Pill
+                    style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  >
+                    menu: {r.scan.capture_signals.nav_menu_labels.slice(0, 5).join(" · ")}
+                    {r.scan.capture_signals.nav_menu_labels.length > 5 &&
+                      ` +${r.scan.capture_signals.nav_menu_labels.length - 5}`}
+                  </Pill>
+                )}
+                {r.scan.capture_signals.popup_detected && <Pill tone="warn">entry popup</Pill>}
+                {r.scan.capture_signals.login_wall && <Pill tone="warn">login wall</Pill>}
+              </div>
+            )}
             <div style={{ marginTop: 12 }}>
               <ShareWithAi scanId={r.scan.id} />
             </div>

@@ -1,0 +1,22 @@
+{
+  "site_id": "nhis",
+  "site": "www.nhis.or.kr",
+  "need": "건강검진 안내 우편을 받았는데, 올해 내가 받을 수 있는 검진 항목이 뭔지, 어디서 받을 수 있는지 궁금해서 이 사이트에 들어왔다.",
+  "_note": "1차 스파이크 사이트. 원본 실행 산출물은 spike/graph.json + spike/screens (site_id 디렉토리 도입 전 경로). 재캡처 시 spike/nhis/으로 생성됨.",
+  "nodes": [
+    { "id": "home",             "url": "https://www.nhis.or.kr/nhis/index.do",                                                "label": "홈",                              "note": "cold landing" },
+    { "id": "checkup_guide",    "url": "https://www.nhis.or.kr/nhis/healthin/wbhaca04500m01.do",                              "label": "건강검진 실시안내",               "note": "정답 경로 1 — 항목/대상 안내" },
+    { "id": "checkup_roadmap",  "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHltExmdLoadMap.do",                      "label": "건강검진 로드맵",                 "note": "그럴듯한 우회로" },
+    { "id": "checkup_target",   "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHealthinCheckUpTargetPerson.do",         "label": "검진대상 조회",                   "note": "로그인 벽 — 최다 클릭 지점" },
+    { "id": "checkup_result",   "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHealthinCheckUpTargetResultPerson.do",   "label": "건강검진 결과조회",               "note": "로그인 벽" },
+    { "id": "checkup_list",     "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHealthinPresentConditionCheckUpList.do", "label": "검진정보 목록",                   "note": "이름 모호 decoy" },
+    { "id": "checkup_apply",    "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHealthinCheckUpUnexaminedRequest.do",    "label": "검진신청",                        "note": "로그인 벽" },
+    { "id": "checkup_confirm",  "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHealthinCheckUpImplementConfirmation.do","label": "건강검진 실시확인서(직장제출용)", "note": "실시안내와 혼동 쌍" },
+    { "id": "org_search",       "url": "https://www.nhis.or.kr/nhis/healthin/retrieveMdcAdminSknsClinic.do",                  "label": "병(의)원/검진기관 찾기",          "note": "정답 경로 2" },
+    { "id": "org_eval",         "url": "https://www.nhis.or.kr/nhis/healthin/wbhacf03110m01.do",                              "label": "병(의)원/검진기관 평가정보",      "note": "찾기와 혼동 쌍" },
+    { "id": "minwon_services",  "url": "https://www.nhis.or.kr/nhis/minwon/minwonServiceBoard.do",                            "label": "서비스찾기",                      "note": "민원 경로 — 검색 우회로" },
+    { "id": "insurance_guide",  "url": "https://www.nhis.or.kr/nhis/minwon/wbhapa01000m01.do",                                "label": "건강보험 제도안내",               "note": "distractor" },
+    { "id": "infant_checkup",   "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHealthinCheckUpTargetInfants.do",        "label": "영유아 건강검진",                 "note": "wrong-audience decoy" },
+    { "id": "policy_direction", "url": "https://www.nhis.or.kr/nhis/policy/wbhadd09400m01.do",                                "label": "정책방향",                        "note": "distractor" }
+  ]
+}

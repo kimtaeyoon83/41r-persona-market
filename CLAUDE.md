@@ -81,7 +81,7 @@ Railway uses a single `railway.toml` at project root. Change `dockerfilePath` be
 pnpm dev                    # Run all (web + api)
 pnpm --filter api dev       # API only
 pnpm --filter web dev       # Web only — prefix with WATCHPACK_POLLING=true on macOS (see Local Dev Gotchas)
-pnpm --filter api test      # Run vitest (199 tests as of 2026-05-07)
+pnpm --filter api test      # Run vitest (272 tests as of 2026-06-12)
 pnpm --filter api db:generate  # Emit a new versioned migration from schema changes → apps/api/drizzle/*.sql
 pnpm --filter api db:migrate   # Apply pending migrations to DATABASE_URL (preferred for Railway deploys)
 pnpm --filter api db:push      # Dev only: push schema directly, bypassing migration files
@@ -93,19 +93,34 @@ pnpm tsx scripts/backfill-cohort-ci.ts [--dry-run]                 # bootstrap C
 pnpm tsx scripts/backfill-site-classifier.ts [--dry-run] [--max N] # re-run classifier on placeholder scans
 pnpm tsx scripts/update-validator-voice-samples.ts                 # in-place voice rewrite for existing personas
 pnpm tsx scripts/usage-summary.ts          # analyze /tmp/llm-usage.jsonl
+pnpm tsx scripts/qa-validator-scans.ts [--max=10] [--scan=<id>]  # cross-scan QA (Layer 2):
+                                           # crypto-vocab on non-crypto, misfit rank-1 >30%,
+                                           # weighted-AARRR all-zero, numeric-vs-voice contradictions
+pnpm tsx scripts/spike-behavior-sim/capture.ts scripts/spike-behavior-sim/sites/<id>.json
+pnpm tsx scripts/spike-behavior-sim/run.ts spike/<id>/graph.json [--start=<node>] [--n=N] [--suffix=s]
 ```
 
 ## Key Conventions
 
 ### Backend (apps/api)
-- 6 active routes under `src/routes/`, mounted in `src/index.ts`:
-  `auth.ts`, `scan.ts`, `calibration.ts`, `benchmark.ts`, `hello.ts`,
-  `me_responses.ts` (Phase 5.1 — `/api/me/survey-responses[/:scanId]`).
+- 7 active routes under `src/routes/`, mounted in `src/index.ts`:
+  `scan.ts`, `calibration.ts`, `benchmark.ts`, `hello.ts`,
+  `console.ts` (Console S2 — workspace CRUD/keys/analytics),
+  `me_responses.ts` (Phase 5.1 — `/api/me/survey-responses[/:scanId]`,
+  `/api/me/points`; Console S1 2026-06-11 adds `/api/me/credits`),
+  `partner.ts` (workspace-keyed since 2026-06-12 —
+  `POST /api/partner/{survey,session-token,survey-by-token,profile,
+  behavior}` + `/t.js`+`/t` beacons. S2S gated by `requireSiteSecret`
+  (`middleware/partner.ts` — workspace rpm_sk_ secret, sha256 lookup);
+  email is a provisional identity claimed on Privy login — see
+  `middleware/privy_auth.ts::claimPartnerRows`).
 - Active services in `src/services/`: `llm.ts`, `audience_fit.ts`,
   `scan_pipeline.ts`, `site_classifier.ts`, `site_capture.ts`,
   `cohort_selection.ts`, `anthropic_client.ts`, `aarrr.ts`,
   `dimension_simulator.ts`, `persona_wallets.ts`, `sponsored_tx.ts`,
   `fee_payer.ts`, `r2.ts`, `health.ts`, `benchmark.ts`,
+  `credits.ts` (Console S1 2026-06-11 — founder credit ledger, see
+  Console section below),
   `human_aggregate.ts` (Phase 5 — survey_responses → AI-shape human
   report via the same dimension/friction/AARRR pipeline),
   `dimensions/` (LLM dimension scorers + friction clustering +
@@ -126,13 +141,25 @@ pnpm tsx scripts/usage-summary.ts          # analyze /tmp/llm-usage.jsonl
 ### Frontend (apps/web)
 - Next.js 14 App Router. Active routes:
   `/`, `/validator/*` (incl. `/validator/compare/[scanId]` — Phase 5),
-  `/me/wallet`, `/me/analyses`,
+  `/console` + `/console/sites/[host]` (Console S1 — site-grouped
+  founder console; `[host]` is the normalized URL host until
+  site_workspaces lands in S2; grouping helpers in
+  `app/console/_lib.ts`),
+  `/me` (tester home: points + credits + activity), `/me/points`,
+  `/me/wallet`,
   `/me/responses[/[scanId]]` (Phase 5.1 — own survey list + AI-vs-Me detail).
+  `/me/analyses` is a redirect stub → `/console` (bookmark preservation,
+  same pattern as `/validator` → `/`).
+- i18n: `lib/i18n.tsx` — lightweight en-default + ko dictionary via
+  React context, locale in localStorage (`41r-locale`), `LocaleToggle`
+  in the TopBar. Decision §12-5 of `docs/console-ia-redesign.md`: new
+  console/me screens must use `t()` from day one; no locale URL
+  routing, deliberately not next-intl.
 - Shared API URL: `import { API_BASE } from '@/lib/api'` — never hardcode.
-- API client (`lib/api.ts`): primary surface is `scanApi` for
-  `/api/scan/*` routes. `signedRequest()` helper still exists for any
-  future wallet-signed mutation, even though most validator routes are
-  Privy-authenticated (see Auth section).
+- API client (`lib/api.ts`): surfaces are `scanApi` (/api/scan/*),
+  `consoleApi` (/api/console/*), `meApi` (/api/me/*),
+  `calibrationApi`. All authenticated calls ride the Privy bearer
+  auto-attached by `setAuthTokenGetter()` (see Auth section).
 - Auth provider: **Privy** (`@privy-io/react-auth`) wraps the app via
   `apps/web/app/providers.tsx`. Single auth layer for Email / Google /
   Phantom / Solflare / Discord / X login + optional embedded Solana
@@ -188,17 +215,22 @@ Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
   if missing/invalid token) and `optionalPrivyAuth` (attach
   `req.privyUser` when present, otherwise pass through). `/api/scan`
   uses `optional` so anonymous landing-page demos still work.
-- Legacy wallet-signed nonce path (`middleware/auth.ts` +
-  `signedRequest()` in `lib/api.ts`) is preserved for any future
-  signed mutation surface but currently has no live consumer routes.
-  Don't remove it without confirming no follow-up sprint needs it.
+- Legacy wallet-signed nonce path — REMOVED 2026-06-12 (user-approved
+  large-change cleanup). `middleware/auth.ts`, `routes/auth.ts`
+  (/api/auth/nonce + /me), `schemas/common.ts`, and the web `authApi`
+  all had zero live consumers after the Privy migration. If a future
+  surface needs wallet-signed mutations, build it fresh against the
+  then-current need — don't resurrect the nonce store.
 
 ### Testing
-- Vitest at `apps/api/src/__tests__/` — **199 tests** as of 2026-05-07.
+- Vitest at `apps/api/src/__tests__/` — **272 tests** as of 2026-06-12.
   Suites cover env validation, auth schema, audience-fit math,
   cohort selection, dimension LLM contracts (incl. the Q2 site-context
   + Q3 voice-cleanup regression locks), scan shapers, AARRR weighted
-  funnel, friction clustering, site classifier, acquisition priors.
+  funnel, friction clustering, site classifier, acquisition priors,
+  behavior-sim state core, partner auth, and Console S1 contracts
+  (`console_sprint1.test.ts` — pricing/bonus constants, anonymous demo
+  allowance, calibration soft gate, rate-limit envelope).
   LLM-touching tests mock `services/anthropic_client` via `vi.mock`
   so the prompt path runs without real API calls.
 
@@ -464,6 +496,189 @@ The validator pipeline does not record per-persona browser sessions
 `captureScreenshotUrls` array; future per-persona replays would need
 a new pipeline.
 
+## Partner Integration — workspace-keyed (2026-06-12 rework)
+
+The geulbat env-key special-casing (`PARTNER_API_KEY_GEULBAT`,
+`PARTNER_SITE_KEY_GEULBAT`, `requireGeulbatKey`, `/api/partner/geulbat/*`
+paths) was REMOVED by user decision — geulbat had not yet implemented
+the old guide, and will register fresh through the console once the
+rebuild ships. Every partner (geulbat included) now:
+
+1. registers a workspace in the console → gets `rpm_pk_` site key +
+   `rpm_sk_` secret (shown once),
+2. uses generic S2S paths: `POST /api/partner/{survey,session-token,
+   survey-by-token,profile,behavior}` with `x-partner-key: rpm_sk_…`,
+3. embeds `/api/partner/t.js` with `data-site="rpm_pk_…"` for beacons.
+
+Handoff/identify tokens are HMAC-signed with the workspace's stored
+secret HASH (server-only signing key; payload carries the workspace id;
+rotating the secret invalidates outstanding tokens by design). Ledger
+`source` values are `ws:<workspace_id>`; historical `'geulbat'` rows
+remain valid data. Dogfooding likewise: register the 41R app itself as
+a workspace and put its rpm_pk_ key in NEXT_PUBLIC_TRACKING_SITE_KEY.
+
+The section below documents the original pilot's data model — the
+3-stream concept is unchanged, only the auth/paths moved.
+
+## Partner Pilot — geulbat (2026-06-10, auth/paths superseded above)
+
+First instance of the tester-data loop: a partner site feeds three
+streams into 41R, all keyed by Google-verified email and claimed on
+the person's first Privy login (`privy_auth.ts::claimPartnerRows`
+backfills `user_id` across all partner tables; non-fatal, never
+blocks login; skips scans the user already submitted to directly so
+the `(scan_id, user_id)` unique index holds).
+
+```
+① profile    POST /api/partner/geulbat/profile     → partner_profiles (flexible jsonb)
+② behavior   <script .../api/partner/t.js data-site=…>  → partner_behavior_events
+             (GA-style snippet: pageview/dwell/session, sendBeacon text/plain;
+              S2S POST /geulbat/behavior is the server-side fallback)
+③ survey     POST /geulbat/session-token → hosted page ?pt=<token>
+             → /geulbat/survey-by-token → survey_responses + calibration_records
+             + point_transactions (+100pt pilot, first submission only)
+```
+
+**Two key tiers — never confuse them:**
+- `PARTNER_API_KEY_GEULBAT` — S2S secret, also the HMAC secret for
+  handoff/identify tokens. Server env only.
+- `PARTNER_SITE_KEY_GEULBAT` — public like a GA measurement id; only
+  routes beacons to a source bucket.
+
+Integration guide for the geulbat repo:
+[`docs/partner-geulbat-integration.md`](docs/partner-geulbat-integration.md).
+Pending value: anchor scanId (run a 41R scan of the geulbat prod URL).
+Points policy is intentionally undecided — the ledger is append-only
+so any future policy can reprice retroactively.
+
+## Console Sprint 3 — analytics + retention loops (2026-06-12)
+
+- **Analytics API** — `GET /api/console/sites/:id/analytics?days=7|30`
+  aggregates partner_behavior_events for source `ws:<id>`: KPIs
+  (distinct-anon visitors, sessions, pageviews, avg dwell ms), daily
+  series, path ranking (views/dwell/scroll), monthly usage vs the
+  100k soft cap. Direct SQL — a rollup table is the scale path.
+- **Beacon soft cap** — in-memory per-(source, month) counter, lazily
+  DB-initialized; over-cap batches are DROPPED with 204 (tracking must
+  never error the partner's page — the console usage gauge is the
+  warning). Single-instance semantics, same caveat as rate limiters.
+- **Analytics tab** (`/console/sites/[id]` ?tab) — TRACKED: KPI strip,
+  daily bars, page table, and the "Prediction vs reality" combined
+  card (MEASURED ↔ AI PREDICTED `experimental — directional only` ↔
+  HUMAN SURVEY — the flywheel §0.2 made visible; keep the labels).
+  LITE: snippet upsell framed as "verify the prediction", never
+  "replace your analytics" (Clarity is free — §0.3).
+- **Retention loop #2** — `services/notify.ts::notifySurveyMilestone`:
+  survey-response arrival email to the scan owner at exact counts
+  1/5/10/20/30 (max = reward cap). Fire-and-forget from BOTH survey
+  paths, only on first submissions.
+- **Retention loop #3** — weekly digest cron (`startDigestCron`, env
+  `DIGEST_CRON_ENABLED=1`, Mondays UTC): per-user summary of each
+  workspace's 7d scans/fit/visitors. In-process week guard only —
+  a redeploy on Monday can double-send (accepted for pilot).
+
+## Console Sprint 2 — workspaces + key self-serve (2026-06-12)
+
+S2 shipped on the same branch. (Originally kept a geulbat env-key
+alias; that alias was removed on 2026-06-12 by user decision — see
+"Partner Integration — workspace-keyed" below.)
+
+- **site_workspaces** (migration 0014, idempotent) — registration =
+  per-user analysis workspace, NOT ownership: `UNIQUE(user_id,
+  url_host)`, no global host unique (N users can register the same
+  site, fully isolated). No domain verification ever — installing the
+  snippet is the natural gate. Tier is emergent: `last_event_at` set →
+  TRACKED, else LITE.
+- **Two-tier keys** (`services/workspaces.ts`): `rpm_pk_…` site key
+  (public, beacon routing only) / `rpm_sk_…` secret (S2S + HMAC,
+  sha256-hashed, plaintext shown exactly once at create/rotate).
+  Neither grants read access — leak blast radius is fake-data
+  injection only.
+- **/api/console/sites** CRUD + rotate-key + link-scan
+  (`routes/console.ts`, owner-scoped WHERE user_id). Creating a
+  workspace adopts the user's existing unassigned scans for that host;
+  new scans auto-link in POST /api/scan via `findWorkspaceByHost`.
+- **requireSiteSecret** (`middleware/partner.ts`) — workspace secrets
+  only (source 'ws:<id>'). Beacon `siteKeySource` resolves `rpm_pk_…`
+  keys from the DB and touches `last_event_at`.
+- **Survey rewards** (`services/rewards.ts`) — single source for both
+  the partner and direct survey paths: +100pt first submission,
+  per-scan cap 30; beyond the cap a transparent 0pt
+  'reward_cap_reached' row is appended (never silently dropped) and
+  the survey page discloses the state BEFORE answering via
+  `survey_reward_available` on the report response (§12 decision 7).
+  `point_transactions.ref_id` (scan id) backs the cap count.
+- **Scan-complete email** (`services/email.ts`) — Resend HTTP wrapper,
+  no-op without RESEND_API_KEY; fired from both pipeline completion
+  points (non-fatal). Headline is the best-fit audience, not the score.
+- **Web**: /console lists workspaces (LITE/TRACKED badge) + Unassigned
+  scans with one-click register; /console/sites/new is a 1-step form
+  whose success state shows the secret once + snippet; detail moved to
+  /console/sites/[id] with a Settings tab (keys, rotate, snippet,
+  last-event, delete — delete unlinks scans, never destroys).
+
+## Console Sprint 1 — credits + founder console (2026-06-11)
+
+Product plan: `docs/console-ia-redesign.md` (v0.6 — decisions §12
+confirmed). S1 shipped on branch `feat/console-sprint1`:
+
+- **Credit ledger** — `credit_transactions` (migration 0013, idempotent
+  SQL) + `services/credits.ts`. Append-only, same contract as
+  point_transactions: corrections/refunds are NEW rows, never UPDATE.
+  Points (tester earn) and credits (founder spend) are separate
+  currencies on purpose — don't unify before v2.
+- **Signup bonus** — granted in `privy_auth.ts::upsertUser` via
+  `ensureSignupBonus` (non-fatal, like claimPartnerRows): $30 verified
+  identity (any non-wallet linked account) / $5 wallet-only, upgraded
+  +$25 when an email/social links later. `expires_at` recorded (90d)
+  but NOT enforced during the pilot — expiry batch ships with top-up
+  billing (v2).
+- **Scan pricing** — Mode A $2 / Mode B $1, debited in POST /api/scan
+  *before* startScanWorker under a per-user pg advisory xact lock
+  (`debitScan`); 402 `insufficient_credits` deletes the pending row.
+  Refund on failure goes through the `setStatus('failed')` choke point
+  in scan_pipeline + the worker crash handler (`refundScanDebit`,
+  idempotent).
+- **Anonymous demo** — 1 fresh scan per IP per day + same-URL 24h
+  cache reuse (returns the existing scanId with `cached: true`).
+- **Console UI** — `/console` (host-grouped sites; S2 replaces host
+  grouping with `site_workspaces`), `/console/sites/[host]` (Overview
+  hero = best-fit cohort first, score second, misfit line — keep that
+  order, it's the §0.4 honesty contract on screen), `/me` + `/me/points`
+  (first consumer of /api/me/points), TopBar `[Console · My Page]` +
+  EN/KO toggle, `/me/analyses` → `/console` redirect.
+- S2 next: `site_workspaces` table + key self-serve +
+  `requireSiteSecret` generalization (geulbat
+  env-key seeded as row 1, no downtime) + scan-complete email.
+
+## Behavior Simulation (Mode C — gated, not shipped)
+
+Spec: `docs/41rpm_behavior_simulation_spec_v1.md`. Validation spike +
+v1-v7 results: `docs/41rpm_behavior_sim_spike_v0.md` (§7 carries four
+empirical findings that feed spec v1.1: trace summary is mandatory;
+indifferent AND satisfied exits both need state gates — LLMs never
+leave from boredom nor declare satisfaction; relevance must be
+Ch1-led, not self-reported). The L4 internal-state core already
+exists as a pure module: `apps/api/src/services/behavior_sim/state.ts`
+(5 state vars + 4-mode leave gate, 17 direction tests, not wired to
+any route). Agreed direction: Mode C runs ALONGSIDE Mode A/B (they
+measure different funnel stages), graph mode first, labeled
+"탐색 시뮬레이션". **Build gate: Phase 1 human think-aloud data (5
+people, NHIS protocol in the spike doc) — do not iterate the
+simulator further without it (risk: tuning toward aesthetics).**
+
+## Capture Signals (Ch1, 2026-06-10 spike transfer)
+
+`captureSite()` measures objective page facts in the capture page
+load (word/link/CTA counts, nav menu labels, popup heuristic,
+login-wall redirect) → `audience_fit_scans.capture_signals` (null on
+legacy scans — every consumer hides). They ground persona prompts
+(`SiteContext.pageFacts` → "Page facts (measured)" section; without
+pageFacts the prompt is byte-identical to pre-2026-06-10, locked by
+`dimension_llm.test.ts`) and render the report's "MEASURED · NO LLM"
+strip. Capture falls back networkidle → domcontentloaded on timeout
+(ad-heavy sites previously degraded silently to text-only scans).
+
 ## LLM Usage Tracking
 
 - Unified JSONL log at `USAGE_LOG_PATH` (default `/tmp/llm-usage.jsonl`)
@@ -494,20 +709,44 @@ a new pipeline.
   ```
 ## Security / Observability / Settlement (Phase 0 + 1 hardening)
 
-- **Wallet signature verification** — all mutating routes gated by
-  `middleware/auth.ts` (ed25519 + single-use 5-min nonce). See §Auth above.
+- **Auth** — Privy bearer on all user-facing mutations
+  (`middleware/privy_auth.ts`); partner S2S via x-partner-key
+  (`middleware/partner.ts`); operator via x-admin-key
+  (`middleware/admin.ts`). The autotest-era wallet-signature layer was
+  removed 2026-06-12 (see §Auth above).
+- **Target-URL guard (SSRF + injection)** — `services/url_guard.ts`
+  (2026-06-15). The site URL is hostile input: captureSite() points a
+  headless Chromium at it (SSRF) and it's echoed into reports/prompts.
+  `validateTargetUrl()` is the synchronous gate — http(s) scheme only;
+  no credentials; no control/script chars (`<>"'\`` etc., raw — encoded
+  `%3C` passes); host must be a public hostname or public IP. Rejects
+  every private/loopback/link-local (incl. 169.254.169.254 metadata),
+  ULA, CGNAT, multicast, single-label, reserved-suffix (.local/.internal/
+  …), and numeric/hex IP-coercion form (2130706433, 0x7f000001, 127.1).
+  Wired at POST /api/scan + console site create/patch (stores the
+  normalized canonical URL; junk/`javascript:` never reaches the DB).
+  `resolvesToPublicHost()` is the async defense-in-depth in captureSite:
+  resolves the host right before navigating and refuses any private
+  answer (DNS-rebinding / internal-CNAME). Frontend mirror is
+  `apps/web/lib/url.ts::checkTargetUrl` (instant UX block on landing /
+  detail / console-new; server stays authoritative — keep the two rule
+  sets in sync). Matrix locked by `__tests__/url_guard.test.ts`.
 - **CORS allowlist** — `config/cors.ts`. Defaults allow localhost:3000/3001,
   127.0.0.1:3000/3001, the Railway web URL. Override via
   `CORS_ALLOWED_ORIGINS` (comma-separated).
-- **Rate limiting** — REMOVED in the 2026-05-07 autotest pivot
-  cleanup. The previous `middleware/rate-limit.ts` exposed
-  `autotestRunLimiter` / `reportSubmitLimiter` / `llmGenerateLimiter`,
-  but all three target routes were removed by the validator pivot.
-  Validator routes (`/api/auth`, `/api/scan`, `/api/calibration`,
-  `/api/benchmark`) currently have NO rate limiting — see Known
-  Limitations §9 below.
-- **Zod body validation** — `schemas/index.ts` + `validateBody()`. Every
-  signed POST has a schema, applied right after `requireSignedRequest`.
+- **Rate limiting** — REBUILT in Console S1 (2026-06-11, closes Known
+  Limitations §9). `middleware/rate_limit.ts`: POST /api/scan gets
+  5/min·IP + 20/h·user (user limiter runs after optionalPrivyAuth so
+  it keys on privyUser.id), mutations (survey / human-aggregate /
+  payment) 30/min·user, and a router-wide read limiter on
+  auth/scan/calibration/benchmark/me. The partner router is
+  deliberately NOT limited (beacons are high-frequency by design).
+  In-memory stores — fine single-instance; `app.set('trust proxy', 1)`
+  in index.ts makes req.ip the real client behind Railway. Limiters
+  skip when NODE_ENV=test.
+- **Zod body validation** — inline `z.object(...).safeParse(req.body)`
+  per route handler (scan.ts, console.ts, partner.ts pattern). The old
+  shared `schemas/` dir went with the wallet-signature layer.
 - **Env flag safety** — `config/env.ts` enforces production-only
   invariants at boot (e.g. mandatory secrets present, dev-only
   bypass flags forced off). Boot log prints
@@ -521,8 +760,14 @@ a new pipeline.
 - **Settlement worker** — exponential backoff 30s → 1m → 5m → 15m cap,
   24h MAX_AGE terminal marker (`services/settlement-worker.ts`). Runs in
   background; disable via `SETTLEMENT_WORKER_DISABLED=1` for tests.
-- **DB migrations** — `apps/api/drizzle/` holds versioned SQL. Use
-  `pnpm --filter api db:migrate` for Railway deploys. `db:push` is dev-only.
+- **DB migrations** — `apps/api/drizzle/` holds versioned SQL.
+  **Production reality check (2026-06-10): the prod DB's drizzle
+  journal is EMPTY** — the schema was historically applied via
+  `db:push`, so `db:migrate` against prod would replay from 0000 and
+  fail. Until a baselining pass records 0000-0012 as applied, ship
+  prod schema changes as idempotent SQL applied manually (the
+  0009-0012 files are written idempotent — `IF NOT EXISTS` /
+  constraint guards — for exactly this). `db:push` stays dev-only.
 
 ## Environment Variables
 
@@ -554,7 +799,22 @@ NEXT_PUBLIC_API_URL=http://localhost:4100
 CORS_ALLOWED_ORIGINS=...    # comma-separated; overrides the default allowlist
 USE_VISION=1                # Use Sonnet vision for persona response (otherwise Haiku text)
 USE_SIMULATOR=0             # Skip LLM, use synthetic responses (dev iteration)
-ADMIN_API_KEY=...           # Gates /api/admin/* (≥12 chars; absent ⇒ 404)
+ADMIN_API_KEY=...           # Gates /api/admin/* (≥12 chars; absent ⇒ 404).
+                            # Console S1: when set, also demotes /api/calibration
+                            # to operator-only (x-admin-key) and acts as the
+                            # operator override on POST /:id/human-aggregate.
+NEXT_PUBLIC_TRACKING_SITE_KEY=... # Dogfooding: a real workspace's rpm_pk_ site key
+                            # (register app.project-rpm.xyz in the console). When set
+                            # together with NEXT_PUBLIC_API_URL, layout.tsx injects
+                            # the t.js snippet (public by design, GA-id semantics).
+                            # Partner env keys (PARTNER_*_GEULBAT, PARTNER_SITE_KEY_41R)
+                            # were removed 2026-06-12 — keys live in site_workspaces now.
+RESEND_API_KEY=...          # Console S2/S3 — transactional email (scan-complete,
+                            # response milestones, weekly digest). Absent ⇒
+                            # services/email.ts no-ops (local/test safe)
+EMAIL_FROM=...              # Sender (default: 41R <noreply@project-rpm.xyz>)
+DIGEST_CRON_ENABLED=1       # Console S3 — weekly digest cron (Mondays UTC)
+WEB_PUBLIC_URL=...          # Base for partner survey_url links (default https://app.project-rpm.xyz)
 LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
 ```
 
@@ -573,11 +833,9 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
 - Commit `.env`, keypair files, or API keys
 - Hardcode `localhost:4100` in frontend — use `API_BASE`
 - Use `JSON.parse()` on LLM output — use `parseJsonSafe()` from `services/llm.ts`
-- ~~Add wallet signature verification~~ — wallet signature IS required now on all
-  mutating routes. Don't disable it or bypass `requireSignedRequest` middleware.
 - Call `request()` in `lib/api.ts` with custom headers and forget about
   `Content-Type` — the helper preserves explicit headers but caller-provided
-  options must not override it. `signedRequest` already handles this.
+  options must not override it.
 - Create new .md docs without explicit request
 - Use `fs.writeFile` for screenshots in production — use `uploadToR2()` from `services/r2.ts`
 - Assume local file paths work in Docker — use env vars for all external paths
@@ -841,6 +1099,36 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
   `assembleFrictionClusters` pure helper IS shared — that's the
   right level of reuse.
 
+- Ship a workspace SECRET (`rpm_sk_…`) to a browser, commit it, or
+  accept a browser-supplied email anywhere outside the two designed
+  channels (partner-key S2S routes, HMAC-token routes). The site key
+  (`rpm_pk_…`) is the only partner value allowed in client markup —
+  it is public by design, like a GA measurement id.
+- Change `POST /api/partner/t` to require `application/json`. The
+  text/plain body is what makes sendBeacon a CORS simple request (no
+  preflight) — "fixing" the content type silently drops beacons from
+  partner origins not in the CORS allowlist.
+- Extend `t.js` to capture content (text, titles, keystrokes, form
+  values). The consent copy promises paths/durations/scroll only —
+  geulbat is a WRITING app; capturing content breaks the consent
+  contract, not just privacy hygiene.
+- Mutate or recompute `point_transactions` rows. The ledger is
+  append-only precisely because the reward policy is undecided — a
+  future policy reprices by appending adjustments, never by editing.
+- Feed personas an under-specified objective fact without qualifying
+  what is NOT known. The 2026-06-10 Spotify case: a bare
+  "popup detected" fact seeded a fabricated "wallet connect required"
+  friction; the fix was "(content not identified — do not assume what
+  it asks for)". When adding new pageFacts lines, state the unknowns.
+- Re-include footer links in `nav_menu_labels` extraction (footers
+  often wrap link groups in <nav> landmarks — Spotify's legal links
+  polluted the menu list and personas reported "navigation cluttered
+  with legal links" as a top friction; that was OUR artifact).
+- Make `claimPartnerRows` fatal or remove its already-submitted-scan
+  guard. A claim failure must never block login, and claiming a scan
+  the user already answered directly would violate the
+  `(scan_id, user_id)` unique index — the Privy-authored row wins.
+
 ## Investor Dashboard Narrative
 
 The "persona ≈ human" claim only holds **within matched demographic cohorts**.
@@ -952,38 +1240,35 @@ the visitor view is load-bearing — see Do-NOT entry.
 **Cost:** Sales/BD effort, not engineering. Once data lands,
 ~half-sprint to wire per-category multipliers.
 
-### 4. Q4 hallucination-guard observation period
+### 4. Q4 hallucination-guard observation period — CLOSED (2026-06-10)
 
-**Status:** No hard guard added at the prompt level (intentional
-— context-starvation was the root cause and Q2+Q3 P1 fixed that).
-2026-05-07 5-site post-fix test recorded **0 site fabrications**
-on 4 non-crypto sites; the 2 residual crypto-vocab matches were
-honest persona self-identification (`"I'm a crypto person…"`),
-not invented site features.
+**Resolution:** The one-recurrence condition fired. First prod scan
+with capture-signal page facts (Spotify) produced a fabricated
+`"지갑 연결이 필수인 것처럼 보이는데"` friction from a Designer
+persona — the unspecified `popup_detected` fact gave crypto-tilted
+vectors a blank to fill. Per the pre-agreed rule, the explicit
+guard ("feature not visible in screenshot nor implied by category →
+not a friction; an unidentified popup is just a popup") was added
+to `buildSystemPrompt`, and the pageFacts popup line now carries
+"content not identified — do not assume what it asks for".
+Same-day Spotify rescan: 0 crypto/wallet mentions across 109
+personas, and the top friction title became **"Unidentified modal
+popup on load"** — the persona reported the popup without guessing
+its content, exactly the intended behavior. Lesson recorded: when
+feeding objective facts to personas, an under-specified fact is a
+hallucination seed — qualify what is NOT known.
 
-**Unblock:** Run 5-10 more non-crypto scans across diverse
-categories (Marketplace, Gaming, Social, etc.). If contamination
-stays at 0 site fabrications, decision is permanent: no
-prompt-level guard needed. If even 1 fabrication recurs, add the
-explicit `"If a feature you describe is not visible in the
-screenshot or implied by the site's stated category, do not
-mention it as a friction"` rule to the buildSystemPrompt body.
+### 5. Cross-scan QA script (Layer 2 detection) — CLOSED (2026-06-10)
 
-**Cost:** Trivial — runs in the normal scan workflow.
-
-### 5. Cross-scan QA script (Layer 2 detection)
-
-**Status:** Not built. The proposed `scripts/qa-validator-scans.ts`
-would pull the last N scans and flag (a) non-crypto scans with
-crypto vocabulary in friction quotes, (b) "Wrong audience" rank-1
-clusters representing >30% of personas, (c) weighted-view
-n_passing collapsing to all zeros (would catch the n_passing=0
-regression).
-
-**Unblock:** ~1 hour engineering. Useful before Phase 2 ship to
-build before/after comparisons across all historic scans.
-
-**Cost:** ~1 hour.
+**Resolution:** `scripts/qa-validator-scans.ts` shipped with the
+three planned checks plus a fourth from the behavior-sim spike's
+gate-vs-utterance pattern: (d) numeric-vs-voice contradictions
+(adoption ≥70 with strongly negative voice; abandon-level engagement
+with adoption ≥50). Validated against prod on day one: it flagged
+both 2026-06-10 Spotify scans correctly (the pre-fix wallet
+fabrication and the footer-link artifact cluster) while all four
+uniswap scans passed clean. Run it after any batch of scans; flags
+are human-review signals, not verdicts.
 
 ### 6. UI auto-flag for domain mismatch (Layer 1 detection)
 
@@ -1034,33 +1319,13 @@ seeds cannot match.
 testers > N (~50) per cohort, the synthetic seeds can be marked
 as fallback-only.
 
-### 9. Validator API routes have no rate limiting
+### 9. Validator API routes have no rate limiting — CLOSED (2026-06-11)
 
-**Symptom:** `/api/auth/*`, `/api/scan/*`, `/api/calibration/*`,
-`/api/benchmark/*` accept unlimited requests per IP/wallet. A
-single misbehaving client (or a DoS) can exhaust LLM credits,
-captureSite Playwright workers, or DB connections.
-
-**Root cause:** The previous `middleware/rate-limit.ts`
-(`autotestRunLimiter` / `reportSubmitLimiter` /
-`llmGenerateLimiter`) targeted autotest-era routes that the
-2026-05-07 pivot deleted. The middleware was removed in the
-follow-up dead-code cleanup (commit d817167) because all three
-limiters had zero call sites. Validator routes were never
-re-wired to limiters.
-
-**Cost concern:** `/api/scan` POST kicks off a ~$0.15 pipeline
-(112 personas × Sonnet vision). 100 requests/hour at the API
-costs $15/hour without rate limiting.
-
-**Unblock:** Rebuild a small rate-limit module sized for the
-validator surface area:
-  - `/api/scan` POST: 5/min per IP + 20/hour per wallet
-  - `/api/auth/nonce`: 30/min per IP
-  - everything else: 60/min per IP (cheap reads)
-Use `express-rate-limit` (already a dep) or the `keyv`-backed
-pattern. ~1 hour engineering.
-
-**Cost:** ~1 hour. Should land before any public/marketing
-traffic; until then the API is on Railway custom-domain hidden
-URLs which limits exposure but doesn't eliminate it.
+**Resolution:** Console Sprint 1 shipped `middleware/rate_limit.ts`
+(express-rate-limit): `/api/scan` POST 5/min·IP + 20/h·user,
+mutations 30/min·user, router-wide read limiter on the validator
+surface; partner beacons deliberately excluded. Cost defense is now
+two-layer: rate limits (burst/DoS, per minute/hour) + the credit
+ledger (business allowance — Mode A $2 / Mode B $1 debit per scan,
+anonymous demo capped at 1/IP/day with a 24h same-URL cache). See
+the Security section above + `docs/console-ia-redesign.md` §4.

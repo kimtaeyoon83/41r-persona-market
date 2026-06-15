@@ -1,0 +1,943 @@
+{
+  "site": "www.nhis.or.kr",
+  "need": "건강검진 안내 우편을 받았는데, 올해 내가 받을 수 있는 검진 항목이 뭔지, 어디서 받을 수 있는지 궁금해서 이 사이트에 들어왔다.",
+  "captured_at": "2026-06-10",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "nodes": [
+    {
+      "id": "home",
+      "url": "https://www.nhis.or.kr/nhis/index.do",
+      "label": "홈",
+      "note": "cold landing",
+      "final_url": "https://www.nhis.or.kr/nhis/index.do",
+      "login_wall": false,
+      "screenshot": "spike/screens/home.png",
+      "screenshot_top": "spike/screens/home.top.png",
+      "signals": {
+        "visible_word_count": 642,
+        "link_count": 580,
+        "cta_count": 355
+      },
+      "edges": [
+        {
+          "label": "서비스찾기",
+          "to": "minwon_services"
+        },
+        {
+          "label": "나의 건강",
+          "to": "checkup_roadmap"
+        },
+        {
+          "label": "건강검진 실시안내",
+          "to": "checkup_guide"
+        },
+        {
+          "label": "검진대상 조회",
+          "to": "checkup_target"
+        },
+        {
+          "label": "건강검진 결과조회",
+          "to": "checkup_result"
+        },
+        {
+          "label": "검진정보 목록",
+          "to": "checkup_list"
+        },
+        {
+          "label": "검진신청",
+          "to": "checkup_apply"
+        },
+        {
+          "label": "건강검진 실시확인서(직장제출용)",
+          "to": "checkup_confirm"
+        },
+        {
+          "label": "자녀 건강",
+          "to": "infant_checkup"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "병(의)원/검진기관 평가정보",
+          "to": "org_eval"
+        },
+        {
+          "label": "건강보험 제도안내",
+          "to": "insurance_guide"
+        },
+        {
+          "label": "정책방향",
+          "to": "policy_direction"
+        }
+      ],
+      "off_graph_link_count": 527
+    },
+    {
+      "id": "checkup_guide",
+      "url": "https://www.nhis.or.kr/nhis/healthin/wbhaca04500m01.do",
+      "label": "건강검진 실시안내",
+      "note": "정답 경로 1 — 항목/대상 안내",
+      "final_url": "https://www.nhis.or.kr/nhis/healthin/wbhaca04500m01.do",
+      "login_wall": false,
+      "screenshot": "spike/screens/checkup_guide.png",
+      "screenshot_top": "spike/screens/checkup_guide.top.png",
+      "signals": {
+        "visible_word_count": 819,
+        "link_count": 654,
+        "cta_count": 365
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        },
+        {
+          "label": "서비스찾기",
+          "to": "minwon_services"
+        },
+        {
+          "label": "나의 건강",
+          "to": "checkup_roadmap"
+        },
+        {
+          "label": "검진대상 조회",
+          "to": "checkup_target"
+        },
+        {
+          "label": "건강검진 결과조회",
+          "to": "checkup_result"
+        },
+        {
+          "label": "검진정보 목록",
+          "to": "checkup_list"
+        },
+        {
+          "label": "검진신청",
+          "to": "checkup_apply"
+        },
+        {
+          "label": "건강검진 실시확인서(직장제출용)",
+          "to": "checkup_confirm"
+        },
+        {
+          "label": "자녀 건강",
+          "to": "infant_checkup"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "병(의)원/검진기관 평가정보",
+          "to": "org_eval"
+        },
+        {
+          "label": "건강보험 제도안내",
+          "to": "insurance_guide"
+        },
+        {
+          "label": "정책방향",
+          "to": "policy_direction"
+        }
+      ],
+      "off_graph_link_count": 600
+    },
+    {
+      "id": "checkup_roadmap",
+      "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHltExmdLoadMap.do",
+      "label": "건강검진 로드맵",
+      "note": "그럴듯한 우회로",
+      "final_url": "https://www.nhis.or.kr/nhis/healthin/retrieveHltExmdLoadMap.do",
+      "login_wall": false,
+      "screenshot": "spike/screens/checkup_roadmap.png",
+      "screenshot_top": "spike/screens/checkup_roadmap.top.png",
+      "signals": {
+        "visible_word_count": 311,
+        "link_count": 666,
+        "cta_count": 365
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        },
+        {
+          "label": "서비스찾기",
+          "to": "minwon_services"
+        },
+        {
+          "label": "건강검진 실시안내",
+          "to": "checkup_guide"
+        },
+        {
+          "label": "검진대상 조회",
+          "to": "checkup_target"
+        },
+        {
+          "label": "건강검진 결과조회",
+          "to": "checkup_result"
+        },
+        {
+          "label": "검진정보 목록",
+          "to": "checkup_list"
+        },
+        {
+          "label": "검진신청",
+          "to": "checkup_apply"
+        },
+        {
+          "label": "건강검진 실시확인서(직장제출용)",
+          "to": "checkup_confirm"
+        },
+        {
+          "label": "자녀 건강",
+          "to": "infant_checkup"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "병(의)원/검진기관 평가정보",
+          "to": "org_eval"
+        },
+        {
+          "label": "건강보험 제도안내",
+          "to": "insurance_guide"
+        },
+        {
+          "label": "정책방향",
+          "to": "policy_direction"
+        }
+      ],
+      "off_graph_link_count": 595
+    },
+    {
+      "id": "checkup_target",
+      "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHealthinCheckUpTargetPerson.do",
+      "label": "검진대상 조회",
+      "note": "로그인 벽 예상 — 최다 클릭 예상 지점",
+      "final_url": "https://www.nhis.or.kr/nhis/etc/personalLoginPage.do",
+      "login_wall": true,
+      "screenshot": "spike/screens/checkup_target.png",
+      "screenshot_top": "spike/screens/checkup_target.top.png",
+      "signals": {
+        "visible_word_count": 297,
+        "link_count": 534,
+        "cta_count": 334
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        },
+        {
+          "label": "서비스찾기",
+          "to": "minwon_services"
+        },
+        {
+          "label": "나의 건강",
+          "to": "checkup_roadmap"
+        },
+        {
+          "label": "건강검진 실시안내",
+          "to": "checkup_guide"
+        },
+        {
+          "label": "건강검진 결과조회",
+          "to": "checkup_result"
+        },
+        {
+          "label": "검진정보 목록",
+          "to": "checkup_list"
+        },
+        {
+          "label": "검진신청",
+          "to": "checkup_apply"
+        },
+        {
+          "label": "건강검진 실시확인서(직장제출용)",
+          "to": "checkup_confirm"
+        },
+        {
+          "label": "자녀 건강",
+          "to": "infant_checkup"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "병(의)원/검진기관 평가정보",
+          "to": "org_eval"
+        },
+        {
+          "label": "건강보험 제도안내",
+          "to": "insurance_guide"
+        },
+        {
+          "label": "정책방향",
+          "to": "policy_direction"
+        }
+      ],
+      "off_graph_link_count": 503
+    },
+    {
+      "id": "checkup_result",
+      "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHealthinCheckUpTargetResultPerson.do",
+      "label": "건강검진 결과조회",
+      "note": "로그인 벽 예상",
+      "final_url": "https://www.nhis.or.kr/nhis/etc/personalLoginPage.do",
+      "login_wall": true,
+      "screenshot": "spike/screens/checkup_result.png",
+      "screenshot_top": "spike/screens/checkup_result.top.png",
+      "signals": {
+        "visible_word_count": 297,
+        "link_count": 534,
+        "cta_count": 334
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        },
+        {
+          "label": "서비스찾기",
+          "to": "minwon_services"
+        },
+        {
+          "label": "나의 건강",
+          "to": "checkup_roadmap"
+        },
+        {
+          "label": "건강검진 실시안내",
+          "to": "checkup_guide"
+        },
+        {
+          "label": "검진대상 조회",
+          "to": "checkup_target"
+        },
+        {
+          "label": "검진정보 목록",
+          "to": "checkup_list"
+        },
+        {
+          "label": "검진신청",
+          "to": "checkup_apply"
+        },
+        {
+          "label": "건강검진 실시확인서(직장제출용)",
+          "to": "checkup_confirm"
+        },
+        {
+          "label": "자녀 건강",
+          "to": "infant_checkup"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "병(의)원/검진기관 평가정보",
+          "to": "org_eval"
+        },
+        {
+          "label": "건강보험 제도안내",
+          "to": "insurance_guide"
+        },
+        {
+          "label": "정책방향",
+          "to": "policy_direction"
+        }
+      ],
+      "off_graph_link_count": 503
+    },
+    {
+      "id": "checkup_list",
+      "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHealthinPresentConditionCheckUpList.do",
+      "label": "검진정보 목록",
+      "note": "이름 모호 decoy",
+      "final_url": "https://www.nhis.or.kr/nhis/etc/personalLoginPage.do",
+      "login_wall": true,
+      "screenshot": "spike/screens/checkup_list.png",
+      "screenshot_top": "spike/screens/checkup_list.top.png",
+      "signals": {
+        "visible_word_count": 297,
+        "link_count": 534,
+        "cta_count": 334
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        },
+        {
+          "label": "서비스찾기",
+          "to": "minwon_services"
+        },
+        {
+          "label": "나의 건강",
+          "to": "checkup_roadmap"
+        },
+        {
+          "label": "건강검진 실시안내",
+          "to": "checkup_guide"
+        },
+        {
+          "label": "검진대상 조회",
+          "to": "checkup_target"
+        },
+        {
+          "label": "건강검진 결과조회",
+          "to": "checkup_result"
+        },
+        {
+          "label": "검진신청",
+          "to": "checkup_apply"
+        },
+        {
+          "label": "건강검진 실시확인서(직장제출용)",
+          "to": "checkup_confirm"
+        },
+        {
+          "label": "자녀 건강",
+          "to": "infant_checkup"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "병(의)원/검진기관 평가정보",
+          "to": "org_eval"
+        },
+        {
+          "label": "건강보험 제도안내",
+          "to": "insurance_guide"
+        },
+        {
+          "label": "정책방향",
+          "to": "policy_direction"
+        }
+      ],
+      "off_graph_link_count": 503
+    },
+    {
+      "id": "checkup_apply",
+      "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHealthinCheckUpUnexaminedRequest.do",
+      "label": "검진신청",
+      "note": "로그인 벽 예상",
+      "final_url": "https://www.nhis.or.kr/nhis/etc/personalLoginPage.do",
+      "login_wall": true,
+      "screenshot": "spike/screens/checkup_apply.png",
+      "screenshot_top": "spike/screens/checkup_apply.top.png",
+      "signals": {
+        "visible_word_count": 297,
+        "link_count": 534,
+        "cta_count": 334
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        },
+        {
+          "label": "서비스찾기",
+          "to": "minwon_services"
+        },
+        {
+          "label": "나의 건강",
+          "to": "checkup_roadmap"
+        },
+        {
+          "label": "건강검진 실시안내",
+          "to": "checkup_guide"
+        },
+        {
+          "label": "검진대상 조회",
+          "to": "checkup_target"
+        },
+        {
+          "label": "건강검진 결과조회",
+          "to": "checkup_result"
+        },
+        {
+          "label": "검진정보 목록",
+          "to": "checkup_list"
+        },
+        {
+          "label": "건강검진 실시확인서(직장제출용)",
+          "to": "checkup_confirm"
+        },
+        {
+          "label": "자녀 건강",
+          "to": "infant_checkup"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "병(의)원/검진기관 평가정보",
+          "to": "org_eval"
+        },
+        {
+          "label": "건강보험 제도안내",
+          "to": "insurance_guide"
+        },
+        {
+          "label": "정책방향",
+          "to": "policy_direction"
+        }
+      ],
+      "off_graph_link_count": 503
+    },
+    {
+      "id": "checkup_confirm",
+      "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHealthinCheckUpImplementConfirmation.do",
+      "label": "건강검진 실시확인서(직장제출용)",
+      "note": "실시안내와 혼동 쌍",
+      "final_url": "https://www.nhis.or.kr/nhis/etc/personalLoginPage.do",
+      "login_wall": true,
+      "screenshot": "spike/screens/checkup_confirm.png",
+      "screenshot_top": "spike/screens/checkup_confirm.top.png",
+      "signals": {
+        "visible_word_count": 297,
+        "link_count": 534,
+        "cta_count": 334
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        },
+        {
+          "label": "서비스찾기",
+          "to": "minwon_services"
+        },
+        {
+          "label": "나의 건강",
+          "to": "checkup_roadmap"
+        },
+        {
+          "label": "건강검진 실시안내",
+          "to": "checkup_guide"
+        },
+        {
+          "label": "검진대상 조회",
+          "to": "checkup_target"
+        },
+        {
+          "label": "건강검진 결과조회",
+          "to": "checkup_result"
+        },
+        {
+          "label": "검진정보 목록",
+          "to": "checkup_list"
+        },
+        {
+          "label": "검진신청",
+          "to": "checkup_apply"
+        },
+        {
+          "label": "자녀 건강",
+          "to": "infant_checkup"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "병(의)원/검진기관 평가정보",
+          "to": "org_eval"
+        },
+        {
+          "label": "건강보험 제도안내",
+          "to": "insurance_guide"
+        },
+        {
+          "label": "정책방향",
+          "to": "policy_direction"
+        }
+      ],
+      "off_graph_link_count": 503
+    },
+    {
+      "id": "org_search",
+      "url": "https://www.nhis.or.kr/nhis/healthin/retrieveMdcAdminSknsClinic.do",
+      "label": "병(의)원/검진기관 찾기",
+      "note": "정답 경로 2",
+      "final_url": "https://www.nhis.or.kr/nhis/healthin/retrieveMdcAdminSknsClinic.do",
+      "login_wall": false,
+      "screenshot": "spike/screens/org_search.png",
+      "screenshot_top": "spike/screens/org_search.top.png",
+      "signals": {
+        "visible_word_count": 70,
+        "link_count": 2,
+        "cta_count": 12
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        }
+      ],
+      "off_graph_link_count": 0
+    },
+    {
+      "id": "org_eval",
+      "url": "https://www.nhis.or.kr/nhis/healthin/wbhacf03110m01.do",
+      "label": "병(의)원/검진기관 평가정보",
+      "note": "찾기와 혼동 쌍",
+      "final_url": "https://www.nhis.or.kr/nhis/healthin/wbhacf03110m01.do",
+      "login_wall": false,
+      "screenshot": "spike/screens/org_eval.png",
+      "screenshot_top": "spike/screens/org_eval.top.png",
+      "signals": {
+        "visible_word_count": 242,
+        "link_count": 644,
+        "cta_count": 356
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        },
+        {
+          "label": "서비스찾기",
+          "to": "minwon_services"
+        },
+        {
+          "label": "나의 건강",
+          "to": "checkup_roadmap"
+        },
+        {
+          "label": "건강검진 실시안내",
+          "to": "checkup_guide"
+        },
+        {
+          "label": "검진대상 조회",
+          "to": "checkup_target"
+        },
+        {
+          "label": "건강검진 결과조회",
+          "to": "checkup_result"
+        },
+        {
+          "label": "검진정보 목록",
+          "to": "checkup_list"
+        },
+        {
+          "label": "검진신청",
+          "to": "checkup_apply"
+        },
+        {
+          "label": "건강검진 실시확인서(직장제출용)",
+          "to": "checkup_confirm"
+        },
+        {
+          "label": "자녀 건강",
+          "to": "infant_checkup"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "건강보험 제도안내",
+          "to": "insurance_guide"
+        },
+        {
+          "label": "정책방향",
+          "to": "policy_direction"
+        }
+      ],
+      "off_graph_link_count": 590
+    },
+    {
+      "id": "minwon_services",
+      "url": "https://www.nhis.or.kr/nhis/minwon/minwonServiceBoard.do",
+      "label": "서비스찾기",
+      "note": "민원 경로 — 검색 우회로",
+      "final_url": "https://www.nhis.or.kr/nhis/minwon/minwonServiceBoard.do",
+      "login_wall": false,
+      "screenshot": "spike/screens/minwon_services.png",
+      "screenshot_top": "spike/screens/minwon_services.top.png",
+      "signals": {
+        "visible_word_count": 429,
+        "link_count": 547,
+        "cta_count": 326
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        },
+        {
+          "label": "나의 건강",
+          "to": "checkup_roadmap"
+        },
+        {
+          "label": "건강검진 실시안내",
+          "to": "checkup_guide"
+        },
+        {
+          "label": "검진대상 조회",
+          "to": "checkup_target"
+        },
+        {
+          "label": "건강검진 결과조회",
+          "to": "checkup_result"
+        },
+        {
+          "label": "검진정보 목록",
+          "to": "checkup_list"
+        },
+        {
+          "label": "검진신청",
+          "to": "checkup_apply"
+        },
+        {
+          "label": "건강검진 실시확인서(직장제출용)",
+          "to": "checkup_confirm"
+        },
+        {
+          "label": "자녀 건강",
+          "to": "infant_checkup"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "병(의)원/검진기관 평가정보",
+          "to": "org_eval"
+        },
+        {
+          "label": "건강보험 제도안내",
+          "to": "insurance_guide"
+        },
+        {
+          "label": "정책방향",
+          "to": "policy_direction"
+        }
+      ],
+      "off_graph_link_count": 497
+    },
+    {
+      "id": "insurance_guide",
+      "url": "https://www.nhis.or.kr/nhis/minwon/wbhapa01000m01.do",
+      "label": "건강보험 제도안내",
+      "note": "distractor",
+      "final_url": "https://www.nhis.or.kr/nhis/minwon/wbhapa01000m01.do",
+      "login_wall": false,
+      "screenshot": "spike/screens/insurance_guide.png",
+      "screenshot_top": "spike/screens/insurance_guide.top.png",
+      "signals": {
+        "visible_word_count": 485,
+        "link_count": 559,
+        "cta_count": 335
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        },
+        {
+          "label": "서비스찾기",
+          "to": "minwon_services"
+        },
+        {
+          "label": "나의 건강",
+          "to": "checkup_roadmap"
+        },
+        {
+          "label": "건강검진 실시안내",
+          "to": "checkup_guide"
+        },
+        {
+          "label": "검진대상 조회",
+          "to": "checkup_target"
+        },
+        {
+          "label": "건강검진 결과조회",
+          "to": "checkup_result"
+        },
+        {
+          "label": "검진정보 목록",
+          "to": "checkup_list"
+        },
+        {
+          "label": "검진신청",
+          "to": "checkup_apply"
+        },
+        {
+          "label": "건강검진 실시확인서(직장제출용)",
+          "to": "checkup_confirm"
+        },
+        {
+          "label": "자녀 건강",
+          "to": "infant_checkup"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "병(의)원/검진기관 평가정보",
+          "to": "org_eval"
+        },
+        {
+          "label": "정책방향",
+          "to": "policy_direction"
+        }
+      ],
+      "off_graph_link_count": 497
+    },
+    {
+      "id": "infant_checkup",
+      "url": "https://www.nhis.or.kr/nhis/healthin/retrieveHealthinCheckUpTargetInfants.do",
+      "label": "영유아 건강검진",
+      "note": "wrong-audience decoy",
+      "final_url": "https://www.nhis.or.kr/nhis/etc/personalLoginPage.do",
+      "login_wall": true,
+      "screenshot": "spike/screens/infant_checkup.png",
+      "screenshot_top": "spike/screens/infant_checkup.top.png",
+      "signals": {
+        "visible_word_count": 297,
+        "link_count": 534,
+        "cta_count": 334
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        },
+        {
+          "label": "서비스찾기",
+          "to": "minwon_services"
+        },
+        {
+          "label": "나의 건강",
+          "to": "checkup_roadmap"
+        },
+        {
+          "label": "건강검진 실시안내",
+          "to": "checkup_guide"
+        },
+        {
+          "label": "검진대상 조회",
+          "to": "checkup_target"
+        },
+        {
+          "label": "건강검진 결과조회",
+          "to": "checkup_result"
+        },
+        {
+          "label": "검진정보 목록",
+          "to": "checkup_list"
+        },
+        {
+          "label": "검진신청",
+          "to": "checkup_apply"
+        },
+        {
+          "label": "건강검진 실시확인서(직장제출용)",
+          "to": "checkup_confirm"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "병(의)원/검진기관 평가정보",
+          "to": "org_eval"
+        },
+        {
+          "label": "건강보험 제도안내",
+          "to": "insurance_guide"
+        },
+        {
+          "label": "정책방향",
+          "to": "policy_direction"
+        }
+      ],
+      "off_graph_link_count": 503
+    },
+    {
+      "id": "policy_direction",
+      "url": "https://www.nhis.or.kr/nhis/policy/wbhadd09400m01.do",
+      "label": "정책방향",
+      "note": "distractor",
+      "final_url": "https://www.nhis.or.kr/nhis/policy/wbhadd09400m01.do",
+      "login_wall": false,
+      "screenshot": "spike/screens/policy_direction.png",
+      "screenshot_top": "spike/screens/policy_direction.top.png",
+      "signals": {
+        "visible_word_count": 591,
+        "link_count": 560,
+        "cta_count": 316
+      },
+      "edges": [
+        {
+          "label": "h-well 국민건강보험",
+          "to": "home"
+        },
+        {
+          "label": "서비스찾기",
+          "to": "minwon_services"
+        },
+        {
+          "label": "나의 건강",
+          "to": "checkup_roadmap"
+        },
+        {
+          "label": "건강검진 실시안내",
+          "to": "checkup_guide"
+        },
+        {
+          "label": "검진대상 조회",
+          "to": "checkup_target"
+        },
+        {
+          "label": "건강검진 결과조회",
+          "to": "checkup_result"
+        },
+        {
+          "label": "검진정보 목록",
+          "to": "checkup_list"
+        },
+        {
+          "label": "검진신청",
+          "to": "checkup_apply"
+        },
+        {
+          "label": "건강검진 실시확인서(직장제출용)",
+          "to": "checkup_confirm"
+        },
+        {
+          "label": "자녀 건강",
+          "to": "infant_checkup"
+        },
+        {
+          "label": "기관 찾기",
+          "to": "org_search"
+        },
+        {
+          "label": "병(의)원/검진기관 평가정보",
+          "to": "org_eval"
+        },
+        {
+          "label": "건강보험 제도안내",
+          "to": "insurance_guide"
+        }
+      ],
+      "off_graph_link_count": 515
+    }
+  ]
+}

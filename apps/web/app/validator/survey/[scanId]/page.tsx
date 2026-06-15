@@ -16,7 +16,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
-import { meApi, scanApi, type CustomQuestion } from "@/lib/api";
+import { meApi, scanApi, submitSurveyByToken, type CustomQuestion } from "@/lib/api";
 import { C, FM, FS, Frame } from "../../_components/ui";
 
 const SUS_QUESTIONS = [
@@ -59,6 +59,18 @@ export default function SurveyPage() {
   const scanId = params?.scanId ?? "";
   const { ready, authenticated, login } = usePrivy();
 
+  // Partner handoff mode (geulbat pilot) — a signed `pt` token in the
+  // query string replaces Privy auth entirely: identity is inside the
+  // token, submit goes to the partner endpoint, and points are
+  // credited to the partner email (claimable on later 41R login).
+  // Read via window.location instead of useSearchParams() to avoid
+  // the Next 14 Suspense-boundary requirement on static builds.
+  const [partnerToken, setPartnerToken] = useState<string | null>(null);
+  useEffect(() => {
+    const v = new URLSearchParams(window.location.search).get("pt");
+    if (v) setPartnerToken(v);
+  }, []);
+
   const [sus, setSus] = useState<number[]>(Array(10).fill(3));
   const [engagement, setEngagement] = useState<string>("browse");
   const [signupLikelihood, setSignupLikelihood] = useState(50);
@@ -75,13 +87,15 @@ export default function SurveyPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<{ delta: Record<string, number> } | null>(null);
+  const [success, setSuccess] = useState<{ delta?: Record<string, number>; points?: number } | null>(null);
   const [hasPriorSubmission, setHasPriorSubmission] = useState(false);
 
   // Phase 5 — site-specific custom questions, loaded once on mount.
   // Null while loading, [] when the scan has none, populated otherwise.
   const [customQuestions, setCustomQuestions] = useState<CustomQuestion[] | null>(null);
   const [customAnswers, setCustomAnswers] = useState<Record<string, number | string>>({});
+  // Console S2 §12-7 — reward-cap state disclosed BEFORE answering.
+  const [rewardAvailable, setRewardAvailable] = useState(true);
 
   // Load scan custom questions (always) + the user's prior response (if
   // authenticated) on mount. The prefill turns the page into an editor
@@ -94,6 +108,7 @@ export default function SurveyPage() {
       .then((r) => {
         if (cancelled) return;
         setCustomQuestions(r.scan.custom_questions ?? []);
+        setRewardAvailable(r.survey_reward_available ?? true);
       })
       .catch(() => {
         if (!cancelled) setCustomQuestions([]);
@@ -134,13 +149,13 @@ export default function SurveyPage() {
 
   const onSubmit = async () => {
     if (submitting) return;
-    if (!authenticated) {
+    if (!partnerToken && !authenticated) {
       if (ready) login();
       return;
     }
     setError(null); setSubmitting(true);
     try {
-      const r = await scanApi.submitSurvey(scanId, {
+      const payload = {
         sus_responses: sus,
         engagement_category: engagement as "abandon" | "skim" | "browse" | "engage" | "extended",
         signup_likelihood: signupLikelihood / 100,
@@ -159,8 +174,14 @@ export default function SurveyPage() {
           mobile_first: mobileFirst,
         },
         custom_answers: customAnswers,
-      });
-      setSuccess({ delta: r.summary.delta });
+      };
+      if (partnerToken) {
+        const r = await submitSurveyByToken(partnerToken, payload);
+        setSuccess({ points: r.points_awarded });
+      } else {
+        const r = await scanApi.submitSurvey(scanId, payload);
+        setSuccess({ delta: r.summary.delta });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit");
     } finally {
@@ -175,6 +196,12 @@ export default function SurveyPage() {
           <h1 style={{ fontSize: 28, fontWeight: 600, fontFamily: FS, marginBottom: 14 }}>
             ✓ Thanks — your response was recorded.
           </h1>
+          {success.points != null && success.points > 0 && (
+            <div style={{ fontSize: 14, color: C.ok, marginBottom: 12 }}>
+              +{success.points}P credited — sign in to 41R with the same Google
+              account anytime to see your points and responses.
+            </div>
+          )}
           <div style={{ fontSize: 14, color: C.textDim, lineHeight: 1.6, marginBottom: 24 }}>
             5 calibration rows written (one per dimension). The team uses these to
             measure how closely the AI personas match real human reactions.
@@ -191,7 +218,7 @@ export default function SurveyPage() {
             }}
           >
             <div style={{ marginBottom: 8, color: C.textDim }}>LLM vs You (Δ per dimension)</div>
-            {Object.entries(success.delta).map(([dim, d]) => (
+            {Object.entries(success.delta ?? {}).map(([dim, d]) => (
               <div key={dim} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0" }}>
                 <span>{dim}</span>
                 <span style={{ color: Math.abs(d) < 10 ? C.ok : Math.abs(d) < 25 ? C.warn : C.bad }}>
@@ -227,11 +254,34 @@ export default function SurveyPage() {
           ground-truth for measuring AI persona accuracy.
         </div>
 
+        {/* Console S2 — pre-answer reward disclosure (§12 decision 7:
+            trust over response rate). Shown before any input so the
+            respondent knows the point budget is exhausted up front. */}
+        {!rewardAvailable && (
+          <div
+            style={{
+              padding: 14,
+              marginBottom: 20,
+              background: C.warnSoft,
+              border: `1px solid #ecdcb4`,
+              borderRadius: 8,
+              fontSize: 13,
+              color: C.warn,
+              lineHeight: 1.6,
+            }}
+          >
+            This survey&apos;s point rewards have been fully claimed — your
+            response still counts, but no points will be awarded for it.
+            <br />이 설문의 포인트 보상이 모두 소진되었습니다 — 응답은
+            반영되지만 포인트는 적립되지 않습니다.
+          </div>
+        )}
+
         {/* Auth gate — Phase 5.1 replaces the email field. Anyone can
             view the form, but Submit triggers Privy login if needed.
             When the user has a prior submission, show the "you're
             editing your previous answer" banner. */}
-        {ready && !authenticated && (
+        {ready && !authenticated && !partnerToken && (
           <div
             style={{
               padding: 14,

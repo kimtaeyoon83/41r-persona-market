@@ -24,6 +24,8 @@
 import { eq } from 'drizzle-orm';
 import { STANDARD_COHORTS } from '@41rpm/shared';
 import { db, schema } from '../db/index.js';
+import { refundScanDebit } from './credits.js';
+import { sendScanCompleteEmail } from './email.js';
 import { logger } from '../logger.js';
 import {
   type CohortFit,
@@ -140,6 +142,7 @@ export function startScanWorker(scanId: string): void {
       } catch (markErr) {
         log.error({ err: markErr, scanId }, 'failed to mark scan as failed');
       }
+      await refundScanDebit(scanId);
     });
   });
 }
@@ -177,8 +180,12 @@ async function runScan(scanId: string): Promise<void> {
         .set({
           captureScreenshotUrls: screenshotUrls,
           captureCompletedAt: cap.capturedAt,
+          captureSignals: cap.signals ?? null,
         })
         .where(eq(schema.audienceFitScans.id, scanId));
+      // Refresh local copy (same pattern as category below) so the
+      // Mode A/B persona handlers can thread pageFacts into prompts.
+      scan.captureSignals = cap.signals ?? null;
       log.info(
         { scanId, urls: screenshotUrls.length, fromCache: cap.fromCache },
         'site capture complete'
@@ -358,6 +365,7 @@ async function runScan(scanId: string): Promise<void> {
         category: scan.category,
         categoryConfidence: scan.categoryConfidence,
         oneLinePitch: scan.oneLinePitch,
+        pageFacts: pageFactsFrom(scan.captureSignals),
       },
     });
     if (r.errored) totalErrored += 1;
@@ -465,6 +473,7 @@ async function runScan(scanId: string): Promise<void> {
     },
     'scan completed'
   );
+  notifyScanComplete(scanId, result.best.cohort_label, result.audience_fit_score);
 }
 
 // ─── Mode B: single-audience pipeline ────────────────────────────
@@ -551,6 +560,7 @@ async function runModeBPipeline(args: {
         category: scan.category,
         categoryConfidence: scan.categoryConfidence,
         oneLinePitch: scan.oneLinePitch,
+        pageFacts: pageFactsFrom(scan.captureSignals),
       },
     });
     if (r.errored) errored += 1;
@@ -637,6 +647,44 @@ async function runModeBPipeline(args: {
     { scanId, cohortFitScore: cohortFitScore.toFixed(2), verdict, audience: parsed.label },
     'mode B scan completed'
   );
+  notifyScanComplete(scanId, parsed.label ?? null, cohortFitScore);
+}
+
+// Scan-complete notification (Console S2, retention loop #1 — §6).
+// Fire-and-forget: looks up the owner's email and sends the report
+// link. Anonymous scans (userId null) and users without an email are
+// silently skipped; email.ts itself no-ops without RESEND_API_KEY.
+function notifyScanComplete(
+  scanId: string,
+  bestCohortLabel: string | null,
+  audienceFitScore: number | null,
+): void {
+  void (async () => {
+    try {
+      const [scan] = await db
+        .select({
+          userId: schema.audienceFitScans.userId,
+          targetUrl: schema.audienceFitScans.targetUrl,
+        })
+        .from(schema.audienceFitScans)
+        .where(eq(schema.audienceFitScans.id, scanId));
+      if (!scan?.userId) return;
+      const [user] = await db
+        .select({ email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.id, scan.userId));
+      if (!user?.email) return;
+      await sendScanCompleteEmail({
+        to: user.email,
+        targetUrl: scan.targetUrl,
+        scanId,
+        bestCohortLabel,
+        audienceFitScore,
+      });
+    } catch (err) {
+      log.warn({ scanId, err }, 'scan-complete notify failed (non-fatal)');
+    }
+  })();
 }
 
 async function setStatus(scanId: string, status: string): Promise<void> {
@@ -644,6 +692,11 @@ async function setStatus(scanId: string, status: string): Promise<void> {
     .update(schema.audienceFitScans)
     .set({ status })
     .where(eq(schema.audienceFitScans.id, scanId));
+  // Failed scan → give the credits back (idempotent, no-op for
+  // anonymous demo scans that never had a debit). All pipeline failure
+  // paths call setStatus('failed'), so this is the single choke point;
+  // the worker crash handler in startScanWorker covers the rest.
+  if (status === 'failed') await refundScanDebit(scanId);
 }
 
 type DCurve = { d1: number; d3: number; d7: number; d30: number };
@@ -656,6 +709,23 @@ function simulateRetentionDCurveFromD7(d7: number): DCurve {
   if (d7 >= 30) return { d1: 70, d3: 50, d7: 30, d30: 10 };
   if (d7 >= 5) return { d1: 40, d3: 15, d7: 5, d30: 1 };
   return { d1: 5, d3: 1, d7: 0, d30: 0 };
+}
+
+// Snake-case DB jsonb → camelCase SiteContext.pageFacts. Null-safe so
+// legacy scans (capture_signals = null) keep the pre-2026-06-10
+// prompt byte-identical.
+function pageFactsFrom(
+  sig: (typeof schema.audienceFitScans.$inferSelect)['captureSignals'],
+): SiteContext['pageFacts'] {
+  if (!sig) return null;
+  return {
+    visibleWordCount: sig.visible_word_count,
+    linkCount: sig.link_count,
+    ctaCount: sig.cta_count,
+    navMenuLabels: sig.nav_menu_labels ?? [],
+    popupDetected: sig.popup_detected,
+    loginWall: sig.login_wall,
+  };
 }
 
 function avgDCurve(curves: readonly DCurve[]): DCurve {

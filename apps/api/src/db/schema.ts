@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, date, integer, real, boolean, jsonb, uuid, varchar, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, date, integer, real, boolean, jsonb, uuid, varchar, uniqueIndex, index } from 'drizzle-orm/pg-core';
 
 // ─── Companies ───────────────────────────────────────
 export const companies = pgTable('companies', {
@@ -216,10 +216,29 @@ export const audienceFitScans = pgTable('audience_fit_scans', {
    *  completed | failed. The Phase 0 frontend Processing screen
    *  polls/streams against transitions of this column. */
   status: varchar('status', { length: 20 }).notNull().default('pending'),
+  /** Console S2 — owning workspace. Set automatically on create when
+   *  the authed user has a workspace matching the URL host; legacy /
+   *  anonymous scans stay NULL (the console's "Unassigned" bucket).
+   *  ON DELETE SET NULL: deleting a workspace unlinks, never destroys
+   *  scan data. */
+  workspaceId: uuid('workspace_id').references(() => siteWorkspaces.id, {
+    onDelete: 'set null',
+  }),
 
   // Site capture (Stagehand-driven, Phase 1B)
   captureScreenshotUrls: jsonb('capture_screenshot_urls').$type<string[]>(),
   captureCompletedAt: timestamp('capture_completed_at'),
+  /** Ch1-style objective page facts measured at capture time (no LLM).
+   *  Behavior-sim spike transfer (2026-06-10): grounds persona prompts
+   *  and renders the report's "measured" strip. Null on legacy scans. */
+  captureSignals: jsonb('capture_signals').$type<{
+    visible_word_count: number;
+    link_count: number;
+    cta_count: number;
+    nav_menu_labels: string[];
+    popup_detected: boolean;
+    login_wall: boolean;
+  }>(),
 
   // Synthesis output — filled at completion. All 0-100 unless noted.
   audienceFitScore: real('audience_fit_score'),
@@ -532,3 +551,142 @@ export const settlements = pgTable('settlements', {
   settlementType: varchar('settlement_type', { length: 20 }).notNull().default('usdc'), // usdc | 41r
   settledAt: timestamp('settled_at').defaultNow().notNull(),
 });
+
+// ─── Partner pilot — point ledger (geulbat, 2026-06-10) ─────────────
+// Internal points credited for partner-channel survey submissions.
+// `email` is the provisional key for rows that arrive before the
+// person ever logs into 41R; the privy_auth claim flow backfills
+// `user_id` on first verified-email login. Currency/redemption policy
+// is intentionally undecided — this is an append-only ledger so any
+// future policy can be applied retroactively.
+export const pointTransactions = pgTable('point_transactions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  /** Linked 41R user. NULL until the email is claimed via Privy login. */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  /** Provisional identity key (Google-verified on the partner side). */
+  email: text('email'),
+  amount: integer('amount').notNull(),
+  reason: text('reason').notNull(), // e.g. 'survey' | 'reward_cap_reached'
+  source: text('source').notNull(), // e.g. 'geulbat' | '41r'
+  /** Console S2 — resource that earned the row (scan id for survey
+   *  rewards). Backs the per-scan reward cap COUNT (30/scan, §12-7:
+   *  cap state is disclosed BEFORE answering). Nullable — legacy rows
+   *  predate it. */
+  refId: uuid('ref_id'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// ─── Partner pilot — person profile (geulbat, 2026-06-10) ───────────
+// Stream ① of the partner data model (profile / behavior / evaluation).
+// One row per (source, email); the profile body is deliberately a
+// flexible jsonb — the partner decides its own field vocabulary
+// (recommended keys mirror the legacy testers.profile shape:
+// age_range, region, occupation, expertise[], crypto_experience,
+// ui_preference, languages[], device_types[], ...). This is the
+// demographics raw material for persona-twin generation.
+export const partnerProfiles = pgTable('partner_profiles', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  source: text('source').notNull(), // e.g. 'geulbat'
+  email: text('email').notNull(),
+  /** Linked 41R user — NULL until claimed on Privy login. */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  profile: jsonb('profile').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  uniqSourceEmail: uniqueIndex('partner_profiles_source_email_uniq').on(t.source, t.email),
+}));
+
+// ─── Partner pilot — behavior events (geulbat, 2026-06-10) ──────────
+// Stream ② — usage tracking, batch-synced from the partner's own
+// store. Event vocabulary is partner-defined (event_type + payload);
+// 41R aggregates later (dwell, paths, return visits → behavioral
+// traits for persona twins v2 + Mode C calibration ground truth).
+export const partnerBehaviorEvents = pgTable('partner_behavior_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  source: text('source').notNull(),
+  /** NULL for anonymous snippet events (GA-style device-only). When
+   *  the same anon_id later identifies (data-uid token), new events
+   *  carry the email; old anon rows can be joined retroactively via
+   *  anon_id. */
+  email: text('email'),
+  /** Snippet device id (localStorage uuid) — present on snippet
+   *  events, NULL on server-side S2S batches. */
+  anonId: text('anon_id'),
+  /** Linked 41R user — NULL until claimed on Privy login. */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  sessionId: text('session_id'),
+  eventType: text('event_type').notNull(), // e.g. 'pageview' | 'dwell' | 'leave'
+  payload: jsonb('payload'),
+  occurredAt: timestamp('occurred_at').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// ─── Site workspaces (Console Sprint 2, 2026-06-11) ─────────────────
+// Registration ≠ ownership: a workspace is one user's analysis space
+// for a URL host (GA-property model, console-ia-redesign.md §1.1).
+// UNIQUE is (user_id, url_host) — deliberately NOT a global host
+// unique: N users can each register the same site, fully isolated.
+// Domain verification is permanently out of scope; being able to
+// install the t.js snippet (site_key) is the natural ownership gate.
+// Tier is emergent, not chosen: last_event_at IS NULL → LITE,
+// otherwise TRACKED.
+export const siteWorkspaces = pgTable('site_workspaces', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  /** Normalized host — scheme + www stripped, lowercased. */
+  urlHost: text('url_host').notNull(),
+  name: text('name'),
+  /** Public tracking key (GA measurement-id semantics) — routes
+   *  beacons only, grants NO read access. */
+  siteKey: text('site_key').notNull().unique(),
+  /** S2S + HMAC handoff secret — sha256 hex only; plaintext is shown
+   *  exactly once at issue/rotation. No read access either: a leaked
+   *  secret can only inject fake data, never exfiltrate (§3.3). */
+  secretHash: text('secret_hash').notNull(),
+  secretLast4: text('secret_last4').notNull(),
+  /** Last beacon received through this workspace's site_key —
+   *  TRACKED-tier flag + the "Last event: 2m ago" settings display. */
+  lastEventAt: timestamp('last_event_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  uniqUserHost: uniqueIndex('site_workspaces_user_host_uniq').on(t.userId, t.urlHost),
+}));
+
+// ─── Credit ledger (Console Sprint 1, 2026-06-11) ───────────────────
+// Founder-side spend currency — separate from point_transactions
+// (tester-side earn currency); the two stay distinct on purpose so
+// each policy can move independently (docs/console-ia-redesign.md §4.3).
+// Append-only, same contract as point_transactions: never UPDATE or
+// DELETE a row; corrections/refunds/expiry are new rows. Balance is
+// SUM(amount_cents).
+//
+// Reasons in use: 'signup_bonus' (+3000, verified identity) |
+// 'signup_bonus_wallet' (+500, wallet-only signup) |
+// 'signup_bonus_upgrade' (+2500, wallet-only later links email/social)
+// | 'scan_mode_a' (-200) | 'scan_mode_b' (-100) | 'scan_refund'
+// (pipeline failed — positive, mirrors the debit) | 'manual_grant'
+// (operator top-up) | 'expiry'.
+export const creditTransactions = pgTable('credit_transactions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  /** USD cents. Grants positive, debits negative. */
+  amountCents: integer('amount_cents').notNull(),
+  reason: text('reason').notNull(),
+  /** Resource that caused the row — scan id for debits/refunds. */
+  refId: uuid('ref_id'),
+  /** Grant rows only. Recorded from day one (90-day policy) but NOT
+   *  enforced during the pilot — the expiry batch ships together with
+   *  top-up billing (v2). console-ia-redesign.md §12 decision 3. */
+  expiresAt: timestamp('expires_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  byUser: index('credit_transactions_user_idx').on(t.userId),
+  // Debit/refund lookups by scan (refund idempotency check).
+  byRef: index('credit_transactions_ref_idx').on(t.refId),
+}));

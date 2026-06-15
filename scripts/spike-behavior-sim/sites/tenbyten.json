@@ -1,0 +1,109 @@
+{
+  "site_id": "tenbyten",
+  "site": "www.10x10.co.kr",
+  "need": "다음 주에 친구 집들이에 가는데, 괜찮은 집들이 선물이 있을지 궁금해서 이 사이트에 들어왔다.",
+  "_note": "2차 스파이크 사이트 (쇼핑몰). NHIS와 달리 satisfied 이탈이 구조적으로 가능 — 시뮬이 만족 이탈도 만들어내는지 테스트. 검색 노드는 의도적 제외 (텍스트 입력은 정적 그래프가 표현 불가 — 등록된 한계). v2: normPath 쿼리 보존 수정 + event_mug 기획전에 실재하는 머그 상품 3종 노드 추가 (목록→상품 행동 공간 확보).",
+  "nodes": [
+    {
+      "id": "home",
+      "url": "https://www.10x10.co.kr/",
+      "label": "홈",
+      "note": "cold landing"
+    },
+    {
+      "id": "gift_recommend",
+      "url": "https://www.10x10.co.kr/shoppingtoday/gift_recommend.asp",
+      "label": "선물포장 서비스",
+      "note": "선물포장 서비스 + 선물 상품 그리드 — 정답 경로 후보이나 라벨은 화면 텍스트 그대로"
+    },
+    {
+      "id": "best",
+      "url": "https://www.10x10.co.kr/award/awardlist.asp?atype=b",
+      "label": "베스트",
+      "note": "그럴듯한 선물 탐색 경로"
+    },
+    {
+      "id": "event_list",
+      "url": "https://www.10x10.co.kr/shoppingtoday/shoppingchance_allevent.asp",
+      "label": "기획전",
+      "note": "탐색 우회로"
+    },
+    {
+      "id": "sale",
+      "url": "https://www.10x10.co.kr/clearancesale/index.asp",
+      "label": "할인특가",
+      "note": "가격 민감 경로"
+    },
+    {
+      "id": "brand",
+      "url": "https://www.10x10.co.kr/street/",
+      "label": "브랜드",
+      "note": "탐색 우회로"
+    },
+    {
+      "id": "category_kitchen",
+      "url": "https://www.10x10.co.kr/shopping/category_list.asp?disp=112102",
+      "label": "주방식기",
+      "note": "집들이 선물 적합 카테고리 목록"
+    },
+    {
+      "id": "product_plate",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7426126",
+      "label": "다이집 브런치 4구 플레이트",
+      "note": "정답 후보 상품 — 집들이 선물감 테이블웨어 42,000원"
+    },
+    {
+      "id": "product_mug",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7361126",
+      "label": "포코아르 토마토 미니 머그",
+      "note": "대안 상품 36,100원"
+    },
+    {
+      "id": "cart",
+      "url": "https://www.10x10.co.kr/inipay/shoppingbag.asp",
+      "label": "장바구니",
+      "note": "구매 직전 단계 — 로그인 벽 여부 캡처로 판정"
+    },
+    {
+      "id": "event_mug",
+      "url": "https://www.10x10.co.kr/event/eventmain.asp?eventid=131031",
+      "label": "미니 머그 수집가 기획전",
+      "note": "선물 인접 기획전"
+    },
+    {
+      "id": "community",
+      "url": "https://www.10x10.co.kr/forums/index.asp",
+      "label": "커뮤니티",
+      "note": "distractor"
+    },
+    {
+      "id": "character",
+      "url": "https://www.10x10.co.kr/event/characterTown2025/index.asp",
+      "label": "캐릭터+",
+      "note": "distractor"
+    },
+    {
+      "id": "product_brunch_set",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7309674",
+      "label": "재팬고양이 도자기 머그컵 브런치 1인세트",
+      "note": "정답 후보 — 상품명에 '신혼 이사' 포함, event_mug에서 링크 실재"
+    },
+    {
+      "id": "product_melody_cup",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7488560",
+      "label": "Lucky Melody Cup - Blue",
+      "note": "event_mug 링크 실재 상품"
+    },
+    {
+      "id": "product_soup_mug",
+      "url": "https://www.10x10.co.kr/shopping/category_prd.asp?itemid=7445828",
+      "label": "무광 레이어드 스페클 스프머그 370ml",
+      "note": "event_mug 링크 실재 상품"
+    }
+  ],
+  "auto_expand": {
+    "match": "category_prd.asp?itemid",
+    "per_page": 4,
+    "max": 16
+  }
+}

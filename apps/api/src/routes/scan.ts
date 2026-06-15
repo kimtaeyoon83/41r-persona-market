@@ -32,12 +32,55 @@ import {
 } from '../services/aarrr.js';
 import { requirePrivyAuth, optionalPrivyAuth } from '../middleware/privy_auth.js';
 import {
+  scanCreateIpLimiter,
+  scanCreateUserLimiter,
+  mutationLimiter,
+} from '../middleware/rate_limit.js';
+import { isAdminRequest } from '../middleware/admin.js';
+import { debitScan, getCreditBalance, SCAN_PRICE_CENTS } from '../services/credits.js';
+import { findWorkspaceByHost } from '../services/workspaces.js';
+import { validateTargetUrl } from '../services/url_guard.js';
+import { awardSurveyPoints, isRewardAvailable } from '../services/rewards.js';
+import { notifySurveyMilestone } from '../services/notify.js';
+import {
   buildSponsoredZeroTx,
   broadcastSignedTx,
   solscanUrl,
 } from '../services/sponsored_tx.js';
 
 const router: RouterType = Router();
+
+// ─── Anonymous demo guard (Console Sprint 1 — §3/§12 decisions) ────
+// Anonymous scans cost real LLM money (~$0.15 Mode A) with no credit
+// ledger behind them, so they're a demo: 1 fresh scan per IP per day,
+// and a repeat request for the same URL within 24h returns the
+// existing scan instead of burning a new pipeline run (decision §12-8
+// — the UI shows "analyzed n hours ago" from created_at).
+const DEMO_WINDOW_MS = 24 * 60 * 60 * 1000;
+const demoIpLastScanAt = new Map<string, number>();
+
+function pruneDemoIpMap(): void {
+  if (demoIpLastScanAt.size < 10_000) return;
+  const cutoff = Date.now() - DEMO_WINDOW_MS;
+  for (const [ip, at] of demoIpLastScanAt) {
+    if (at < cutoff) demoIpLastScanAt.delete(ip);
+  }
+}
+
+/** Exported for tests. */
+export function checkDemoIpAllowance(
+  ip: string,
+  now: number = Date.now(),
+): boolean {
+  const last = demoIpLastScanAt.get(ip);
+  return last === undefined || now - last >= DEMO_WINDOW_MS;
+}
+
+/** Exported for tests. */
+export function recordDemoIpScan(ip: string, now: number = Date.now()): void {
+  pruneDemoIpMap();
+  demoIpLastScanAt.set(ip, now);
+}
 
 const createScanBody = z.object({
   target_url: z.string().min(1).max(500),
@@ -52,7 +95,7 @@ const createScanBody = z.object({
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-router.post('/', optionalPrivyAuth, async (req, res) => {
+router.post('/', scanCreateIpLimiter, optionalPrivyAuth, scanCreateUserLimiter, async (req, res) => {
   const parsed = createScanBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
@@ -61,10 +104,69 @@ router.post('/', optionalPrivyAuth, async (req, res) => {
   const { target_url, mode, target_audience_text, hypothesis, target_cohorts } =
     parsed.data;
 
+  // ── Security gate (2026-06-15) ──
+  // The target URL is navigated to by a headless browser (SSRF) and
+  // echoed into reports/prompts. Reject hostile / non-public values
+  // BEFORE the cache lookup, credit debit, or pipeline kickoff. Store
+  // the normalized canonical form so a `javascript:`/internal host
+  // never lands in the DB.
+  const guard = validateTargetUrl(target_url);
+  if (!guard.ok) {
+    res.status(400).json({ error: 'invalid_url', reason: guard.reason });
+    return;
+  }
+  const safeUrl = guard.url;
+
+  // ── Anonymous path: demo limits (Sprint 1, decision §12-8) ──
+  if (!req.privyUser) {
+    // 24h cache — same URL recently scanned → return that scan instead
+    // of burning a new pipeline run. Reports are unlisted-public, so
+    // handing back an existing scanId leaks nothing new.
+    const windowStart = new Date(Date.now() - DEMO_WINDOW_MS);
+    const [cached] = await db
+      .select()
+      .from(schema.audienceFitScans)
+      .where(
+        and(
+          eq(schema.audienceFitScans.targetUrl, safeUrl),
+          sql`${schema.audienceFitScans.createdAt} >= ${windowStart}`,
+          sql`${schema.audienceFitScans.status} != 'failed'`,
+        ),
+      )
+      .orderBy(desc(schema.audienceFitScans.createdAt))
+      .limit(1);
+    if (cached) {
+      res.json({
+        scanId: cached.id,
+        status: cached.status,
+        cached: true,
+        created_at: cached.createdAt.toISOString(),
+      });
+      return;
+    }
+
+    const ip = req.ip ?? 'unknown';
+    if (!checkDemoIpAllowance(ip)) {
+      res.status(429).json({
+        error: 'demo_limit',
+        message:
+          'Anonymous demo is limited to 1 scan per day. Sign in to get $30 in free credits.',
+      });
+      return;
+    }
+    recordDemoIpScan(ip);
+  }
+
+  // Console S2 — auto-link to the user's workspace for this host
+  // (when one exists). Anonymous scans stay unlinked forever.
+  const workspace = req.privyUser
+    ? await findWorkspaceByHost(req.privyUser.id, safeUrl)
+    : null;
+
   const [scan] = await db
     .insert(schema.audienceFitScans)
     .values({
-      targetUrl: target_url,
+      targetUrl: safeUrl,
       mode,
       targetAudienceText: target_audience_text ?? null,
       hypothesis: hypothesis ?? null,
@@ -74,6 +176,7 @@ router.post('/', optionalPrivyAuth, async (req, res) => {
       // Phase 4 §1 — claim ownership when the requester is logged in.
       // Anonymous requests still allowed (legacy / pre-login demos).
       userId: req.privyUser?.id ?? null,
+      workspaceId: workspace?.id ?? null,
       status: 'pending',
       weightsVersion: 'v1.0',
     })
@@ -82,6 +185,25 @@ router.post('/', optionalPrivyAuth, async (req, res) => {
   if (!scan) {
     res.status(500).json({ error: 'insert_failed' });
     return;
+  }
+
+  // ── Authed path: credit debit before the pipeline starts ──
+  // Price: Mode A $2 / Mode B $1 (console-ia-redesign.md §12 decision 1).
+  // Insufficient balance → remove the pending row (nothing started yet)
+  // and 402 with the numbers the UI needs for the "충전/소진" state.
+  if (req.privyUser) {
+    const ok = await debitScan(req.privyUser.id, scan.id, mode);
+    if (!ok) {
+      await db
+        .delete(schema.audienceFitScans)
+        .where(eq(schema.audienceFitScans.id, scan.id));
+      res.status(402).json({
+        error: 'insufficient_credits',
+        price_cents: SCAN_PRICE_CENTS[mode],
+        balance_cents: await getCreditBalance(req.privyUser.id),
+      });
+      return;
+    }
   }
 
   // Kick off the pipeline on the next tick. Errors are caught inside
@@ -209,9 +331,14 @@ router.get('/me', requirePrivyAuth, async (req, res) => {
   // strips it because the public Recent feed shouldn't expose it).
   const sigByScan = new Map<string, string | null>();
   for (const s of scans) sigByScan.set(s.id, s.paymentTxSignature ?? null);
+  // Console S2 — workspace linkage so the console can split
+  // assigned vs Unassigned scans without a second round-trip.
+  const wsByScan = new Map<string, string | null>();
+  for (const s of scans) wsByScan.set(s.id, s.workspaceId ?? null);
   res.json({
     scans: summaries.map((s) => ({
       ...s,
+      workspace_id: wsByScan.get(s.id) ?? null,
       payment_tx_signature: sigByScan.get(s.id) ?? null,
       payment_solscan: sigByScan.get(s.id) ? solscanUrl(sigByScan.get(s.id)!) : null,
     })),
@@ -440,6 +567,10 @@ router.get('/:id/report', async (req, res) => {
     // Phase 5 — drives the "Compare with humans (n=X)" footer button.
     // Live count of survey_responses; resets to 0 when no submissions.
     survey_response_count: surveyResponseCount,
+    // Console S2 — pre-answer reward disclosure (§12 decision 7): the
+    // survey page must tell respondents BEFORE they answer when the
+    // per-scan reward budget (30) is exhausted.
+    survey_reward_available: completed ? await isRewardAvailable(id) : true,
     /** Whether human_aggregate has been computed at least once. The
      *  report page uses this to decide whether the Compare button
      *  goes straight to the comparison page or first triggers a
@@ -784,7 +915,11 @@ async function computeWeightedAarrrFor(
 // No auth in Phase 2 — email field is for traceability only. Phase 4
 // promotes this to Privy login.
 
-const surveyBody = z.object({
+// Exported for routes/partner.ts (geulbat S2S ingest) — the partner
+// channel reuses the exact same answer schema, plus its own
+// email/consent envelope. Do NOT add identity fields here (CLAUDE.md
+// Do-NOT on surveyBody email).
+export const surveyBody = z.object({
   // Phase 5.1 — identity comes from Privy (req.privyUser.id), not the
   // body. The legacy `email` field was dropped here when the route
   // became authenticated; existing pre-Phase-5.1 rows keep their email
@@ -827,14 +962,14 @@ const surveyBody = z.object({
 // the AI persona pipeline produces. Mirrors mapLLMResponseToSimulated
 // in services/dimensions/llm.ts so LLM vs human are directly
 // comparable.
-const HUMAN_ENGAGEMENT_TO_SCORE: Record<string, number> = {
+export const HUMAN_ENGAGEMENT_TO_SCORE: Record<string, number> = {
   abandon: 10, skim: 30, browse: 55, engage: 75, extended: 90,
 };
-const HUMAN_RETENTION_TO_D7: Record<string, number> = {
+export const HUMAN_RETENTION_TO_D7: Record<string, number> = {
   no_return: 0, weak: 5, moderate: 30, strong: 55,
 };
 
-function computeSusScoreLocal(responses: readonly number[]): number {
+export function computeSusScoreLocal(responses: readonly number[]): number {
   // Same canonical SUS-10 calc as services/audience_fit.ts.
   // Inlined to avoid pulling cross-module imports here.
   let sum = 0;
@@ -845,7 +980,7 @@ function computeSusScoreLocal(responses: readonly number[]): number {
   return sum * 2.5;
 }
 
-router.post('/:id/survey', requirePrivyAuth, async (req, res) => {
+router.post('/:id/survey', requirePrivyAuth, mutationLimiter, async (req, res) => {
   // Note: with `requirePrivyAuth` chained, Express's req.params.id typing
   // widens to string | string[] | undefined. Coerce to string explicitly.
   const id = String(req.params.id ?? '');
@@ -963,6 +1098,7 @@ router.post('/:id/survey', requirePrivyAuth, async (req, res) => {
         eq(schema.surveyResponses.userId, userId),
       ),
     );
+  let pointsAwarded = 0;
   if (existing) {
     await db
       .update(schema.surveyResponses)
@@ -974,12 +1110,25 @@ router.post('/:id/survey', requirePrivyAuth, async (req, res) => {
       userId,
       ...surveyValues,
     });
+    // Console S2 — direct (self-distributed) responses earn the same
+    // reward as partner-channel ones: every response is calibration
+    // fuel, 41R pays (console-ia-redesign.md §4.1). First submission
+    // only; per-scan cap 30 with a transparent 0pt row beyond it.
+    pointsAwarded = await awardSurveyPoints({
+      scanId: id,
+      source: '41r',
+      userId,
+      email: req.privyUser!.email,
+    });
+    // Retention loop #2 (S3) — milestone-batched owner notification.
+    notifySurveyMilestone(id);
   }
 
   res.json({
     ok: true,
     scanId: id,
     rows_created: dims.length,
+    points_awarded: pointsAwarded,
     summary: {
       llm,
       human,
@@ -995,13 +1144,15 @@ router.post('/:id/survey', requirePrivyAuth, async (req, res) => {
 // writes the like-for-like report into audience_fit_scans.human_aggregate.
 //
 // Idempotent — re-runnable any time. Each call overwrites in-place
-// so the latest n_respondents is always the source of truth. No auth
-// gate in Phase 5 (the /survey endpoint is also unauthenticated).
-// Phase 6 will gate behind scan-ownership when survey URLs become
-// shareable from a logged-in dashboard.
-router.post('/:id/human-aggregate', async (req, res) => {
-  const { id } = req.params;
-  if (!UUID_RE.test(id ?? '')) {
+// so the latest n_respondents is always the source of truth.
+//
+// Console Sprint 1 (console-ia-redesign.md §3.2): gated by scan
+// ownership — the requester must be the Privy user that created the
+// scan. Operator override via x-admin-key (covers legacy scans whose
+// user_id is NULL — those have no owner to ask).
+router.post('/:id/human-aggregate', optionalPrivyAuth, mutationLimiter, async (req, res) => {
+  const id = String(req.params.id ?? '');
+  if (!UUID_RE.test(id)) {
     res.status(404).json({ error: 'scan_not_found' });
     return;
   }
@@ -1012,6 +1163,19 @@ router.post('/:id/human-aggregate', async (req, res) => {
   if (!scan) {
     res.status(404).json({ error: 'scan_not_found' });
     return;
+  }
+  // Operator (x-admin-key) bypasses ownership — also the only path for
+  // legacy scans whose user_id is NULL. Everyone else must be logged in
+  // AND own the scan.
+  if (!isAdminRequest(req)) {
+    if (!req.privyUser) {
+      res.status(401).json({ error: 'auth_required' });
+      return;
+    }
+    if (scan.userId === null || scan.userId !== req.privyUser.id) {
+      res.status(403).json({ error: 'not_scan_owner' });
+      return;
+    }
   }
   try {
     const aggregate = await recomputeHumanAggregate(id);
@@ -1199,7 +1363,7 @@ router.get('/:id/compare', async (req, res) => {
 // Both routes require Privy auth + scan ownership. /payment-tx will
 // lazily claim ownership if the scan was created anonymously.
 
-router.post('/:id/payment-tx', requirePrivyAuth, async (req, res) => {
+router.post('/:id/payment-tx', requirePrivyAuth, mutationLimiter, async (req, res) => {
   const u = req.privyUser!;
   if (!u.walletAddress) {
     res.status(400).json({
@@ -1256,7 +1420,7 @@ const paymentConfirmBody = z.object({
   signed_tx_base64: z.string().min(1).max(20_000),
 });
 
-router.post('/:id/payment-confirm', requirePrivyAuth, async (req, res) => {
+router.post('/:id/payment-confirm', requirePrivyAuth, mutationLimiter, async (req, res) => {
   const u = req.privyUser!;
   const id = String(req.params.id ?? '');
   if (!UUID_RE.test(id)) {
@@ -1964,6 +2128,9 @@ function shapeScanMeta(s: typeof schema.audienceFitScans.$inferSelect) {
     // questions and the report page can show "n custom questions"
     // without a separate fetch.
     custom_questions: s.customQuestions ?? null,
+    /** Ch1 objective page facts measured at capture (no LLM). Null on
+     *  legacy scans — the report's "measured" strip hides itself. */
+    capture_signals: s.captureSignals ?? null,
     created_at: s.createdAt.toISOString(),
     completed_at: s.completedAt ? s.completedAt.toISOString() : null,
   };
@@ -2174,6 +2341,7 @@ function buildDemoReport() {
     // tsc won't catch missing fields, but the Compare button reads
     // these directly and renders "(n=)" if undefined.
     survey_response_count: 0,
+    survey_reward_available: true,
     human_aggregate_computed: false,
   };
 }

@@ -441,3 +441,165 @@ body::before {
     align-items: stretch;
   }
 }
+
+/* ─── E-series — 2026-06-12 design refresh (console + landing) ──────
+   Hover/elevation layer for the warm-editorial theme in
+   validator/_components/ui.tsx (inline styles can't express :hover).
+   .e-card  — paper card with hairline + lift on hover
+   .e-cta   — primary action: accent darken + press feedback
+   .e-row   — list row hover tint
+   Load-bearing for the design pass; safe to extend, don't repurpose. */
+.e-card {
+  box-shadow: 0 1px 2px rgba(21, 23, 27, 0.04);
+  transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
+}
+a.e-card:hover,
+.e-card-link:hover {
+  box-shadow: 0 10px 28px -10px rgba(21, 23, 27, 0.14), 0 2px 6px rgba(21, 23, 27, 0.05);
+  transform: translateY(-2px);
+  border-color: #c9cdd2 !important;
+}
+.e-cta {
+  transition: background-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 2px rgba(224, 78, 20, 0.25);
+}
+.e-cta:hover:not(:disabled) {
+  background-color: #c33f0c !important;
+  box-shadow: 0 6px 18px -6px rgba(224, 78, 20, 0.4);
+}
+.e-cta:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.e-cta-ink {
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+.e-cta-ink:hover:not(:disabled) {
+  background-color: #2c2f35 !important;
+}
+.e-row {
+  transition: background-color 0.12s ease;
+}
+.e-row:hover {
+  background-color: rgba(21, 23, 27, 0.03);
+}
+.e-hero-accent {
+  background-image: linear-gradient(transparent 66%, #ffd3bd 66%);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* ─── cs-series — GA-style console shell (2026-06-12) ───────────────
+   Persistent left sidebar for /console/* (sites list + per-site
+   subnav). Desktop: sticky 232px rail under the TopBar. Mobile:
+   collapses to a horizontal scroll strip so the phone contract
+   (no horizontal page overflow) holds. */
+.cs-layout {
+  display: flex;
+  align-items: stretch;
+  min-height: calc(100vh - 57px);
+}
+.cs-side {
+  width: 232px;
+  flex-shrink: 0;
+  background: #ffffff;
+  border-right: 1px solid #e4e6e8;
+  position: sticky;
+  top: 57px;
+  height: calc(100vh - 57px);
+  overflow-y: auto;
+  padding: 16px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cs-main {
+  flex: 1;
+  min-width: 0;
+  padding: 26px clamp(16px, 3vw, 36px) 64px;
+}
+.cs-main > .cs-inner {
+  max-width: 1160px;
+}
+.cs-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: #5c616b;
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cs-item:hover {
+  background: #f3f4f4;
+  color: #15171b;
+}
+.cs-item.active {
+  background: #f3f4f4;
+  color: #15171b;
+  font-weight: 600;
+  border-left-color: #e04e14;
+}
+.cs-sub {
+  margin-left: 14px;
+  border-left: 1px solid #e4e6e8;
+  padding-left: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cs-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #969ca6;
+  padding: 14px 10px 6px;
+  font-family: var(--font-mono-loaded), "JetBrains Mono", monospace;
+}
+.cs-foot {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid #e4e6e8;
+}
+@media (max-width: 768px) {
+  .cs-layout {
+    flex-direction: column;
+  }
+  .cs-side {
+    position: static;
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid #e4e6e8;
+    padding: 8px 12px;
+    gap: 6px;
+  }
+  .cs-side .cs-label,
+  .cs-side .cs-foot {
+    display: none;
+  }
+  .cs-sub {
+    margin-left: 0;
+    border-left: none;
+    padding-left: 0;
+    flex-direction: row;
+    gap: 4px;
+  }
+  .cs-item {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 6px;
+  }
+  .cs-item.active {
+    border-left-color: transparent;
+    border-bottom-color: #e04e14;
+  }
+}
