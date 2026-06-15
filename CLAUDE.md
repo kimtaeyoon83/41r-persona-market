@@ -768,6 +768,12 @@ strip. Capture falls back networkidle → domcontentloaded on timeout
   prod schema changes as idempotent SQL applied manually (the
   0009-0012 files are written idempotent — `IF NOT EXISTS` /
   constraint guards — for exactly this). `db:push` stays dev-only.
+  **0013 + 0014 (Console S1-S2) were applied to prod 2026-06-15** via
+  `scripts/apply-prod-console-migrations.ts` (idempotent, re-runnable,
+  reads DATABASE_URL → point at the Postgres service's public proxy
+  URL). Use that script — NOT db:migrate — for any future
+  empty-journal prod schema add; both new migration files follow the
+  same IF-NOT-EXISTS pattern.
 
 ## Environment Variables
 
