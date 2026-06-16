@@ -17,46 +17,20 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { meApi, scanApi, submitSurveyByToken, type CustomQuestion } from "@/lib/api";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 import { C, FM, FS, Frame } from "../../_components/ui";
 
-const SUS_QUESTIONS = [
-  "I think that I would like to use this site frequently.",
-  "I found the site unnecessarily complex.",
-  "I thought the site was easy to use.",
-  "I think I would need help to use this site.",
-  "I found the various functions in this site were well integrated.",
-  "I thought there was too much inconsistency in this site.",
-  "I would imagine that most people would learn to use this site quickly.",
-  "I found the site very cumbersome to use.",
-  "I felt very confident using the site.",
-  "I needed to learn a lot before I could get going with this site.",
-];
-
-const ENGAGEMENT_OPTIONS = [
-  { id: "abandon", label: "Abandon (<15s)" },
-  { id: "skim", label: "Skim (<1min)" },
-  { id: "browse", label: "Browse (1-5min)" },
-  { id: "engage", label: "Engage (5-15min)" },
-  { id: "extended", label: "Extended (>15min)" },
-] as const;
-
-const RETENTION_OPTIONS = [
-  { id: "no_return", label: "No return" },
-  { id: "weak", label: "Weak — maybe once" },
-  { id: "moderate", label: "Moderate — weekly" },
-  { id: "strong", label: "Strong — daily" },
-] as const;
-
-const AGE_OPTIONS = [
-  { id: "teen", label: "<20" },
-  { id: "young_adult", label: "20s" },
-  { id: "adult", label: "30-40s" },
-  { id: "senior", label: "50+" },
-] as const;
+const ENGAGEMENT_IDS = ["abandon", "skim", "browse", "engage", "extended"] as const;
+const RETENTION_IDS = ["no_return", "weak", "moderate", "strong"] as const;
+const AGE_IDS = ["teen", "young_adult", "adult", "senior"] as const;
 
 export default function SurveyPage() {
   const params = useParams<{ scanId: string }>();
   const scanId = params?.scanId ?? "";
+  const { t } = useI18n();
+  const engOptions = ENGAGEMENT_IDS.map((id) => ({ id, label: t(`survey.eng.${id}` as MessageKey) }));
+  const retOptions = RETENTION_IDS.map((id) => ({ id, label: t(`survey.ret.${id}` as MessageKey) }));
+  const ageOptions = AGE_IDS.map((id) => ({ id, label: t(`survey.age.${id}` as MessageKey) }));
   const { ready, authenticated, login } = usePrivy();
 
   // Partner handoff mode (geulbat pilot) — a signed `pt` token in the
@@ -202,8 +176,8 @@ export default function SurveyPage() {
       const m = err instanceof Error ? err.message : "";
       // Friendly, specific copy instead of a raw error code.
       const friendly = /expired|invalid_or_expired|token/i.test(m)
-        ? "설문 링크가 만료됐어요. 페이지를 다시 열어 제출해 주세요. (link expired — reopen the survey)"
-        : "제출 중 문제가 생겼어요. 이미 제출됐을 수 있으니 중복 걱정 없이 다시 시도해 주세요. (submit failed — safe to retry)";
+        ? t("survey.errExpired")
+        : t("survey.errRetry");
       setError(friendly);
     } finally {
       setSubmitting(false);
@@ -215,17 +189,15 @@ export default function SurveyPage() {
       <Frame active="discovery">
         <div className="v-page-pad" style={{ maxWidth: 640, margin: "0 auto" }}>
           <h1 style={{ fontSize: 28, fontWeight: 600, fontFamily: FS, marginBottom: 14 }}>
-            ✓ Thanks — your response was recorded.
+            {t("survey.thanks")}
           </h1>
           {success.points != null && success.points > 0 && (
             <div style={{ fontSize: 14, color: C.ok, marginBottom: 12 }}>
-              +{success.points}P credited — sign in to 41R with the same Google
-              account anytime to see your points and responses.
+              +{success.points}P {t("survey.pointsCredited")}
             </div>
           )}
           <div style={{ fontSize: 14, color: C.textDim, lineHeight: 1.6, marginBottom: 24 }}>
-            5 calibration rows written (one per dimension). The team uses these to
-            measure how closely the AI personas match real human reactions.
+            {t("survey.calibNote")}
           </div>
           <div
             style={{
@@ -238,7 +210,7 @@ export default function SurveyPage() {
               marginBottom: 20,
             }}
           >
-            <div style={{ marginBottom: 8, color: C.textDim }}>LLM vs You (Δ per dimension)</div>
+            <div style={{ marginBottom: 8, color: C.textDim }}>{t("survey.llmVsYou")}</div>
             {Object.entries(success.delta ?? {}).map(([dim, d]) => (
               <div key={dim} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0" }}>
                 <span>{dim}</span>
@@ -249,7 +221,7 @@ export default function SurveyPage() {
             ))}
           </div>
           <Link href="/" style={{ color: C.accent, fontSize: 13, textDecoration: "none" }}>
-            ← Back to home
+            {t("survey.backHome")}
           </Link>
         </div>
       </Frame>
@@ -261,18 +233,17 @@ export default function SurveyPage() {
       <div className="v-page-pad" style={{ maxWidth: 720, margin: "0 auto" }}>
         <div style={{ marginBottom: 28 }}>
           <Link href="/" style={{ fontSize: 12, color: C.textFaint, fontFamily: FM, textDecoration: "none" }}>
-            ← Home
+            {t("survey.home")}
           </Link>
         </div>
         <h1 style={{ fontSize: 30, fontWeight: 600, fontFamily: FS, lineHeight: 1.2, marginBottom: 8 }}>
-          Human calibration survey
+          {t("survey.title")}
         </h1>
         <div style={{ fontSize: 13, color: C.textDim, marginBottom: 4 }}>
-          Scan ID: <span style={{ fontFamily: FM, color: C.text }}>{scanId.slice(0, 8)}…</span>
+          {t("survey.scanId")}: <span style={{ fontFamily: FM, color: C.text }}>{scanId.slice(0, 8)}…</span>
         </div>
         <div style={{ fontSize: 13, color: C.textDim, marginBottom: 30, lineHeight: 1.6 }}>
-          Use the site for a few minutes, then answer below. Your responses become
-          ground-truth for measuring AI persona accuracy.
+          {t("survey.intro")}
         </div>
 
         {/* Console S2 — pre-answer reward disclosure (§12 decision 7:
@@ -291,10 +262,7 @@ export default function SurveyPage() {
               lineHeight: 1.6,
             }}
           >
-            This survey&apos;s point rewards have been fully claimed — your
-            response still counts, but no points will be awarded for it.
-            <br />이 설문의 포인트 보상이 모두 소진되었습니다 — 응답은
-            반영되지만 포인트는 적립되지 않습니다.
+            {t("survey.rewardExhausted")}
           </div>
         )}
 
@@ -315,8 +283,7 @@ export default function SurveyPage() {
               lineHeight: 1.6,
             }}
           >
-            Sign in to submit your survey. Your responses are tied to your
-            account so you can come back and edit them later.
+            {t("survey.signInPrompt")}
             <button
               onClick={() => login()}
               style={{
@@ -333,7 +300,7 @@ export default function SurveyPage() {
                 cursor: "pointer",
               }}
             >
-              Sign in →
+              {t("survey.signIn")}
             </button>
           </div>
         )}
@@ -349,18 +316,17 @@ export default function SurveyPage() {
               color: C.textDim,
             }}
           >
-            ✎ You&rsquo;ve submitted before — editing your previous answer.
-            Resubmitting overwrites it.
+            {t("survey.editing")}
           </div>
         )}
 
         {/* SUS-10 */}
-        <Section title="Usability (SUS-10)" sub="Strongly disagree (1) → Strongly agree (5)">
-          {SUS_QUESTIONS.map((q, i) => (
+        <Section title={t("survey.susTitle")} sub={t("survey.susSub")}>
+          {Array.from({ length: 10 }).map((_, i) => (
             <div key={i} style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 13, marginBottom: 6 }}>
                 <span style={{ color: C.textFaint, fontFamily: FM, marginRight: 6 }}>Q{i + 1}.</span>
-                {q}
+                {t(`survey.sus.${i + 1}` as MessageKey)}
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 {[1, 2, 3, 4, 5].map((v) => (
@@ -392,38 +358,38 @@ export default function SurveyPage() {
         </Section>
 
         {/* Engagement */}
-        <Section title="Engagement" sub="Roughly how long would you spend on this site?">
-          <RadioRow options={ENGAGEMENT_OPTIONS} value={engagement} onChange={setEngagement} />
+        <Section title={t("survey.engTitle")} sub={t("survey.engSub")}>
+          <RadioRow options={engOptions} value={engagement} onChange={setEngagement} />
         </Section>
 
         {/* Adoption */}
-        <Section title="Adoption" sub="How likely are you to sign up / start using this?">
+        <Section title={t("survey.adoptTitle")} sub={t("survey.adoptSub")}>
           <Slider value={signupLikelihood} onChange={setSignupLikelihood} suffix="%" />
         </Section>
 
         {/* Retention */}
-        <Section title="Retention" sub="Would you come back?">
-          <RadioRow options={RETENTION_OPTIONS} value={retention} onChange={setRetention} />
+        <Section title={t("survey.retTitle")} sub={t("survey.retSub")}>
+          <RadioRow options={retOptions} value={retention} onChange={setRetention} />
         </Section>
 
         {/* Task success */}
-        <Section title="Task success" sub="How likely could you complete the site's core action?">
+        <Section title={t("survey.taskTitle")} sub={t("survey.taskSub")}>
           <Slider value={completionLikelihood} onChange={setCompletionLikelihood} suffix="%" />
         </Section>
 
         {/* Voice quotes */}
-        <Section title="Voice quotes" sub="Optional but valued — your voice goes into the report.">
-          <Textarea label="First impression" value={firstImpression} onChange={setFirstImpression} />
-          <Textarea label="Biggest friction" value={biggestFriction} onChange={setBiggestFriction} />
-          <Textarea label="What would make you return" value={wouldReturnBecause} onChange={setWouldReturnBecause} />
-          <Textarea label="One thing to change" value={oneThingToChange} onChange={setOneThingToChange} />
+        <Section title={t("survey.voiceTitle")} sub={t("survey.voiceSub")}>
+          <Textarea label={t("survey.voiceFirst")} value={firstImpression} onChange={setFirstImpression} />
+          <Textarea label={t("survey.voiceFriction")} value={biggestFriction} onChange={setBiggestFriction} />
+          <Textarea label={t("survey.voiceReturn")} value={wouldReturnBecause} onChange={setWouldReturnBecause} />
+          <Textarea label={t("survey.voiceChange")} value={oneThingToChange} onChange={setOneThingToChange} />
         </Section>
 
         {/* Site-specific questions — only render when the scan has them. */}
         {customQuestions && customQuestions.length > 0 && (
           <Section
-            title="Site-specific questions"
-            sub="Tailored to this site — your answers feed the comparison report."
+            title={t("survey.customTitle")}
+            sub={t("survey.customSub")}
           >
             {customQuestions.map((q) => (
               <div key={q.id} style={{ marginBottom: 18 }}>
@@ -467,7 +433,7 @@ export default function SurveyPage() {
                       setCustomAnswers((a) => ({ ...a, [q.id]: e.target.value }))
                     }
                     rows={3}
-                    placeholder="Type your answer here…"
+                    placeholder={t("survey.typeAnswer")}
                     style={{
                       width: "100%",
                       padding: "10px 14px",
@@ -491,21 +457,21 @@ export default function SurveyPage() {
         )}
 
         {/* Demographics */}
-        <Section title="About you" sub="For cohort matching only — not stored against your email.">
-          <FieldRow label="Age">
-            <RadioRow options={AGE_OPTIONS} value={ageGroup} onChange={setAgeGroup} />
+        <Section title={t("survey.aboutTitle")} sub={t("survey.aboutSub")}>
+          <FieldRow label={t("survey.age")}>
+            <RadioRow options={ageOptions} value={ageGroup} onChange={setAgeGroup} />
           </FieldRow>
-          <FieldRow label="Tech literacy">
+          <FieldRow label={t("survey.tech")}>
             <Slider value={techLit} onChange={setTechLit} suffix="%" />
           </FieldRow>
-          <FieldRow label="Crypto experience">
+          <FieldRow label={t("survey.crypto")}>
             <Slider value={cryptoExp} onChange={setCryptoExp} suffix="%" />
           </FieldRow>
-          <FieldRow label="Primary device">
+          <FieldRow label={t("survey.device")}>
             <div style={{ display: "flex", gap: 6 }}>
               {[
-                { id: true, label: "Mobile" },
-                { id: false, label: "Desktop" },
+                { id: true, label: t("survey.mobile") },
+                { id: false, label: t("survey.desktop") },
               ].map((o) => (
                 <button
                   key={String(o.id)}
@@ -549,7 +515,7 @@ export default function SurveyPage() {
             fontFamily: FS,
           }}
         >
-          {submitting ? "Submitting…" : "Submit response"}
+          {submitting ? t("survey.submitting") : t("survey.submit")}
         </button>
       </div>
     </Frame>
