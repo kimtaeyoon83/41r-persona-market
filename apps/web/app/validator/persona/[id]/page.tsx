@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { scanApi, type ScanPersonaDetail } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { Bar, C, Card, FM, FS, Frame, Pill } from "../../_components/ui";
 
 // Screen 5: Persona drill-down. Reads
@@ -19,14 +20,17 @@ function fitTone(score: number | null): "ok" | "warn" | "bad" {
   return "bad";
 }
 
-function fitLabel(score: number | null): string {
-  if (score == null) return "no data";
-  if (score >= 65) return "Strong fit";
-  if (score >= 40) return "Mixed";
-  return "Strong misfit";
+function fitLabel(
+  score: number | null,
+): "persona.fitNoData" | "persona.fitStrong" | "persona.fitMixed" | "persona.fitMisfit" {
+  if (score == null) return "persona.fitNoData";
+  if (score >= 65) return "persona.fitStrong";
+  if (score >= 40) return "persona.fitMixed";
+  return "persona.fitMisfit";
 }
 
 function PersonaInner() {
+  const { t } = useI18n();
   const params = useParams();
   const search = useSearchParams();
   const personaId = (params?.id as string) || "";
@@ -56,9 +60,9 @@ function PersonaInner() {
     return (
       <Frame active="report">
         <div style={{ padding: 32 }}>
-          <Pill tone="warn">Missing scan context</Pill>
+          <Pill tone="warn">{t("persona.missingScan")}</Pill>
           <div style={{ marginTop: 12, fontSize: 13, color: C.textDim }}>
-            Open a persona from a report card. Direct links require
+            {t("persona.missingScanHint")}{" "}
             <code style={{ fontFamily: FM, marginLeft: 4 }}>?scan=&lt;scanId&gt;</code>.
           </div>
         </div>
@@ -70,13 +74,13 @@ function PersonaInner() {
     return (
       <Frame active="report">
         <div style={{ padding: 32 }}>
-          <Pill tone="bad">Error</Pill>
+          <Pill tone="bad">{t("persona.error")}</Pill>
           <div style={{ marginTop: 8, fontSize: 13, color: C.bad }}>{error}</div>
           <Link
             href={`/validator/report/${scanId}`}
             style={{ fontSize: 12, color: C.accent, marginTop: 12, display: "inline-block" }}
           >
-            ← Back to report
+            {t("persona.backToReport")}
           </Link>
         </div>
       </Frame>
@@ -87,7 +91,7 @@ function PersonaInner() {
     return (
       <Frame active="report">
         <div style={{ padding: 32, color: C.textFaint, fontSize: 13 }}>
-          Loading persona…
+          {t("persona.loading")}
         </div>
       </Frame>
     );
@@ -114,11 +118,11 @@ function PersonaInner() {
   // task_success likelihood, etc.) so each chip here is a dimension
   // score, not a behavioural step the user did or did not reach.
   const dimensionSnapshot = [
-    { label: "Engagement", v: response.engagement },
-    { label: "Task", v: response.task_success },
-    { label: "Happiness", v: response.happiness },
-    { label: "Adoption", v: response.adoption },
-    { label: "Retention D-7", v: response.retention_d7 },
+    { label: t("persona.dimEngagement"), v: response.engagement },
+    { label: t("persona.dimTask"), v: response.task_success },
+    { label: t("persona.dimHappiness"), v: response.happiness },
+    { label: t("persona.dimAdoption"), v: response.adoption },
+    { label: t("persona.dimRetention"), v: response.retention_d7 },
   ];
 
   const sus = response.sus_responses ?? [];
@@ -126,28 +130,28 @@ function PersonaInner() {
 
   const metrics = [
     {
-      l: "Onboarding",
+      l: t("persona.mOnboarding"),
       v: response.signup_likelihood,
       asPct: true,
-      sub: response.is_flagged ? "Flagged response" : "Sign-up likelihood",
+      sub: response.is_flagged ? t("persona.subFlagged") : t("persona.subSignup"),
     },
     {
-      l: "Completion",
+      l: t("persona.mCompletion"),
       v: response.completion_likelihood,
       asPct: true,
-      sub: "Task likelihood",
+      sub: t("persona.subTask"),
     },
     {
-      l: "Happiness",
+      l: t("persona.mHappiness"),
       v: response.happiness != null ? response.happiness / 100 : null,
       asPct: true,
-      sub: "SUS aggregate",
+      sub: t("persona.subSus"),
     },
     {
-      l: "Return D-7",
+      l: t("persona.mReturn"),
       v: response.retention_d7 != null ? response.retention_d7 / 100 : null,
       asPct: true,
-      sub: "Likelihood to return",
+      sub: t("persona.subReturn"),
     },
   ];
 
@@ -208,7 +212,7 @@ function PersonaInner() {
             <div style={{ fontSize: 16, fontWeight: 600 }}>
               {persona.display_name}{" "}
               <span style={{ fontSize: 11, color: C.textFaint, fontWeight: 400 }}>
-                (synthetic)
+                {t("persona.synthetic")}
               </span>
             </div>
             <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>
@@ -216,9 +220,9 @@ function PersonaInner() {
             </div>
             <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
               <Pill tone={tone}>
-                {fitLabel(fitScore)} · {fitScore ?? "—"}
+                {t(fitLabel(fitScore))} · {fitScore ?? "—"}
               </Pill>
-              {response.is_flagged && <Pill tone="bad">Flagged</Pill>}
+              {response.is_flagged && <Pill tone="bad">{t("persona.flagged")}</Pill>}
             </div>
 
             {persona.vector_axes.length > 0 && (
@@ -267,7 +271,7 @@ function PersonaInner() {
                   lineHeight: 1.55,
                 }}
               >
-                <b style={{ color: C.text }}>Persona personality</b>
+                <b style={{ color: C.text }}>{t("persona.personality")}</b>
                 <span
                   style={{
                     fontSize: 10,
@@ -276,7 +280,7 @@ function PersonaInner() {
                     marginLeft: 6,
                   }}
                 >
-                  pre-defined trait, not a scan response
+                  {t("persona.personalityNote")}
                 </span>
                 <br />
                 &ldquo;{persona.voice_sample}&rdquo;
@@ -296,7 +300,7 @@ function PersonaInner() {
                   justifyContent: "space-between",
                 }}
               >
-                <span>Dimension snapshot</span>
+                <span>{t("persona.dimSnapshot")}</span>
                 <span
                   style={{
                     fontSize: 11,
@@ -305,7 +309,7 @@ function PersonaInner() {
                     fontFamily: FM,
                   }}
                 >
-                  per-axis score · not a step funnel
+                  {t("persona.dimSnapshotNote")}
                 </span>
               </div>
               <div
@@ -382,15 +386,15 @@ function PersonaInner() {
                 }}
               >
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  Sentiment · SUS 10 questions
+                  {t("persona.sentiment")}
                 </div>
                 <div style={{ fontFamily: FM, fontSize: 13 }}>
-                  raw {susScore != null ? Math.round(susScore) : "—"} / 100
+                  {t("persona.raw")} {susScore != null ? Math.round(susScore) : "—"} / 100
                 </div>
               </div>
               {sus.length === 0 ? (
                 <div style={{ fontSize: 12, color: C.textFaint, padding: "20px 0" }}>
-                  SUS responses not available for this row.
+                  {t("persona.susUnavailable")}
                 </div>
               ) : (
                 <div
@@ -501,7 +505,7 @@ function PersonaInner() {
                     fontFamily: FS,
                   }}
                 >
-                  Biggest friction
+                  {t("persona.biggestFriction")}
                 </div>
                 <div
                   style={{
@@ -529,7 +533,7 @@ function PersonaInner() {
                     fontFamily: FS,
                   }}
                 >
-                  Would return because
+                  {t("persona.wouldReturn")}
                 </div>
                 <div
                   style={{
@@ -556,17 +560,16 @@ function PersonaInner() {
                   fontFamily: FS,
                 }}
               >
-                Trust contract
+                {t("persona.trustContract")}
               </div>
               <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.55 }}>
-                Response generated from PersonaVector + site captures via a single
-                Sonnet vision call.{" "}
+                {t("persona.trustBody")}{" "}
                 <span style={{ fontFamily: FM }}>
                   scan {scan.id.slice(0, 8)} · persona {persona.id.slice(0, 8)}
                 </span>{" "}
                 ·{" "}
                 <span style={{ color: C.text }}>
-                  AI persona inference, not actual user testimony.
+                  {t("persona.trustTail")}
                 </span>
               </div>
             </Card>
