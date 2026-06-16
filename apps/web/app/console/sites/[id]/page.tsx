@@ -65,9 +65,18 @@ function SiteDetailInner() {
     const res = await consoleApi.getSite(id);
     setSite(res.workspace);
     setScans(res.scans);
-    const latestCompleted = res.scans.find((s) => s.status === "completed");
-    if (latestCompleted) {
-      const r = await scanApi.getReport(latestCompleted.id);
+    // Show the ANCHOR scan's report — that's where partner surveys
+    // accumulate and the human comparison lives. Without this the
+    // Overview shows the latest re-scan (often 0 surveys), making the
+    // survey/compare sections look empty even though responses exist on
+    // the anchor. Fall back to the latest completed scan when no anchor.
+    const anchorId = res.workspace.anchor_scan_id;
+    const reportScan =
+      (anchorId &&
+        res.scans.find((s) => s.id === anchorId && s.status === "completed")) ||
+      res.scans.find((s) => s.status === "completed");
+    if (reportScan) {
+      const r = await scanApi.getReport(reportScan.id);
       setReport(r);
     }
   }, [id]);
@@ -210,15 +219,17 @@ function SiteDetailInner() {
           <Center>{t("common.loading")}</Center>
         ) : tab === "overview" ? (
           <Overview
+            site={site}
             scans={scans}
             latest={latest}
             report={report}
             delta={delta}
             scores={completedScores}
             copied={copied === "survey"}
-            onCopySurvey={() =>
-              latest && copy(`${window.location.origin}/validator/survey/${latest.id}`, "survey")
-            }
+            onCopySurvey={() => {
+              const sid = report?.scan.id ?? latest?.id;
+              if (sid) copy(`${window.location.origin}/validator/survey/${sid}`, "survey");
+            }}
           />
         ) : tab === "reports" ? (
           <Reports scans={scans} />
@@ -234,6 +245,7 @@ function SiteDetailInner() {
 
 // ─── Overview tab (S1 layout, workspace-fed) ───────────────────────
 function Overview({
+  site,
   scans,
   latest,
   report,
@@ -242,6 +254,7 @@ function Overview({
   copied,
   onCopySurvey,
 }: {
+  site: ConsoleSite;
   scans: ScanSummary[];
   latest: ScanSummary | null;
   report: ScanReport | null;
@@ -257,10 +270,68 @@ function Overview({
   const tone =
     score == null ? C.textFaint : score >= 60 ? C.ok : score >= 40 ? C.warn : C.bad;
 
+  // No completed scan yet → this is where founders land right after
+  // registering. Instead of a dead-end message, drive the first analysis
+  // (which becomes the workspace anchor partner surveys attach to).
   if (!latest) {
+    const running = scans.find((s) => s.status !== "completed" && s.status !== "failed");
     return (
-      <div style={{ padding: 32, textAlign: "center", color: C.textDim, fontSize: 13 }}>
-        {t("console.noCompleted")}
+      <div
+        style={{
+          background: C.panel,
+          border: `1px dashed ${C.border}`,
+          borderRadius: 14,
+          padding: "36px 28px",
+          textAlign: "center",
+          maxWidth: 560,
+        }}
+      >
+        {running ? (
+          <>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>
+              {t("console.analysisRunning")}
+            </div>
+            <Link
+              href={`/validator/processing/${running.id}`}
+              style={{ color: C.accent, textDecoration: "none", fontSize: 13, fontFamily: FM }}
+            >
+              {t("console.viewProgress")}
+            </Link>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+              {t("console.noScanTitle")}
+            </div>
+            <div
+              style={{
+                fontSize: 12.5,
+                color: C.textDim,
+                lineHeight: 1.7,
+                maxWidth: 420,
+                margin: "0 auto 18px",
+              }}
+            >
+              {t("console.noScanBody")}
+            </div>
+            <Link
+              href={`/validator/detail?url=${encodeURIComponent(`https://${site.url_host}`)}`}
+              className="e-cta"
+              style={{
+                display: "inline-block",
+                background: C.accent,
+                color: "#fff",
+                borderRadius: 9,
+                padding: "10px 20px",
+                fontSize: 13,
+                fontWeight: 600,
+                textDecoration: "none",
+              }}
+            >
+              {t("console.analyzeNow")} · $2
+            </Link>
+          </>
+        )}
       </div>
     );
   }
@@ -387,7 +458,7 @@ function Overview({
             {copied ? t("console.copied") : t("console.copySurveyLink")}
           </button>
           <Link
-            href={`/validator/compare/${latest.id}`}
+            href={`/validator/compare/${report.scan.id}`}
             style={{
               border: `1px solid ${C.border}`,
               borderRadius: 7,
@@ -868,6 +939,44 @@ function Settings({
   const [rotated, setRotated] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Auth session (Phase 1) — paste storageState JSON + key screens.
+  const [sessionJson, setSessionJson] = useState("");
+  const [paths, setPaths] = useState((site.capture_paths ?? []).join("\n"));
+  const [authSaving, setAuthSaving] = useState(false);
+  const [authSaved, setAuthSaved] = useState(false);
+
+  const saveAuth = async () => {
+    if (authSaving || !sessionJson.trim()) return;
+    setAuthSaving(true);
+    try {
+      const capture_paths = paths
+        .split("\n")
+        .map((p) => p.trim())
+        .filter(Boolean);
+      await consoleApi.setAuthSession(site.id, {
+        storage_state: sessionJson.trim(),
+        capture_paths,
+      });
+      setSessionJson("");
+      setAuthSaved(true);
+      setTimeout(() => setAuthSaved(false), 1600);
+      await onChanged();
+    } finally {
+      setAuthSaving(false);
+    }
+  };
+
+  const clearAuth = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await consoleApi.clearAuthSession(site.id);
+      await onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const snippet = `<script src="${API_BASE}/api/partner/t.js" data-site="${site.site_key}" async></script>`;
 
   const saveName = async () => {
@@ -989,6 +1098,78 @@ function Settings({
         <div style={{ fontSize: 11, color: C.textFaint, marginTop: 8, fontFamily: FM }}>
           {t("console.lastEvent")}:{" "}
           {site.last_event_at ? timeAgo(site.last_event_at) : t("console.noEvents")}
+        </div>
+      </SettingsCard>
+
+      {/* Auth session — authenticated capture for login-gated apps */}
+      <SettingsCard title={t("console.authTitle")} sub={t("console.authBody")}>
+        <div
+          style={{
+            fontSize: 12,
+            fontFamily: FM,
+            color: site.has_auth_session ? C.ok : C.textFaint,
+            marginBottom: 10,
+          }}
+        >
+          {site.has_auth_session
+            ? `● ${t("console.authActive")}${
+                site.auth_session_updated_at
+                  ? ` (${timeAgo(site.auth_session_updated_at)})`
+                  : ""
+              }`
+            : `○ ${t("console.authNone")}`}
+        </div>
+        <textarea
+          value={sessionJson}
+          onChange={(e) => setSessionJson(e.target.value)}
+          placeholder={t("console.authPaste")}
+          rows={3}
+          style={{
+            width: "100%",
+            padding: "9px 12px",
+            fontSize: 11,
+            fontFamily: FM,
+            border: `1px solid ${C.border}`,
+            borderRadius: 7,
+            background: "#fff",
+            color: C.text,
+            outline: "none",
+            resize: "vertical",
+            marginBottom: 8,
+          }}
+        />
+        <textarea
+          value={paths}
+          onChange={(e) => setPaths(e.target.value)}
+          placeholder={t("console.authPaths")}
+          rows={3}
+          style={{
+            width: "100%",
+            padding: "9px 12px",
+            fontSize: 12,
+            fontFamily: FM,
+            border: `1px solid ${C.border}`,
+            borderRadius: 7,
+            background: "#fff",
+            color: C.text,
+            outline: "none",
+            resize: "vertical",
+            marginBottom: 10,
+          }}
+        />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            onClick={saveAuth}
+            style={btnGhost}
+            disabled={authSaving || !sessionJson.trim()}
+          >
+            {authSaved ? t("console.authSaved") : t("console.save")}
+          </button>
+          {site.has_auth_session && (
+            <button onClick={clearAuth} style={btnGhost} disabled={busy}>
+              {t("console.authClear")}
+            </button>
+          )}
         </div>
       </SettingsCard>
 

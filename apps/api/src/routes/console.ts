@@ -19,8 +19,11 @@ import {
   hashSecret,
   normalizeHost,
   secretLast4,
+  setWorkspaceAuthSession,
+  clearWorkspaceAuthSession,
   type Workspace,
 } from '../services/workspaces.js';
+import { isEncryptionAvailable } from '../services/crypto_box.js';
 import { validateTargetUrl } from '../services/url_guard.js';
 
 const router: RouterType = Router();
@@ -47,6 +50,17 @@ function shapeWorkspace(ws: Workspace) {
     name: ws.name,
     site_key: ws.siteKey,
     secret_last4: ws.secretLast4,
+    // Anchor scan (2026-06-15) — the analysis partner surveys attach to.
+    // null until the site's first scan completes; the detail page turns
+    // that into the "analyze this site" CTA.
+    anchor_scan_id: ws.anchorScanId,
+    // Authenticated-capture status (Phase 1) — never the secret itself,
+    // only whether one is stored + when, plus the key screens.
+    has_auth_session: ws.authSessionEnc != null,
+    auth_session_updated_at: ws.authSessionUpdatedAt
+      ? ws.authSessionUpdatedAt.toISOString()
+      : null,
+    capture_paths: ws.capturePaths ?? null,
     // Emergent tier (§1.2): a beacon has arrived → TRACKED.
     tracked: ws.lastEventAt != null,
     last_event_at: ws.lastEventAt ? ws.lastEventAt.toISOString() : null,
@@ -301,6 +315,66 @@ router.post(
     res.json({ ok: true, secret, secret_last4: secretLast4(secret) });
   },
 );
+
+// ─── Authenticated capture session (Phase 1, 2026-06-16) ───────────
+// Store an encrypted Playwright storageState so the scanner can reach
+// login-gated screens (services/crypto_box.ts). The session is
+// bearer-equivalent — accepted here, encrypted at rest, NEVER returned.
+// Obtained by the founder via scripts/record-auth-session.ts.
+const authSessionBody = z.object({
+  // Playwright storageState JSON, stringified. Capped generously; a
+  // real storageState is a few KB.
+  storage_state: z.string().min(2).max(1_000_000),
+  // Optional key screens to capture (paths or absolute URLs).
+  capture_paths: z.array(z.string().min(1).max(2048)).max(30).optional(),
+});
+
+router.put('/sites/:id/auth-session', requirePrivyAuth, mutationLimiter, async (req, res) => {
+  const id = String(req.params.id ?? '');
+  if (!UUID_RE.test(id)) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  if (!isEncryptionAvailable()) {
+    res.status(503).json({ error: 'session_storage_unavailable' });
+    return;
+  }
+  const parsed = authSessionBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
+    return;
+  }
+  const ws = await getWorkspaceForUser(req.privyUser!.id, id);
+  if (!ws) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  try {
+    await setWorkspaceAuthSession(ws.id, parsed.data.storage_state, parsed.data.capture_paths);
+  } catch (err) {
+    res.status(400).json({
+      error: 'invalid_storage_state',
+      message: err instanceof Error ? err.message : 'unparseable',
+    });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+router.delete('/sites/:id/auth-session', requirePrivyAuth, mutationLimiter, async (req, res) => {
+  const id = String(req.params.id ?? '');
+  if (!UUID_RE.test(id)) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  const ws = await getWorkspaceForUser(req.privyUser!.id, id);
+  if (!ws) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  await clearWorkspaceAuthSession(ws.id);
+  res.json({ ok: true });
+});
 
 // ─── Analytics (Console Sprint 3 — the TRACKED tier's value) ───────
 // Aggregates partner_behavior_events for this workspace's beacon

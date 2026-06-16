@@ -27,6 +27,7 @@ import { requireSiteSecret } from '../middleware/partner.js';
 import {
   findWorkspaceBySiteKey,
   getWorkspaceById,
+  resolveAnchorScanId,
   touchWorkspaceEvent,
 } from '../services/workspaces.js';
 import { awardSurveyPoints } from '../services/rewards.js';
@@ -50,7 +51,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // (Console S2) — single source for both the partner and direct paths.
 
 const partnerSurveyBody = surveyBody.extend({
-  scan_id: z.string().uuid(),
+  /** Optional since 2026-06-15 — when omitted, resolved from the
+   *  authenticated workspace's anchor scan (partners no longer track a
+   *  scanId). Still accepted for explicit targeting / back-compat. */
+  scan_id: z.string().uuid().optional(),
   /** Google-verified on the partner side; trusted because the request
    *  carries the partner key (see middleware/partner.ts trust note). */
   email: z.string().email().max(320),
@@ -294,9 +298,17 @@ router.post('/survey', requireSiteSecret, async (req, res) => {
       return;
     }
     const { scan_id, email, consent: _c, ...answers } = parsed.data;
+    const scanId = scan_id ?? (await resolveAnchorScanId(req.partnerWorkspace!));
+    if (!scanId) {
+      res.status(409).json({
+        error: 'no_anchor_scan',
+        message: 'Run a 41R scan of this site first (console → analyze).',
+      });
+      return;
+    }
     respondIngest(
       res,
-      await ingestPartnerSurvey(scan_id, email, answers as SurveyAnswers, req.partnerSource!),
+      await ingestPartnerSurvey(scanId, email, answers as SurveyAnswers, req.partnerSource!),
     );
   } catch (err) {
     log.error({ err: (err as Error).message }, 'partner survey ingest failed');
@@ -308,7 +320,8 @@ router.post('/survey', requireSiteSecret, async (req, res) => {
 // B1 — partner server mints a token (key-gated).
 const sessionTokenBody = z.object({
   email: z.string().email().max(320),
-  scan_id: z.string().uuid(),
+  /** Optional since 2026-06-15 — defaults to the workspace anchor scan. */
+  scan_id: z.string().uuid().optional(),
 });
 
 router.post('/session-token', requireSiteSecret, async (req, res) => {
@@ -318,11 +331,20 @@ router.post('/session-token', requireSiteSecret, async (req, res) => {
       res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
       return;
     }
-    const { email, scan_id } = parsed.data;
+    const { email } = parsed.data;
+    const ws = req.partnerWorkspace!; // middleware guarantees presence
+    const scanId = parsed.data.scan_id ?? (await resolveAnchorScanId(ws));
+    if (!scanId) {
+      res.status(409).json({
+        error: 'no_anchor_scan',
+        message: 'Run a 41R scan of this site first (console → analyze).',
+      });
+      return;
+    }
     const [scan] = await db
       .select({ id: schema.audienceFitScans.id, status: schema.audienceFitScans.status })
       .from(schema.audienceFitScans)
-      .where(eq(schema.audienceFitScans.id, scan_id));
+      .where(eq(schema.audienceFitScans.id, scanId));
     if (!scan) {
       res.status(404).json({ error: 'scan_not_found' });
       return;
@@ -331,13 +353,12 @@ router.post('/session-token', requireSiteSecret, async (req, res) => {
       res.status(409).json({ error: 'scan_not_completed', status: scan.status });
       return;
     }
-    const ws = req.partnerWorkspace!; // middleware guarantees presence
-    const { token, exp } = signToken(email.toLowerCase(), scan_id, ws.id, ws.secretHash);
+    const { token, exp } = signToken(email.toLowerCase(), scanId, ws.id, ws.secretHash);
     const webBase = process.env.WEB_PUBLIC_URL ?? 'https://app.project-rpm.xyz';
     res.json({
       token,
       expires_at: new Date(exp * 1000).toISOString(),
-      survey_url: `${webBase}/validator/survey/${scan_id}?pt=${encodeURIComponent(token)}`,
+      survey_url: `${webBase}/validator/survey/${scanId}?pt=${encodeURIComponent(token)}`,
     });
   } catch (err) {
     log.error({ err: (err as Error).message }, 'session token issue failed');

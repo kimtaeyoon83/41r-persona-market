@@ -58,54 +58,67 @@ export async function ensureSignupBonus(
 ): Promise<void> {
   if (bonusResolved.has(userId)) return;
   try {
-    const grants = await db
-      .select({ reason: schema.creditTransactions.reason })
-      .from(schema.creditTransactions)
-      .where(
-        and(
-          eq(schema.creditTransactions.userId, userId),
-          inArray(schema.creditTransactions.reason, [
-            'signup_bonus',
-            'signup_bonus_wallet',
-            'signup_bonus_upgrade',
-          ]),
-        ),
+    // Per-user advisory lock serializes concurrent grants (same idiom as
+    // debitScan). Without it, the first authed request burst after a
+    // process restart races: every concurrent call passes the empty-DB
+    // check and inserts, duplicating the bonus. The lock + the re-check
+    // inside it makes the check-then-insert atomic; onConflictDoNothing
+    // + the partial unique index (credit_transactions_signup_unique) are
+    // the DB-layer backstop if a multi-instance deploy ever skips here.
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${'signup:' + userId}))`,
       );
-    const has = new Set(grants.map((g) => g.reason));
+      const grants = await tx
+        .select({ reason: schema.creditTransactions.reason })
+        .from(schema.creditTransactions)
+        .where(
+          and(
+            eq(schema.creditTransactions.userId, userId),
+            inArray(schema.creditTransactions.reason, [
+              'signup_bonus',
+              'signup_bonus_wallet',
+              'signup_bonus_upgrade',
+            ]),
+          ),
+        );
+      const has = new Set(grants.map((g) => g.reason));
 
-    if (has.has('signup_bonus') || has.has('signup_bonus_upgrade')) {
-      bonusResolved.add(userId);
-      return;
-    }
+      if (has.has('signup_bonus') || has.has('signup_bonus_upgrade')) {
+        bonusResolved.add(userId);
+        return;
+      }
 
-    if (!has.has('signup_bonus_wallet')) {
-      // First grant for this user.
-      const reason = hasVerifiedIdentity ? 'signup_bonus' : 'signup_bonus_wallet';
-      const amountCents = hasVerifiedIdentity
-        ? SIGNUP_BONUS_VERIFIED_CENTS
-        : SIGNUP_BONUS_WALLET_CENTS;
-      await db.insert(schema.creditTransactions).values({
-        userId,
-        amountCents,
-        reason,
-        expiresAt: expiryDate(),
-      });
-      log.info({ userId, reason, amountCents }, 'signup bonus granted');
-      if (hasVerifiedIdentity) bonusResolved.add(userId);
-      return;
-    }
+      if (!has.has('signup_bonus_wallet')) {
+        // First grant for this user.
+        const reason = hasVerifiedIdentity ? 'signup_bonus' : 'signup_bonus_wallet';
+        const amountCents = hasVerifiedIdentity
+          ? SIGNUP_BONUS_VERIFIED_CENTS
+          : SIGNUP_BONUS_WALLET_CENTS;
+        await tx
+          .insert(schema.creditTransactions)
+          .values({ userId, amountCents, reason, expiresAt: expiryDate() })
+          .onConflictDoNothing();
+        log.info({ userId, reason, amountCents }, 'signup bonus granted');
+        if (hasVerifiedIdentity) bonusResolved.add(userId);
+        return;
+      }
 
-    // Wallet-only grant exists; top up the difference once verified.
-    if (hasVerifiedIdentity) {
-      await db.insert(schema.creditTransactions).values({
-        userId,
-        amountCents: SIGNUP_BONUS_VERIFIED_CENTS - SIGNUP_BONUS_WALLET_CENTS,
-        reason: 'signup_bonus_upgrade',
-        expiresAt: expiryDate(),
-      });
-      log.info({ userId }, 'signup bonus upgraded (wallet-only → verified)');
-      bonusResolved.add(userId);
-    }
+      // Wallet-only grant exists; top up the difference once verified.
+      if (hasVerifiedIdentity) {
+        await tx
+          .insert(schema.creditTransactions)
+          .values({
+            userId,
+            amountCents: SIGNUP_BONUS_VERIFIED_CENTS - SIGNUP_BONUS_WALLET_CENTS,
+            reason: 'signup_bonus_upgrade',
+            expiresAt: expiryDate(),
+          })
+          .onConflictDoNothing();
+        log.info({ userId }, 'signup bonus upgraded (wallet-only → verified)');
+        bonusResolved.add(userId);
+      }
+    });
   } catch (err) {
     log.warn(
       { userId, err: err instanceof Error ? err.message : 'unknown' },

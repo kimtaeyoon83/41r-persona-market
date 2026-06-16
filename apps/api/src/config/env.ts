@@ -94,6 +94,12 @@ const envSchema = z.object({
   PRIVY_APP_ID: z.string().optional(),
   PRIVY_APP_SECRET: z.string().optional(),
 
+  // AES-256-GCM key for encrypting stored partner auth sessions
+  // (authenticated capture — services/crypto_box.ts). 32-byte key as
+  // 64 hex chars or base64. Absent ⇒ session storage is disabled (the
+  // console rejects uploads), so gated-app capture just isn't offered.
+  SESSION_ENC_KEY: z.string().optional(),
+
   // 41R Fee Payer wallet (Phase 2 §3 / D6) — sponsored 0 USDC SPL
   // transfer + future USDC reward distribution.
   FEE_PAYER_KEYPAIR_JSON: z.string().optional(),

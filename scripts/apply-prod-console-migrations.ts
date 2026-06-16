@@ -25,7 +25,14 @@ import pg from 'pg';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DRIZZLE_DIR = path.resolve(__dirname, '../apps/api/drizzle');
-const FILES = ['0013_modern_bug.sql', '0014_zippy_agent_zero.sql'];
+const FILES = [
+  '0013_modern_bug.sql',
+  '0014_zippy_agent_zero.sql',
+  '0015_signup_bonus_unique.sql',
+  '0016_workspace_anchor_scan.sql',
+  '0017_workspace_auth_capture.sql',
+  '0018_scan_auth_capture.sql',
+];
 const DRY_RUN = process.argv.includes('--dry-run');
 
 function loadSql(file: string): string {

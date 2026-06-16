@@ -651,6 +651,60 @@ confirmed). S1 shipped on branch `feat/console-sprint1`:
   `requireSiteSecret` generalization (geulbat
   env-key seeded as row 1, no downtime) + scan-complete email.
 
+## Console Sprint 4 — anchor automation + CORS + auth capture (2026-06-16)
+
+Shipped on `feat/workspace-anchor-scan` (prod migrations 0015–0018
+applied via `scripts/apply-prod-console-migrations.ts`):
+
+- **Signup-bonus race fix** — `ensureSignupBonus` (`services/credits.ts`)
+  now wraps the check-then-insert in a per-user `pg_advisory_xact_lock`
+  + `onConflictDoNothing`; partial unique index
+  `credit_transactions_signup_unique` (migration 0015) is the DB
+  backstop. The bug: wiping `credit_transactions` while the process ran
+  left the in-memory `bonusResolved` set stale → restart re-granted, and
+  the first authed burst raced into duplicate $30 rows.
+  `scripts/fix-signup-bonus-dupes.ts` dedupes legacy dupes (dry-run
+  default). Do NOT remove the advisory lock or the partial index.
+- **Workspace anchor scan** (migration 0016 — `site_workspaces.anchor_scan_id`)
+  — partner surveys no longer pass a `scanId`. `session-token`/`survey`
+  make `scan_id` optional and resolve it via
+  `resolveAnchorScanId(ws)` (pinned anchor, else latest completed scan
+  for the workspace, lazily pinned). `scan_pipeline` calls
+  `setWorkspaceAnchorFromScan(scanId)` at both completion points — the
+  FIRST completed scan becomes the stable anchor (re-scans don't move
+  it, so human responses stay together). No anchor yet ⇒ partner gets
+  `409 no_anchor_scan`. The console detail loads the ANCHOR scan's
+  report (not the latest) so survey/compare sections aren't empty after
+  a re-scan. `RPM_ANCHOR_SCAN_ID` was removed from the partner guide.
+- **CORS** (`config/cors.ts`) — the origin callback returns
+  `cb(null, false)` for disallowed origins instead of throwing. Throwing
+  500'd the request BEFORE the handler, silently dropping the public
+  partner beacon (`/api/partner/t`, embedded on arbitrary partner
+  domains by design). Auth is enforced by partner-key/Privy, not CORS;
+  omitting ACAO only stops a disallowed browser origin from READING the
+  response. Do NOT restore the throw — it re-breaks partner tracking
+  (stuck LITE / `last_event_at` null).
+- **Authenticated capture (Phase 1)** — for login-gated apps (the
+  geulbat tutorial+Google-OAuth case where an anonymous screenshot only
+  ever sees the gate). A human records a session once
+  (`scripts/record-auth-session.ts` — headed browser, manual login, save
+  Playwright `storageState`; we never automate OAuth). It's uploaded via
+  `PUT /api/console/sites/:id/auth-session`, AES-256-GCM encrypted at
+  rest (`services/crypto_box.ts`, key `SESSION_ENC_KEY`; migration 0017
+  adds `site_workspaces.auth_session_enc/auth_session_updated_at/
+  capture_paths`), and NEVER returned to a client. When present,
+  `scan_pipeline` uses `captureAuthenticatedSite()` (site_capture.ts):
+  storageState injection → multi-screen capture of `capture_paths`
+  (same-origin GET only, no destructive clicks) → per-screen structure
+  (actions/nav via DOM, not the deprecated a11y snapshot) →
+  `audience_fit_scans.auth_capture` (migration 0018). Personas get the
+  PRIMARY screenshot + a measured `SiteContext.structure` text summary
+  of all screens (cost: 1 image, not N×112). Without structure the
+  persona prompt stays byte-identical (dimension_llm.test.ts lock).
+  `crypto_box.test.ts` locks the AES roundtrip + tamper safety.
+  Phase 2 (graph-traversal Mode C over the captured structure) is still
+  gated on think-aloud data — see Behavior Simulation below.
+
 ## Behavior Simulation (Mode C — gated, not shipped)
 
 Spec: `docs/41rpm_behavior_simulation_spec_v1.md`. Validation spike +
@@ -821,6 +875,10 @@ RESEND_API_KEY=...          # Console S2/S3 — transactional email (scan-comple
 EMAIL_FROM=...              # Sender (default: 41R <noreply@project-rpm.xyz>)
 DIGEST_CRON_ENABLED=1       # Console S3 — weekly digest cron (Mondays UTC)
 WEB_PUBLIC_URL=...          # Base for partner survey_url links (default https://app.project-rpm.xyz)
+SESSION_ENC_KEY=...         # Console S4 — AES-256-GCM key (32 bytes as 64 hex
+                            # or base64) encrypting stored partner auth sessions
+                            # for authenticated capture (services/crypto_box.ts).
+                            # Absent ⇒ session upload 503s (gated-app capture off).
 LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
 ```
 
