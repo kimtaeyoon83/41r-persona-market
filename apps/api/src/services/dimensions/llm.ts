@@ -104,6 +104,15 @@ export type SiteContext = {
     popupDetected: boolean;
     loginWall: boolean;
   } | null;
+  /** Authenticated multi-screen structure (Phase 1, 2026-06-16) — the
+   *  real product behind a login gate: per-screen available actions +
+   *  navigation from the accessibility tree. Optional; only present when
+   *  the scan ran authenticated capture. Without it the prompt is
+   *  byte-identical to the pre-2026-06-16 build (locked by
+   *  dimension_llm.test.ts). */
+  structure?: {
+    screens: { title: string; path: string; actions: string[]; nav: string[] }[];
+  } | null;
 };
 
 // ─── Prompt builder ───────────────────────────────────────────────
@@ -243,6 +252,23 @@ export function buildUserPrompt(
       lines.push(`  navigation menu (verbatim): ${pf.navMenuLabels.join(' / ')}`);
     }
     lines.push('  Ground your effort and navigability judgments in these facts. Do not invent features beyond the screenshot and this menu list.');
+  }
+  const struct = siteContext?.structure;
+  if (struct && struct.screens.length > 0) {
+    lines.push('');
+    lines.push(
+      'App structure (measured behind login — the real product a signed-in user reaches, captured across key screens):',
+    );
+    for (const s of struct.screens.slice(0, 6)) {
+      const label = s.title || s.path;
+      const parts: string[] = [];
+      if (s.actions.length) parts.push(`actions: ${s.actions.slice(0, 12).join(', ')}`);
+      if (s.nav.length) parts.push(`nav: ${s.nav.slice(0, 12).join(', ')}`);
+      lines.push(`  • ${label} — ${parts.join(' · ') || 'no interactive elements detected'}`);
+    }
+    lines.push(
+      '  React to THESE real capabilities, not just the first screenshot. The screenshot may show one screen; the product includes the screens above.',
+    );
   }
   lines.push('');
   lines.push('Persona profile:');

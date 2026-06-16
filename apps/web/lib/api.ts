@@ -545,6 +545,14 @@ export type ConsoleSite = {
   /** Public tracking key — GA measurement-id semantics, safe in markup. */
   site_key: string;
   secret_last4: string;
+  /** Anchor scan — the analysis partner surveys auto-attach to. null
+   *  until this site's first scan completes. */
+  anchor_scan_id: string | null;
+  /** Authenticated capture (Phase 1): whether an encrypted session is
+   *  stored (never the session itself) + the key screens to capture. */
+  has_auth_session: boolean;
+  auth_session_updated_at: string | null;
+  capture_paths: string[] | null;
   /** Emergent tier: a beacon has arrived through this site_key. */
   tracked: boolean;
   last_event_at: string | null;
@@ -602,6 +610,22 @@ export const consoleApi = {
   /** Console S3 — measured tracking aggregates for the analytics tab. */
   getAnalytics: (id: string, days: 7 | 30 = 7) =>
     request<SiteAnalytics>(`/api/console/sites/${id}/analytics?days=${days}`),
+
+  /** Authenticated capture (Phase 1) — store the encrypted session +
+   *  key screens so scans of this gated site reach the real product. */
+  setAuthSession: (
+    id: string,
+    body: { storage_state: string; capture_paths?: string[] },
+  ) =>
+    request<{ ok: boolean }>(`/api/console/sites/${id}/auth-session`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  clearAuthSession: (id: string) =>
+    request<{ ok: boolean }>(`/api/console/sites/${id}/auth-session`, {
+      method: 'DELETE',
+    }),
 };
 
 export type SiteAnalytics = {

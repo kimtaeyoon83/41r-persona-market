@@ -22,8 +22,19 @@ export function isOriginAllowed(origin: string | undefined, allowlist = allowedO
 
 export const corsOptions: CorsOptions = {
   origin: (origin, cb) => {
+    // Allowed origins get the reflected ACAO (credentialed reads work).
+    // A disallowed origin is NOT an error: returning cb(null, false)
+    // omits the CORS headers but still lets the request reach its
+    // handler. Throwing here 500s the request BEFORE the handler runs,
+    // which silently broke the public partner beacon (/api/partner/t):
+    // it is embedded on ARBITRARY partner domains by design (GA-style
+    // public ingestion, sent as a text/plain simple request), so it can
+    // never be allowlisted and must still be recorded. Auth is enforced
+    // by partner-key / Privy bearer, not by CORS — omitting ACAO only
+    // stops a disallowed browser origin from READING the response, which
+    // is exactly the intended boundary.
     if (isOriginAllowed(origin)) return cb(null, true);
-    cb(new Error(`CORS: origin ${origin} not in allowlist`));
+    cb(null, false);
   },
   credentials: true,
 };

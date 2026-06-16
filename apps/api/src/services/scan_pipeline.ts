@@ -25,6 +25,11 @@ import { eq } from 'drizzle-orm';
 import { STANDARD_COHORTS } from '@41rpm/shared';
 import { db, schema } from '../db/index.js';
 import { refundScanDebit } from './credits.js';
+import {
+  setWorkspaceAnchorFromScan,
+  getWorkspaceById,
+  getWorkspaceAuthState,
+} from './workspaces.js';
 import { sendScanCompleteEmail } from './email.js';
 import { logger } from '../logger.js';
 import {
@@ -48,7 +53,7 @@ import {
   type SiteContext,
 } from './dimensions/llm.js';
 import { clusterFrictions } from './dimensions/frictions.js';
-import { captureSite } from './site_capture.js';
+import { captureSite, captureAuthenticatedSite } from './site_capture.js';
 import { classifySite } from './site_classifier.js';
 import { generateCustomQuestions } from './dimensions/custom_questions.js';
 
@@ -173,23 +178,69 @@ async function runScan(scanId: string): Promise<void> {
   if (!USE_SIMULATOR) {
     await setStatus(scanId, 'capturing');
     try {
-      const cap = await captureSite(targetUrl);
-      screenshotUrls = cap.urls;
-      await db
-        .update(schema.audienceFitScans)
-        .set({
-          captureScreenshotUrls: screenshotUrls,
-          captureCompletedAt: cap.capturedAt,
-          captureSignals: cap.signals ?? null,
-        })
-        .where(eq(schema.audienceFitScans.id, scanId));
-      // Refresh local copy (same pattern as category below) so the
-      // Mode A/B persona handlers can thread pageFacts into prompts.
-      scan.captureSignals = cap.signals ?? null;
-      log.info(
-        { scanId, urls: screenshotUrls.length, fromCache: cap.fromCache },
-        'site capture complete'
-      );
+      // Authenticated capture when the scan's workspace has a stored
+      // session — reaches the real product behind a login gate. Falls
+      // back to the ordinary anonymous capture otherwise.
+      let authState: unknown | null = null;
+      let capturePaths: string[] | null = null;
+      if (scan.workspaceId) {
+        const ws = await getWorkspaceById(scan.workspaceId);
+        if (ws) {
+          authState = getWorkspaceAuthState(ws);
+          capturePaths = ws.capturePaths ?? null;
+        }
+      }
+
+      if (authState) {
+        const cap = await captureAuthenticatedSite(targetUrl, {
+          storageState: authState,
+          capturePaths,
+        });
+        screenshotUrls = cap.primaryUrls;
+        const authCapture = {
+          screens: cap.screens.map((s) => ({
+            path: s.path,
+            url: s.url,
+            title: s.title,
+            screenshotUrl: s.screenshotUrl,
+            actions: s.actions,
+            nav: s.nav,
+          })),
+        };
+        await db
+          .update(schema.audienceFitScans)
+          .set({
+            captureScreenshotUrls: screenshotUrls,
+            captureCompletedAt: cap.capturedAt,
+            captureSignals: cap.signals ?? null,
+            authCapture,
+          })
+          .where(eq(schema.audienceFitScans.id, scanId));
+        scan.captureSignals = cap.signals ?? null;
+        scan.authCapture = authCapture;
+        log.info(
+          { scanId, screens: cap.screens.length, authenticated: true },
+          'authenticated capture complete',
+        );
+      } else {
+        const cap = await captureSite(targetUrl);
+        screenshotUrls = cap.urls;
+        await db
+          .update(schema.audienceFitScans)
+          .set({
+            captureScreenshotUrls: screenshotUrls,
+            captureCompletedAt: cap.capturedAt,
+            captureSignals: cap.signals ?? null,
+          })
+          .where(eq(schema.audienceFitScans.id, scanId));
+        // Refresh local copy (same pattern as category below) so the
+        // Mode A/B persona handlers can thread pageFacts into prompts.
+        scan.captureSignals = cap.signals ?? null;
+        log.info(
+          { scanId, urls: screenshotUrls.length, fromCache: cap.fromCache },
+          'site capture complete'
+        );
+      }
 
       // Classify the captured page once, persist immediately so the
       // report header shows real category + pitch even while the
@@ -366,6 +417,7 @@ async function runScan(scanId: string): Promise<void> {
         categoryConfidence: scan.categoryConfidence,
         oneLinePitch: scan.oneLinePitch,
         pageFacts: pageFactsFrom(scan.captureSignals),
+        structure: structureFrom(scan.authCapture),
       },
     });
     if (r.errored) totalErrored += 1;
@@ -473,6 +525,9 @@ async function runScan(scanId: string): Promise<void> {
     },
     'scan completed'
   );
+  // Pin this as the workspace anchor if it's the first completed scan
+  // there — partner surveys resolve their scanId from the workspace.
+  await setWorkspaceAnchorFromScan(scanId);
   notifyScanComplete(scanId, result.best.cohort_label, result.audience_fit_score);
 }
 
@@ -561,6 +616,7 @@ async function runModeBPipeline(args: {
         categoryConfidence: scan.categoryConfidence,
         oneLinePitch: scan.oneLinePitch,
         pageFacts: pageFactsFrom(scan.captureSignals),
+        structure: structureFrom(scan.authCapture),
       },
     });
     if (r.errored) errored += 1;
@@ -647,6 +703,7 @@ async function runModeBPipeline(args: {
     { scanId, cohortFitScore: cohortFitScore.toFixed(2), verdict, audience: parsed.label },
     'mode B scan completed'
   );
+  await setWorkspaceAnchorFromScan(scanId);
   notifyScanComplete(scanId, parsed.label ?? null, cohortFitScore);
 }
 
@@ -725,6 +782,23 @@ function pageFactsFrom(
     navMenuLabels: sig.nav_menu_labels ?? [],
     popupDetected: sig.popup_detected,
     loginWall: sig.login_wall,
+  };
+}
+
+// Authenticated-capture structure → SiteContext.structure. Null on
+// ordinary scans, which keeps the persona prompt byte-identical to the
+// pre-2026-06-16 build (dimension_llm.test.ts lock).
+function structureFrom(
+  ac: (typeof schema.audienceFitScans.$inferSelect)['authCapture'],
+): SiteContext['structure'] {
+  if (!ac || !ac.screens?.length) return null;
+  return {
+    screens: ac.screens.map((s) => ({
+      title: s.title,
+      path: s.path,
+      actions: s.actions ?? [],
+      nav: s.nav ?? [],
+    })),
   };
 }
 

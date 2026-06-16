@@ -1,4 +1,5 @@
 import { pgTable, text, timestamp, date, integer, real, boolean, jsonb, uuid, varchar, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 // ─── Companies ───────────────────────────────────────
 export const companies = pgTable('companies', {
@@ -238,6 +239,22 @@ export const audienceFitScans = pgTable('audience_fit_scans', {
     nav_menu_labels: string[];
     popup_detected: boolean;
     login_wall: boolean;
+  }>(),
+
+  // Authenticated multi-screen capture (Phase 1, 2026-06-16) — populated
+  // when the scan's workspace has a stored auth session. Holds the
+  // post-login key screens + their structure (actions/nav from the
+  // accessibility tree) so personas and the report see the real product
+  // behind the gate, not just the login wall. null on ordinary scans.
+  authCapture: jsonb('auth_capture').$type<{
+    screens: {
+      path: string;
+      url: string;
+      title: string;
+      screenshotUrl: string;
+      actions: string[];
+      nav: string[];
+    }[];
   }>(),
 
   // Synthesis output — filled at completion. All 0-100 unless noted.
@@ -650,6 +667,25 @@ export const siteWorkspaces = pgTable('site_workspaces', {
   /** Last beacon received through this workspace's site_key —
    *  TRACKED-tier flag + the "Last event: 2m ago" settings display. */
   lastEventAt: timestamp('last_event_at'),
+  /** Anchor scan — the canonical 41R analysis of this site that partner
+   *  surveys attach to (the AI↔human compare pair). Set automatically to
+   *  the FIRST completed scan linked to this workspace and then left
+   *  stable, so partners never pass a scanId and re-scans don't move
+   *  where human responses land.
+   *  NOTE: the FK (audience_fit_scans.id, ON DELETE SET NULL) lives in
+   *  migration 0016, NOT a Drizzle `.references()` — a `.references()`
+   *  here would create a circular table reference with
+   *  audienceFitScans.workspaceId and break TS type inference (TS7022). */
+  anchorScanId: uuid('anchor_scan_id'),
+  /** Authenticated-capture session (Phase 1, 2026-06-16) — AES-256-GCM
+   *  encrypted Playwright storageState (services/crypto_box.ts). Lets the
+   *  scanner reach login-gated screens by reusing a human's session.
+   *  Bearer-equivalent secret: never returned to a client. null = none. */
+  authSessionEnc: text('auth_session_enc'),
+  authSessionUpdatedAt: timestamp('auth_session_updated_at'),
+  /** Key screens to capture for this site (paths or absolute URLs). When
+   *  null, capture falls back to the start URL + a bounded nav crawl. */
+  capturePaths: jsonb('capture_paths').$type<string[]>(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
@@ -689,4 +725,14 @@ export const creditTransactions = pgTable('credit_transactions', {
   byUser: index('credit_transactions_user_idx').on(t.userId),
   // Debit/refund lookups by scan (refund idempotency check).
   byRef: index('credit_transactions_ref_idx').on(t.refId),
+  // One signup-bonus grant of each kind per user. The append-only ledger
+  // has many rows per user, so this is a PARTIAL unique index scoped to
+  // the three bonus reasons only — the DB backstop against the
+  // ensureSignupBonus concurrency race (allows signup_bonus_wallet +
+  // signup_bonus_upgrade to coexist; blocks a second signup_bonus).
+  signupUnique: uniqueIndex('credit_transactions_signup_unique')
+    .on(t.userId, t.reason)
+    .where(
+      sql`${t.reason} IN ('signup_bonus','signup_bonus_wallet','signup_bonus_upgrade')`,
+    ),
 }));

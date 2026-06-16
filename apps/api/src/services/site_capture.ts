@@ -10,7 +10,7 @@
 // reuses the file — typical re-runs (compare two scans, debug a
 // flagged persona) skip the browser launch entirely.
 
-import { chromium } from 'playwright-core';
+import { chromium, type BrowserContextOptions } from 'playwright-core';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -183,83 +183,7 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
 
     // Ch1 objective signals — same page load, one evaluate. Failure
     // is non-fatal: signals stay null and every consumer hides.
-    try {
-      const finalUrl = page.url();
-      const extracted = await page.evaluate(() => {
-        const text = document.body?.innerText ?? '';
-        const words = text.split(/\s+/).filter(Boolean).length;
-        const anchors = Array.from(document.querySelectorAll('a[href]')).filter((a) => {
-          const el = a as HTMLAnchorElement;
-          const t = (el.innerText || '').trim();
-          return t && el.href && !el.href.startsWith('javascript:');
-        });
-        const ctas = document.querySelectorAll(
-          'button, input[type=submit], [role=button], a.btn, a[class*="btn"]',
-        ).length;
-        // Nav menu labels — nearest nav/header/gnb region anchors,
-        // verbatim text, deduped, capped. Feeds the persona prompt's
-        // "what can you do on this site" grounding.
-        const navLabels: string[] = [];
-        const seen = new Set<string>();
-        for (const a of anchors) {
-          const el = a as HTMLAnchorElement;
-          let p: Element | null = el;
-          let inNav = false;
-          let inFooter = false;
-          // Walk the FULL ancestor chain — footers often wrap their
-          // link groups in <nav> landmarks (Spotify 2026-06-10: legal/
-          // corporate links flooded nav_menu_labels and personas read
-          // "navigation cluttered with legal links"). Footer wins.
-          while (p) {
-            const tag = p.tagName.toLowerCase();
-            const cls = (p.className || '').toString().toLowerCase();
-            if (tag === 'footer' || cls.includes('footer')) {
-              inFooter = true;
-              break;
-            }
-            if (tag === 'nav' || tag === 'header' || cls.includes('gnb') || cls.includes('menu')) {
-              inNav = true;
-            }
-            p = p.parentElement;
-          }
-          if (!inNav || inFooter) continue;
-          const label = (el.innerText || '').trim().replace(/\s+/g, ' ');
-          if (!label || label.length > 30 || seen.has(label)) continue;
-          seen.add(label);
-          navLabels.push(label);
-          if (navLabels.length >= 15) break;
-        }
-        // Popup/modal heuristic: visible dialog roles or fixed
-        // overlays covering ≥ 25% of the viewport.
-        let popup = Boolean(
-          document.querySelector('[role=dialog]:not([hidden]), [class*="modal"]:not([hidden])'),
-        );
-        if (!popup) {
-          const vw = window.innerWidth * window.innerHeight;
-          for (const el of Array.from(document.querySelectorAll('div, section'))) {
-            const cs = getComputedStyle(el);
-            if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden')
-              continue;
-            const r = el.getBoundingClientRect();
-            if ((r.width * r.height) / vw >= 0.25) {
-              popup = true;
-              break;
-            }
-          }
-        }
-        return { words, links: anchors.length, ctas, navLabels, popup };
-      });
-      signals = {
-        visible_word_count: extracted.words,
-        link_count: extracted.links,
-        cta_count: extracted.ctas,
-        nav_menu_labels: extracted.navLabels,
-        popup_detected: extracted.popup,
-        login_wall: /login|signin|sign-in|auth|cert|sso/i.test(new URL(finalUrl).pathname),
-      };
-    } catch (err) {
-      log.warn({ targetUrl: normalised, err: (err as Error).message }, 'signal extraction failed');
-    }
+    signals = await extractCaptureSignals(page, normalised);
 
     await ctx.close();
   } finally {
@@ -323,5 +247,280 @@ export function readCaptureAsBase64(
   return {
     mediaType: 'image/png',
     data: fs.readFileSync(localPath).toString('base64'),
+  };
+}
+
+// ─── Shared signal extraction (used by captureSite + auth capture) ──
+// Browser-side collector — runs in page context (no Node closure refs).
+function collectSignalsInPage() {
+  const text = document.body?.innerText ?? '';
+  const words = text.split(/\s+/).filter(Boolean).length;
+  const anchors = Array.from(document.querySelectorAll('a[href]')).filter((a) => {
+    const el = a as HTMLAnchorElement;
+    const t = (el.innerText || '').trim();
+    return t && el.href && !el.href.startsWith('javascript:');
+  });
+  const ctas = document.querySelectorAll(
+    'button, input[type=submit], [role=button], a.btn, a[class*="btn"]',
+  ).length;
+  const navLabels: string[] = [];
+  const seen = new Set<string>();
+  for (const a of anchors) {
+    const el = a as HTMLAnchorElement;
+    let p: Element | null = el;
+    let inNav = false;
+    let inFooter = false;
+    while (p) {
+      const tag = p.tagName.toLowerCase();
+      const cls = (p.className || '').toString().toLowerCase();
+      if (tag === 'footer' || cls.includes('footer')) {
+        inFooter = true;
+        break;
+      }
+      if (tag === 'nav' || tag === 'header' || cls.includes('gnb') || cls.includes('menu')) {
+        inNav = true;
+      }
+      p = p.parentElement;
+    }
+    if (!inNav || inFooter) continue;
+    const label = (el.innerText || '').trim().replace(/\s+/g, ' ');
+    if (!label || label.length > 30 || seen.has(label)) continue;
+    seen.add(label);
+    navLabels.push(label);
+    if (navLabels.length >= 15) break;
+  }
+  let popup = Boolean(
+    document.querySelector('[role=dialog]:not([hidden]), [class*="modal"]:not([hidden])'),
+  );
+  if (!popup) {
+    const vw = window.innerWidth * window.innerHeight;
+    for (const el of Array.from(document.querySelectorAll('div, section'))) {
+      const cs = getComputedStyle(el);
+      if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden') continue;
+      const r = el.getBoundingClientRect();
+      if ((r.width * r.height) / vw >= 0.25) {
+        popup = true;
+        break;
+      }
+    }
+  }
+  return { words, links: anchors.length, ctas, navLabels, popup };
+}
+
+async function extractCaptureSignals(
+  page: import('playwright-core').Page,
+  label: string,
+): Promise<CaptureSignals | null> {
+  try {
+    const finalUrl = page.url();
+    const extracted = await page.evaluate(collectSignalsInPage);
+    return {
+      visible_word_count: extracted.words,
+      link_count: extracted.links,
+      cta_count: extracted.ctas,
+      nav_menu_labels: extracted.navLabels,
+      popup_detected: extracted.popup,
+      login_wall: /login|signin|sign-in|auth|cert|sso/i.test(new URL(finalUrl).pathname),
+    };
+  } catch (err) {
+    log.warn({ targetUrl: label, err: (err as Error).message }, 'signal extraction failed');
+    return null;
+  }
+}
+
+// ─── Authenticated multi-screen capture (Phase 1, 2026-06-16) ──────
+// For login-gated apps: reuse a human's session (storageState) so the
+// scanner reaches the REAL product, capture the founder's key screens,
+// and extract a structure summary (accessibility tree → available
+// actions + nav) per screen. NOT cached (session-specific) and SAFE:
+// only GET-navigates explicit same-origin targets — never clicks
+// destructive buttons / submits forms.
+
+/** Pruned structure for one screen — what a user can DO + navigate. */
+export type AuthCaptureScreen = {
+  path: string;
+  url: string;
+  title: string;
+  screenshotUrl: string;
+  viewUrl: string;
+  signals: CaptureSignals | null;
+  actions: string[];
+  nav: string[];
+};
+
+export type AuthCaptureResult = {
+  /** [full, view] of the primary (first) screen — feeds personas + classifier. */
+  primaryUrls: string[];
+  capturedAt: Date;
+  signals: CaptureSignals | null;
+  screens: AuthCaptureScreen[];
+};
+
+const MAX_AUTH_SCREENS = 6;
+
+// Browser-side structure collector — interactive affordances (what a
+// user can DO: buttons, inputs) + navigation (links), deduped + capped.
+// DOM-based rather than the deprecated accessibility snapshot.
+function collectStructureInPage() {
+  const actions: string[] = [];
+  const nav: string[] = [];
+  const seenA = new Set<string>();
+  const seenN = new Set<string>();
+  const norm = (s: string | null | undefined) => (s ?? '').trim().replace(/\s+/g, ' ');
+  const addA = (t: string) => {
+    if (t && t.length <= 40 && !seenA.has(t) && actions.length < 40) {
+      seenA.add(t);
+      actions.push(t);
+    }
+  };
+  const addN = (t: string) => {
+    if (t && t.length <= 40 && !seenN.has(t) && nav.length < 40) {
+      seenN.add(t);
+      nav.push(t);
+    }
+  };
+  document
+    .querySelectorAll('button, [role="button"], input[type=submit], input[type=button]')
+    .forEach((el) => {
+      const e = el as HTMLElement & { value?: string };
+      addA(norm(e.innerText || e.value || el.getAttribute('aria-label')));
+    });
+  document
+    .querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]), textarea, select')
+    .forEach((el) => {
+      const e = el as HTMLInputElement;
+      const lab =
+        el.getAttribute('aria-label') ||
+        el.getAttribute('placeholder') ||
+        (e.labels && e.labels[0] ? (e.labels[0] as HTMLElement).innerText : '') ||
+        e.name ||
+        '';
+      addA(norm(lab));
+    });
+  document.querySelectorAll('a[href]').forEach((a) => {
+    const el = a as HTMLAnchorElement;
+    if (!el.href || el.href.startsWith('javascript:')) return;
+    addN(norm(el.innerText || el.getAttribute('aria-label')));
+  });
+  return { actions, nav };
+}
+
+async function extractStructure(
+  page: import('playwright-core').Page,
+): Promise<{ actions: string[]; nav: string[] }> {
+  try {
+    return await page.evaluate(collectStructureInPage);
+  } catch {
+    return { actions: [], nav: [] };
+  }
+}
+
+export async function captureAuthenticatedSite(
+  targetUrl: string,
+  opts: { storageState: unknown; capturePaths?: string[] | null },
+): Promise<AuthCaptureResult> {
+  const guard = validateTargetUrl(targetUrl);
+  if (!guard.ok) throw new Error(`unsafe_target_url:${guard.reason}`);
+  const start = guard.url;
+  if (!(await resolvesToPublicHost(guard.host))) {
+    throw new Error('unsafe_target_url:private_host_resolved');
+  }
+  const origin = new URL(start).origin;
+
+  // Resolve capture targets to same-origin absolute URLs, each re-guarded
+  // (a capture_path could be an absolute URL to a private host).
+  const raw =
+    opts.capturePaths && opts.capturePaths.length ? opts.capturePaths : [start];
+  const targets: string[] = [];
+  const seen = new Set<string>();
+  for (const t of raw) {
+    let u: string;
+    try {
+      u = new URL(t, origin).toString();
+    } catch {
+      continue;
+    }
+    const g = validateTargetUrl(u);
+    if (!g.ok || new URL(g.url).origin !== origin) continue;
+    if (seen.has(g.url)) continue;
+    seen.add(g.url);
+    targets.push(g.url);
+  }
+  if (targets.length === 0) targets.push(start);
+  const list = targets.slice(0, MAX_AUTH_SCREENS);
+
+  fs.mkdirSync(LOCAL_DIR, { recursive: true });
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.CHROMIUM_PATH || undefined,
+  });
+  const screens: AuthCaptureScreen[] = [];
+  try {
+    const ctx = await browser.newContext({
+      viewport: VIEWPORT,
+      userAgent:
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      storageState: opts.storageState as BrowserContextOptions['storageState'],
+    });
+    const page = await ctx.newPage();
+    for (const url of list) {
+      try {
+        try {
+          await page.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS });
+        } catch {
+          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+          await page.waitForTimeout(2000);
+        }
+        await page.waitForTimeout(400);
+        const bufFull = await page.screenshot({ fullPage: true, type: 'png' });
+        const bufView = await page.screenshot({
+          type: 'png',
+          clip: { x: 0, y: 0, width: VIEWPORT.width, height: VIEWPORT.height },
+        });
+        const key = captureKey(url);
+        const viewKey = captureClassifierKey(url);
+        fs.writeFileSync(localPathFor(key), bufFull);
+        fs.writeFileSync(localPathFor(viewKey), bufView);
+        let screenshotUrl: string;
+        let viewUrl: string;
+        if (isR2Configured()) {
+          screenshotUrl = await uploadToR2(key, bufFull, 'image/png');
+          viewUrl = await uploadToR2(viewKey, bufView, 'image/png');
+        } else {
+          screenshotUrl = `/${key}`;
+          viewUrl = `/${viewKey}`;
+        }
+        const signals = await extractCaptureSignals(page, url);
+        const { actions, nav } = await extractStructure(page);
+        const title = await page.title().catch(() => '');
+        screens.push({
+          path: url,
+          url: page.url(),
+          title,
+          screenshotUrl,
+          viewUrl,
+          signals,
+          actions,
+          nav,
+        });
+      } catch (err) {
+        log.warn({ url, err: (err as Error).message }, 'auth screen capture failed');
+      }
+    }
+    await ctx.close();
+  } finally {
+    await browser.close();
+  }
+
+  const primary = screens[0];
+  log.info(
+    { targetUrl: start, screens: screens.length },
+    'authenticated capture complete',
+  );
+  return {
+    primaryUrls: primary ? [primary.screenshotUrl, primary.viewUrl] : [],
+    capturedAt: new Date(),
+    signals: primary?.signals ?? null,
+    screens,
   };
 }
