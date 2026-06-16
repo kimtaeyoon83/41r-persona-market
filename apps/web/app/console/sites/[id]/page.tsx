@@ -942,6 +942,7 @@ function Settings({
   // Auth session (Phase 1) — paste storageState JSON + key screens.
   const [sessionJson, setSessionJson] = useState("");
   const [paths, setPaths] = useState((site.capture_paths ?? []).join("\n"));
+  const [mobile, setMobile] = useState(site.capture_mobile);
   const [authSaving, setAuthSaving] = useState(false);
   const [authSaved, setAuthSaved] = useState(false);
 
@@ -956,6 +957,7 @@ function Settings({
       await consoleApi.setAuthSession(site.id, {
         storage_state: sessionJson.trim(),
         capture_paths,
+        capture_mobile: mobile,
       });
       setSessionJson("");
       setAuthSaved(true);
@@ -1157,6 +1159,24 @@ function Settings({
             marginBottom: 10,
           }}
         />
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 12.5,
+            color: C.text,
+            marginBottom: 10,
+            cursor: "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={mobile}
+            onChange={(e) => setMobile(e.target.checked)}
+          />
+          {t("console.authMobile")}
+        </label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             onClick={saveAuth}

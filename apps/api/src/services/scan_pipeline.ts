@@ -183,11 +183,13 @@ async function runScan(scanId: string): Promise<void> {
       // back to the ordinary anonymous capture otherwise.
       let authState: unknown | null = null;
       let capturePaths: string[] | null = null;
+      let captureMobile = false;
       if (scan.workspaceId) {
         const ws = await getWorkspaceById(scan.workspaceId);
         if (ws) {
           authState = getWorkspaceAuthState(ws);
           capturePaths = ws.capturePaths ?? null;
+          captureMobile = ws.captureMobile ?? false;
         }
       }
 
@@ -195,6 +197,7 @@ async function runScan(scanId: string): Promise<void> {
         const cap = await captureAuthenticatedSite(targetUrl, {
           storageState: authState,
           capturePaths,
+          mobile: captureMobile,
         });
         screenshotUrls = cap.primaryUrls;
         const authCapture = {

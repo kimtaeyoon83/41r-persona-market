@@ -686,6 +686,11 @@ export const siteWorkspaces = pgTable('site_workspaces', {
   /** Key screens to capture for this site (paths or absolute URLs). When
    *  null, capture falls back to the start URL + a bounded nav crawl. */
   capturePaths: jsonb('capture_paths').$type<string[]>(),
+  /** Capture at a mobile viewport (phone frame). Mobile-first apps render
+   *  a centered phone on a blurred desktop background, which a desktop
+   *  capture mis-reads as a modal (geulbat, 2026-06-16). null/false =
+   *  desktop 1280×800. */
+  captureMobile: boolean('capture_mobile'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({

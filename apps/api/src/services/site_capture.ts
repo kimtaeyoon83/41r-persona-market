@@ -437,9 +437,13 @@ async function waitForContent(
   }
 }
 
+const MOBILE_VIEWPORT = { width: 390, height: 844 };
+const MOBILE_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1';
+
 export async function captureAuthenticatedSite(
   targetUrl: string,
-  opts: { storageState: unknown; capturePaths?: string[] | null },
+  opts: { storageState: unknown; capturePaths?: string[] | null; mobile?: boolean | null },
 ): Promise<AuthCaptureResult> {
   const guard = validateTargetUrl(targetUrl);
   if (!guard.ok) throw new Error(`unsafe_target_url:${guard.reason}`);
@@ -471,6 +475,7 @@ export async function captureAuthenticatedSite(
   if (targets.length === 0) targets.push(start);
   const list = targets.slice(0, MAX_AUTH_SCREENS);
 
+  const vp = opts.mobile ? MOBILE_VIEWPORT : VIEWPORT;
   fs.mkdirSync(LOCAL_DIR, { recursive: true });
   const browser = await chromium.launch({
     headless: true,
@@ -479,9 +484,11 @@ export async function captureAuthenticatedSite(
   const screens: AuthCaptureScreen[] = [];
   try {
     const ctx = await browser.newContext({
-      viewport: VIEWPORT,
-      userAgent:
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      viewport: vp,
+      userAgent: opts.mobile
+        ? MOBILE_UA
+        : 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      ...(opts.mobile ? { isMobile: true, hasTouch: true, deviceScaleFactor: 3 } : {}),
       storageState: opts.storageState as BrowserContextOptions['storageState'],
     });
     const page = await ctx.newPage();
@@ -497,7 +504,7 @@ export async function captureAuthenticatedSite(
         const bufFull = await page.screenshot({ fullPage: true, type: 'png' });
         const bufView = await page.screenshot({
           type: 'png',
-          clip: { x: 0, y: 0, width: VIEWPORT.width, height: VIEWPORT.height },
+          clip: { x: 0, y: 0, width: vp.width, height: vp.height },
         });
         const key = captureKey(url);
         const viewKey = captureClassifierKey(url);

@@ -176,6 +176,7 @@ export async function setWorkspaceAuthSession(
   workspaceId: string,
   storageStateJson: string,
   capturePaths?: string[] | null,
+  captureMobile?: boolean,
 ): Promise<void> {
   // Sanity-check it parses (storageState is { cookies, origins }).
   const parsed = JSON.parse(storageStateJson) as unknown;
@@ -190,6 +191,7 @@ export async function setWorkspaceAuthSession(
       ...(capturePaths !== undefined
         ? { capturePaths: capturePaths && capturePaths.length ? capturePaths : null }
         : {}),
+      ...(captureMobile !== undefined ? { captureMobile } : {}),
       updatedAt: new Date(),
     })
     .where(eq(schema.siteWorkspaces.id, workspaceId));

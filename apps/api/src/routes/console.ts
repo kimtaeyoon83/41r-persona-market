@@ -61,6 +61,7 @@ function shapeWorkspace(ws: Workspace) {
       ? ws.authSessionUpdatedAt.toISOString()
       : null,
     capture_paths: ws.capturePaths ?? null,
+    capture_mobile: ws.captureMobile ?? false,
     // Emergent tier (§1.2): a beacon has arrived → TRACKED.
     tracked: ws.lastEventAt != null,
     last_event_at: ws.lastEventAt ? ws.lastEventAt.toISOString() : null,
@@ -327,6 +328,9 @@ const authSessionBody = z.object({
   storage_state: z.string().min(2).max(1_000_000),
   // Optional key screens to capture (paths or absolute URLs).
   capture_paths: z.array(z.string().min(1).max(2048)).max(30).optional(),
+  // Mobile-first app → capture at a phone viewport (avoids the
+  // desktop phone-frame "modal" false positive).
+  capture_mobile: z.boolean().optional(),
 });
 
 router.put('/sites/:id/auth-session', requirePrivyAuth, mutationLimiter, async (req, res) => {
@@ -350,7 +354,12 @@ router.put('/sites/:id/auth-session', requirePrivyAuth, mutationLimiter, async (
     return;
   }
   try {
-    await setWorkspaceAuthSession(ws.id, parsed.data.storage_state, parsed.data.capture_paths);
+    await setWorkspaceAuthSession(
+      ws.id,
+      parsed.data.storage_state,
+      parsed.data.capture_paths,
+      parsed.data.capture_mobile,
+    );
   } catch (err) {
     res.status(400).json({
       error: 'invalid_storage_state',
