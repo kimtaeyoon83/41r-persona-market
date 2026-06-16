@@ -298,7 +298,14 @@ function collectSignalsInPage() {
       const cs = getComputedStyle(el);
       if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden') continue;
       const r = el.getBoundingClientRect();
-      if ((r.width * r.height) / vw >= 0.25) {
+      const ratio = (r.width * r.height) / vw;
+      // A real modal covers a MIDDLE band of the viewport (a centered
+      // card / sheet). A near-full-screen fixed element (>= 85%) is the
+      // app shell / background, NOT a popup — flagging it as one
+      // false-fired on mobile-first apps that render a full-screen fixed
+      // container (geulbat app-viewport, 2026-06-16) and poisoned the
+      // persona prompt with a non-existent "popup blocks the page".
+      if (ratio >= 0.25 && ratio < 0.85) {
         popup = true;
         break;
       }
