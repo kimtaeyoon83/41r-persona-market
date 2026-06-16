@@ -415,6 +415,28 @@ async function extractStructure(
   }
 }
 
+// SPAs (esp. behind login) show a splash/loading screen for a beat after
+// navigation, then render content. Screenshotting too early captures the
+// splash — which reads as a "modal blocking everything" (geulbat /home,
+// 2026-06-16: visible_word_count=7 splash). Poll until the page has real
+// text, bounded so a genuinely sparse/visual page still proceeds.
+async function waitForContent(
+  page: import('playwright-core').Page,
+  minWords = 25,
+  timeoutMs = 8000,
+): Promise<void> {
+  const start = Date.now();
+  // Always give one settle tick first.
+  await page.waitForTimeout(600);
+  while (Date.now() - start < timeoutMs) {
+    const words = await page
+      .evaluate(() => (document.body?.innerText || '').split(/\s+/).filter(Boolean).length)
+      .catch(() => 0);
+    if (words >= minWords) return;
+    await page.waitForTimeout(600);
+  }
+}
+
 export async function captureAuthenticatedSite(
   targetUrl: string,
   opts: { storageState: unknown; capturePaths?: string[] | null },
@@ -469,9 +491,9 @@ export async function captureAuthenticatedSite(
           await page.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS });
         } catch {
           await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
-          await page.waitForTimeout(2000);
         }
-        await page.waitForTimeout(400);
+        // Wait for the SPA to render past its splash/loading screen.
+        await waitForContent(page);
         const bufFull = await page.screenshot({ fullPage: true, type: 'png' });
         const bufView = await page.screenshot({
           type: 'png',
