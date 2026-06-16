@@ -79,13 +79,18 @@ export function Providers({ children }: { children: ReactNode }) {
 // auto-attaches `Authorization: Bearer <token>`. Effect-only — renders
 // children unchanged.
 function AuthBridge({ children }: { children: ReactNode }) {
-  const { ready, authenticated, getAccessToken } = usePrivy();
+  const { getAccessToken } = usePrivy();
+  // Wire the getter UNCONDITIONALLY on mount (not gated on
+  // ready/authenticated). React runs child effects before parent
+  // effects, so a deep-linked authed page (e.g. /console/sites/[id])
+  // would otherwise fire its data load before this parent effect set
+  // the getter — sending the request with no bearer → 401
+  // missing_bearer_token. getAccessToken() itself returns null when
+  // not authenticated, so request() simply omits the header until a
+  // token exists. (2026-06-16 deep-link auth fix.)
   useEffect(() => {
-    if (ready && authenticated) {
-      setAuthTokenGetter(() => getAccessToken());
-    } else {
-      setAuthTokenGetter(null);
-    }
-  }, [ready, authenticated, getAccessToken]);
+    setAuthTokenGetter(() => getAccessToken());
+    return () => setAuthTokenGetter(null);
+  }, [getAccessToken]);
   return <>{children}</>;
 }
