@@ -154,36 +154,57 @@ export default function SurveyPage() {
       return;
     }
     setError(null); setSubmitting(true);
-    try {
-      const payload = {
-        sus_responses: sus,
-        engagement_category: engagement as "abandon" | "skim" | "browse" | "engage" | "extended",
-        signup_likelihood: signupLikelihood / 100,
-        retention_category: retention as "no_return" | "weak" | "moderate" | "strong",
-        completion_likelihood: completionLikelihood / 100,
-        voice: {
-          first_impression: firstImpression,
-          biggest_friction: biggestFriction,
-          would_return_because: wouldReturnBecause,
-          if_could_change_one_thing: oneThingToChange,
-        },
-        demographics: {
-          age_group: ageGroup as "teen" | "young_adult" | "adult" | "senior",
-          tech_literacy: techLit / 100,
-          crypto_experience: cryptoExp / 100,
-          mobile_first: mobileFirst,
-        },
-        custom_answers: customAnswers,
-      };
+    const payload = {
+      sus_responses: sus,
+      engagement_category: engagement as "abandon" | "skim" | "browse" | "engage" | "extended",
+      signup_likelihood: signupLikelihood / 100,
+      retention_category: retention as "no_return" | "weak" | "moderate" | "strong",
+      completion_likelihood: completionLikelihood / 100,
+      voice: {
+        first_impression: firstImpression,
+        biggest_friction: biggestFriction,
+        would_return_because: wouldReturnBecause,
+        if_could_change_one_thing: oneThingToChange,
+      },
+      demographics: {
+        age_group: ageGroup as "teen" | "young_adult" | "adult" | "senior",
+        tech_literacy: techLit / 100,
+        crypto_experience: cryptoExp / 100,
+        mobile_first: mobileFirst,
+      },
+      custom_answers: customAnswers,
+    };
+    const doSubmit = async () => {
       if (partnerToken) {
         const r = await submitSurveyByToken(partnerToken, payload);
-        setSuccess({ points: r.points_awarded });
-      } else {
-        const r = await scanApi.submitSurvey(scanId, payload);
-        setSuccess({ delta: r.summary.delta });
+        return { points: r.points_awarded };
       }
+      const r = await scanApi.submitSurvey(scanId, payload);
+      return { delta: r.summary.delta };
+    };
+    try {
+      let res: { points?: number; delta?: Record<string, number> };
+      try {
+        res = await doSubmit();
+      } catch (e1) {
+        // Re-submit is idempotent server-side (upsert keyed by
+        // scan+identity), so a transient mobile network blip — where the
+        // first request may have already saved but the response was lost
+        // — self-heals on one retry. An expired/invalid token can't
+        // recover, so don't retry that.
+        const m1 = e1 instanceof Error ? e1.message : "";
+        if (/expired|invalid_or_expired|token/i.test(m1)) throw e1;
+        await new Promise((r) => setTimeout(r, 1500));
+        res = await doSubmit();
+      }
+      setSuccess(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to submit");
+      const m = err instanceof Error ? err.message : "";
+      // Friendly, specific copy instead of a raw error code.
+      const friendly = /expired|invalid_or_expired|token/i.test(m)
+        ? "설문 링크가 만료됐어요. 페이지를 다시 열어 제출해 주세요. (link expired — reopen the survey)"
+        : "제출 중 문제가 생겼어요. 이미 제출됐을 수 있으니 중복 걱정 없이 다시 시도해 주세요. (submit failed — safe to retry)";
+      setError(friendly);
     } finally {
       setSubmitting(false);
     }

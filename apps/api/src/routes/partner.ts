@@ -79,7 +79,10 @@ const partnerSurveyBody = surveyBody.extend({
 // a forged `w` simply fails the HMAC.
 //   token = base64url({e: email, s: scanId, w: wsId, x: expEpochSec})
 //           + '.' + hmacSHA256(payload, workspace.secret_hash)
-const TOKEN_TTL_SEC = 30 * 60;
+// 2h (was 30m) — mobile respondents often open the hosted survey and
+// submit well after it was minted; a short TTL surfaced as a confusing
+// "error" on submit even though earlier submits had already saved.
+const TOKEN_TTL_SEC = 120 * 60;
 
 function b64url(buf: Buffer): string {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
