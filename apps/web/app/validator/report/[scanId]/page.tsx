@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { API_BASE, scanApi, type ScanReport } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import {
   Bar,
   Btn,
@@ -37,6 +38,7 @@ const TONE_COLOR: Record<string, string> = {
 
 export default function ValidatorReportPage() {
   const params = useParams();
+  const { t } = useI18n();
   const scanId = (params?.scanId as string) || "demo";
 
   const [report, setReport] = useState<ScanReport | null>(null);
@@ -51,16 +53,16 @@ export default function ValidatorReportPage() {
   // restoring the toggle, swap this back to:
   //   const [view, setView] = useState<"panel" | "visitor">("panel");
   // and set `visitorAvailable` below back to `view === "visitor" && weighted != null`.
-  const [shareLabel, setShareLabel] = useState<"Share report" | "Copied!" | "Copy failed">("Share report");
+  const [shareState, setShareState] = useState<"idle" | "copied" | "failed">("idle");
 
   const onShareReport = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
-      setShareLabel("Copied!");
+      setShareState("copied");
     } catch {
-      setShareLabel("Copy failed");
+      setShareState("failed");
     }
-    setTimeout(() => setShareLabel("Share report"), 1500);
+    setTimeout(() => setShareState("idle"), 1500);
   };
 
   useEffect(() => {
@@ -166,7 +168,7 @@ export default function ValidatorReportPage() {
         >
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-              <Pill tone="accent">Report</Pill>
+              <Pill tone="accent">{t("report.pill")}</Pill>
               {r.scan.category && (
                 <Pill>
                   {r.scan.category}
@@ -182,7 +184,7 @@ export default function ValidatorReportPage() {
               </span>
             </div>
             <h1 style={{ fontSize: "clamp(18px, 5vw, 24px)", fontWeight: 600, margin: 0, letterSpacing: "-0.01em", wordBreak: "break-word", lineHeight: 1.25 }}>
-              {r.scan.target_url} — Survival Report
+              {r.scan.target_url} — {t("report.titleSuffix")}
             </h1>
             {r.scan.one_line_pitch && (
               <div
@@ -222,7 +224,7 @@ export default function ValidatorReportPage() {
                   }}
                   title="Measured from the live page at capture time — deterministic, no LLM judgment."
                 >
-                  Measured · no LLM
+                  {t("report.measuredNoLlm")}
                 </span>
                 <Pill>{r.scan.capture_signals.visible_word_count.toLocaleString()} words</Pill>
                 <Pill>{r.scan.capture_signals.cta_count} CTAs</Pill>
@@ -280,7 +282,7 @@ export default function ValidatorReportPage() {
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <Btn href={`/?url=${encodeURIComponent(r.scan.target_url)}`}>
-              Re-run
+              {t("report.rerun")}
             </Btn>
             <a
               href={`${API_BASE}/api/scan/${r.scan.id}/report.md`}
@@ -299,10 +301,14 @@ export default function ValidatorReportPage() {
                 display: "inline-block",
               }}
             >
-              Export ↗
+              {t("report.export")}
             </a>
             <Btn primary onClick={onShareReport}>
-              {shareLabel}
+              {shareState === "copied"
+                ? t("report.copied")
+                : shareState === "failed"
+                  ? t("report.copyFailed")
+                  : t("report.share")}
             </Btn>
           </div>
         </div>
@@ -324,8 +330,8 @@ export default function ValidatorReportPage() {
         {r.scan.mode === "A" && (
           <SectionLabel
             n={1}
-            label="Audience-Fit Score"
-            sub="Composite of best · median · task-success · sentiment"
+            label={t("report.sec1")}
+            sub={t("report.sec1Sub")}
             help={{
               title: "How the Audience-Fit Score is computed",
               body: (
@@ -435,8 +441,7 @@ export default function ValidatorReportPage() {
               }}
             />
             <span>
-              <b>Analysis in progress</b> — {r.scan.personas_completed} of{" "}
-              {r.scan.personas_attempted || 112} personas analyzed · status{" "}
+              <b>{t("report.analysisInProgress")}</b> — {r.scan.personas_completed} / {r.scan.personas_attempted || 112} personas · status{" "}
               <code style={{ fontFamily: FM, fontSize: 12 }}>{r.scan.status}</code>
             </span>
             <style>{`@keyframes validatorPulse{0%,100%{opacity:1}50%{opacity:.3}}`}</style>
@@ -471,9 +476,9 @@ export default function ValidatorReportPage() {
                 marginBottom: 10,
               }}
             >
-              {verdictLabel(effectiveResult!.audience_fit_score)}
+              {t(verdictLabel(effectiveResult!.audience_fit_score))}
             </div>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Verdict</div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t("report.verdict")}</div>
             <div style={{ fontSize: 13, color: C.textDim, lineHeight: 1.6, marginBottom: 14 }}>
               Best-fit cohort{" "}
               <b style={{ color: C.text }}>{effectiveResult!.best.cohort_label}</b> scores{" "}
@@ -535,7 +540,7 @@ export default function ValidatorReportPage() {
                     gap: 4,
                   }}
                 >
-                  ▾ View formula
+                  {t("report.viewFormula")}
                 </summary>
                 <div
                   style={{
@@ -592,8 +597,8 @@ export default function ValidatorReportPage() {
         {/* ② Engagement */}
         <SectionLabel
           n={2}
-          label="Engagement"
-          sub="First-session flow in plain terms"
+          label={t("report.sec2")}
+          sub={t("report.sec2Sub")}
           help={{
             title: "How Engagement & Retention curves are produced",
             body: (
@@ -687,7 +692,7 @@ strong      85   70   55   30`}
                 marginBottom: 14,
               }}
             >
-              <div style={{ fontSize: 14, fontWeight: 600 }}>Retention curve</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{t("report.retentionCurve")}</div>
               <span style={{ fontSize: 11, color: C.textFaint, fontFamily: FM }}>
                 n={r.scan.personas_completed} · ±5
               </span>
@@ -695,12 +700,12 @@ strong      85   70   55   30`}
             {retentionCurve.length > 0 ? (
               <RetentionCurve data={retentionCurve} />
             ) : (
-              <div style={{ fontSize: 12, color: C.textFaint }}>No retention data yet.</div>
+              <div style={{ fontSize: 12, color: C.textFaint }}>{t("report.noRetention")}</div>
             )}
           </Card>
           <Card padding={18}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>
-              Engagement breakdown
+              {t("report.engagementBreakdown")}
             </div>
             {dimensionBreakdown.map((m, i) => {
               const tone = TONE_COLOR[m.tone] ?? C.text;
@@ -748,8 +753,8 @@ strong      85   70   55   30`}
         {/* ③ Friction & Bottleneck */}
         <SectionLabel
           n={3}
-          label="Friction & Bottleneck"
-          sub="Where the journey breaks"
+          label={t("report.sec3")}
+          sub={t("report.sec3Sub")}
           help={{
             title: "How friction clusters are built",
             body: (
@@ -898,8 +903,8 @@ strong      85   70   55   30`}
             <>
               <SectionLabel
                 n="A"
-                label="Improvement priority"
-                sub="Action checklist — sorted by impact"
+                label={t("report.improve")}
+                sub={t("report.improveSub")}
                 help={{
                   title: "How to read this priority table",
                   body: (
@@ -969,9 +974,9 @@ strong      85   70   55   30`}
                         }}
                       >
                         <th style={{ padding: "12px 14px", width: 48 }}>#</th>
-                        <th style={{ padding: "12px 14px" }}>What to fix</th>
+                        <th style={{ padding: "12px 14px" }}>{t("report.colFix")}</th>
                         <th style={{ padding: "12px 14px", width: 180 }}>
-                          Where
+                          {t("report.colWhere")}
                         </th>
                         <th
                           style={{
@@ -980,7 +985,7 @@ strong      85   70   55   30`}
                             textAlign: "right",
                           }}
                         >
-                          Affected
+                          {t("report.colAffected")}
                         </th>
                         <th
                           style={{
@@ -989,7 +994,7 @@ strong      85   70   55   30`}
                             textAlign: "right",
                           }}
                         >
-                          Impact
+                          {t("report.colImpact")}
                         </th>
                       </tr>
                     </thead>
@@ -1093,8 +1098,8 @@ strong      85   70   55   30`}
         {/* ④ Persona Resonance */}
         <SectionLabel
           n={4}
-          label="Persona Resonance"
-          sub="Who used it how — click a card for drill-down"
+          label={t("report.sec4")}
+          sub={t("report.sec4Sub")}
           help={{
             title: "Where the personas come from",
             body: (
@@ -1161,13 +1166,13 @@ strong      85   70   55   30`}
         <div className="v-grid-stack-sm" style={{ marginBottom: 24 }}>
           <PersonaBoard
             tone="ok"
-            label="Fit personas"
+            label={t("report.fitPersonas")}
             personas={fitPersonas}
             scanId={scanId}
           />
           <PersonaBoard
             tone="bad"
-            label="Non-fit personas"
+            label={t("report.nonFitPersonas")}
             personas={nonFitPersonas}
             scanId={scanId}
           />
@@ -1229,14 +1234,13 @@ strong      85   70   55   30`}
                     marginBottom: 6,
                   }}
                 >
-                  COMING IN NEXT VERSION
+                  {t("report.comingNext")}
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 4 }}>
                   AARRR funnel
                 </div>
                 <div style={{ fontSize: 12, color: C.textDim, lineHeight: 1.55 }}>
-                  Calibration in progress — pending broader GA4 reference data
-                  before this becomes a load-bearing metric.{" "}
+                  {t("report.aarrrCalibrating")}{" "}
                   <Link
                     href="/validator/how-it-works"
                     style={{ color: C.accent, textDecoration: "underline" }}
@@ -1272,15 +1276,15 @@ strong      85   70   55   30`}
                 marginBottom: 2,
               }}
             >
-              SERVICE INFO
+              {t("report.serviceInfo")}
             </div>
             <div style={{ fontSize: 13 }}>
-              Analyzed with <b>{r.scan.weights_version ?? "v1.0"}</b> weights
+              {t("report.analyzedWith")} <b>{r.scan.weights_version ?? "v1.0"}</b> {t("report.weightsSuffix")}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Btn href="/validator/how-it-works">How it works →</Btn>
-            <Btn href={`/validator/survey/${scanId}`}>Take baseline survey →</Btn>
+            <Btn href="/validator/how-it-works">{t("report.howItWorks")}</Btn>
+            <Btn href={`/validator/survey/${scanId}`}>{t("report.takeSurvey")}</Btn>
             {/* Phase 5 — Compare AI vs Human. The button always
                 navigates; the compare page handles the n=0 empty
                 state and offers a "Compute now" button itself, so
@@ -1289,9 +1293,9 @@ strong      85   70   55   30`}
               primary={r.survey_response_count > 0}
               href={`/validator/compare/${scanId}`}
             >
-              Compare with humans (n={r.survey_response_count}) →
+              {t("report.compareWithHumans")} (n={r.survey_response_count}) →
             </Btn>
-            <Btn href="/validator/calibration">Calibration report →</Btn>
+            <Btn href="/validator/calibration">{t("report.calibrationReport")}</Btn>
           </div>
         </div>
       </div>
@@ -1299,10 +1303,12 @@ strong      85   70   55   30`}
   );
 }
 
-function verdictLabel(score: number): string {
-  if (score < 40) return "⚠ WARNING — CRITICAL CHURN DETECTED";
-  if (score < 60) return "⚠ WARNING — IMPROVEMENT NEEDED";
-  return "✓ HEALTHY — STRONG AUDIENCE FIT";
+function verdictLabel(
+  score: number,
+): "report.verdictCritical" | "report.verdictImprove" | "report.verdictHealthy" {
+  if (score < 40) return "report.verdictCritical";
+  if (score < 60) return "report.verdictImprove";
+  return "report.verdictHealthy";
 }
 
 function verdictBorder(score: number): string {
@@ -1323,6 +1329,7 @@ function AarrrFunnelBlock({
 }: {
   funnel: NonNullable<ScanReport['aarrr']>;
 }) {
+  const { t } = useI18n();
   // Compute stage-to-stage dropoff (in score percentage points). The
   // 2026-05-07 user feedback was that absolute % numbers look too
   // similar across sites — and they do, especially in weighted view.
@@ -1451,7 +1458,7 @@ Revenue      + adoption ≥ 30`}
                 marginRight: 6,
               }}
             >
-              BIGGEST LEAK
+              {t("report.biggestLeak")}
             </span>
             <strong>{biggestDropStage.label}</strong> — {biggestDrop.toFixed(0)} pt
             drop from previous stage. This is where your audience is
