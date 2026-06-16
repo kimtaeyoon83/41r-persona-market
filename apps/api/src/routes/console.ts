@@ -62,6 +62,7 @@ function shapeWorkspace(ws: Workspace) {
       : null,
     capture_paths: ws.capturePaths ?? null,
     capture_mobile: ws.captureMobile ?? false,
+    intended_stage: ws.intendedStage ?? 'any',
     // Emergent tier (§1.2): a beacon has arrived → TRACKED.
     tracked: ws.lastEventAt != null,
     last_event_at: ws.lastEventAt ? ws.lastEventAt.toISOString() : null,
@@ -331,6 +332,9 @@ const authSessionBody = z.object({
   // Mobile-first app → capture at a phone viewport (avoids the
   // desktop phone-frame "modal" false positive).
   capture_mobile: z.boolean().optional(),
+  // Which journey stage to evaluate (drives anonymous-first +
+  // auth-on-login-gate capture for onboarding).
+  intended_stage: z.enum(['onboarding', 'main_app', 'any']).optional(),
 });
 
 router.put('/sites/:id/auth-session', requirePrivyAuth, mutationLimiter, async (req, res) => {
@@ -359,6 +363,7 @@ router.put('/sites/:id/auth-session', requirePrivyAuth, mutationLimiter, async (
       parsed.data.storage_state,
       parsed.data.capture_paths,
       parsed.data.capture_mobile,
+      parsed.data.intended_stage,
     );
   } catch (err) {
     res.status(400).json({

@@ -113,6 +113,11 @@ export type SiteContext = {
   structure?: {
     screens: { title: string; path: string; actions: string[]; nav: string[] }[];
   } | null;
+  /** Capture-planner verdict (Console S4) — which journey stage this
+   *  screen is + a one-line factual description, so the persona reacts
+   *  to the right moment (e.g. new-user onboarding, not a returning-user
+   *  home). Optional; byte-identical prompt when absent. */
+  stage?: { journeyStage: string; summary: string } | null;
 };
 
 // ─── Prompt builder ───────────────────────────────────────────────
@@ -252,6 +257,14 @@ export function buildUserPrompt(
       lines.push(`  navigation menu (verbatim): ${pf.navMenuLabels.join(' / ')}`);
     }
     lines.push('  Ground your effort and navigability judgments in these facts. Do not invent features beyond the screenshot and this menu list.');
+  }
+  const stage = siteContext?.stage;
+  if (stage && stage.journeyStage) {
+    lines.push('');
+    lines.push(
+      `Captured journey stage (measured): ${stage.journeyStage} — ${stage.summary}`,
+    );
+    lines.push('  React to THIS stage of the experience specifically.');
   }
   const struct = siteContext?.structure;
   if (struct && struct.screens.length > 0) {

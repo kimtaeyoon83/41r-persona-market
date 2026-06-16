@@ -33,6 +33,7 @@ const FILES = [
   '0017_workspace_auth_capture.sql',
   '0018_scan_auth_capture.sql',
   '0019_workspace_capture_mobile.sql',
+  '0020_capture_planner.sql',
 ];
 const DRY_RUN = process.argv.includes('--dry-run');
 

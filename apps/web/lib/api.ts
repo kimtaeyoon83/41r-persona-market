@@ -554,6 +554,7 @@ export type ConsoleSite = {
   auth_session_updated_at: string | null;
   capture_paths: string[] | null;
   capture_mobile: boolean;
+  intended_stage: "onboarding" | "main_app" | "any";
   /** Emergent tier: a beacon has arrived through this site_key. */
   tracked: boolean;
   last_event_at: string | null;
@@ -616,7 +617,12 @@ export const consoleApi = {
    *  key screens so scans of this gated site reach the real product. */
   setAuthSession: (
     id: string,
-    body: { storage_state: string; capture_paths?: string[]; capture_mobile?: boolean },
+    body: {
+      storage_state: string;
+      capture_paths?: string[];
+      capture_mobile?: boolean;
+      intended_stage?: "onboarding" | "main_app" | "any";
+    },
   ) =>
     request<{ ok: boolean }>(`/api/console/sites/${id}/auth-session`, {
       method: 'PUT',

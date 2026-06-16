@@ -704,6 +704,30 @@ applied via `scripts/apply-prod-console-migrations.ts`):
   `crypto_box.test.ts` locks the AES roundtrip + tamper safety.
   Phase 2 (graph-traversal Mode C over the captured structure) is still
   gated on think-aloud data — see Behavior Simulation below.
+- **Mobile capture + capture planner** (migrations 0019/0020) — many
+  apps are mobile-first and render a centered phone frame on a blurred
+  desktop background, which the desktop capture + popup heuristic
+  mis-read as a blocking modal (geulbat). Fixes: per-workspace
+  `capture_mobile` (390×844 + mobile UA) and the popup area heuristic
+  capped to a 25–85% band (≥85% fixed = app shell, not a popup — it was
+  poisoning the persona prompt with a phantom popup). `captureScreens`
+  (formerly captureAuthenticatedSite) now takes an OPTIONAL storageState
+  (anonymous when omitted). `services/capture_planner.ts` (Haiku vision,
+  route `validator.capture_planner`) runs after capture: labels
+  `journey_stage`/`render_frame`/`blocking_state`/`evaluable`/
+  `matches_intended_stage`/`next_action_hint`, stored on
+  `audience_fit_scans.capture_plan` and fed to personas as
+  `SiteContext.stage` (byte-identical prompt when absent — lock holds).
+  `scan_pipeline.orchestrateCapture` (workspace scans only) starts
+  ANONYMOUS for `intended_stage='onboarding'` (new-visitor view), then a
+  ONE-pass correction: recapture mobile if the planner says so, and
+  cross a login gate with the stored session (`next_action_hint=
+  use_auth_session`). `site_workspaces.intended_stage` (onboarding/
+  main_app/any) is the per-site control. Gated apps' true new-user
+  onboarding still needs a FRESH-account session recorded
+  (record-auth-session.ts) — an existing-user session lands on that
+  user's state. The hard evaluable=false block+refund is deferred; the
+  plan is stored + logged for now.
 
 ## Behavior Simulation (Mode C — gated, not shipped)
 

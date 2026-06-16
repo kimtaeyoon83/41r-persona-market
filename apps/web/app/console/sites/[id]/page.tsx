@@ -943,6 +943,7 @@ function Settings({
   const [sessionJson, setSessionJson] = useState("");
   const [paths, setPaths] = useState((site.capture_paths ?? []).join("\n"));
   const [mobile, setMobile] = useState(site.capture_mobile);
+  const [stage, setStage] = useState(site.intended_stage);
   const [authSaving, setAuthSaving] = useState(false);
   const [authSaved, setAuthSaved] = useState(false);
 
@@ -958,6 +959,7 @@ function Settings({
         storage_state: sessionJson.trim(),
         capture_paths,
         capture_mobile: mobile,
+        intended_stage: stage,
       });
       setSessionJson("");
       setAuthSaved(true);
@@ -1176,6 +1178,37 @@ function Settings({
             onChange={(e) => setMobile(e.target.checked)}
           />
           {t("console.authMobile")}
+        </label>
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 12.5,
+            color: C.text,
+            marginBottom: 10,
+          }}
+        >
+          {t("console.authStage")}
+          <select
+            value={stage}
+            onChange={(e) =>
+              setStage(e.target.value as "onboarding" | "main_app" | "any")
+            }
+            style={{
+              padding: "6px 10px",
+              fontSize: 12.5,
+              border: `1px solid ${C.border}`,
+              borderRadius: 7,
+              background: "#fff",
+              color: C.text,
+              fontFamily: FS,
+            }}
+          >
+            <option value="any">{t("console.stageAny")}</option>
+            <option value="onboarding">{t("console.stageOnboarding")}</option>
+            <option value="main_app">{t("console.stageMain")}</option>
+          </select>
         </label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button

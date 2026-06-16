@@ -53,7 +53,8 @@ import {
   type SiteContext,
 } from './dimensions/llm.js';
 import { clusterFrictions } from './dimensions/frictions.js';
-import { captureSite, captureAuthenticatedSite } from './site_capture.js';
+import { captureSite, captureScreens, type AuthCaptureResult } from './site_capture.js';
+import { planCapture, type CapturePlan, type IntendedStage } from './capture_planner.js';
 import { classifySite } from './site_classifier.js';
 import { generateCustomQuestions } from './dimensions/custom_questions.js';
 
@@ -178,26 +179,31 @@ async function runScan(scanId: string): Promise<void> {
   if (!USE_SIMULATOR) {
     await setStatus(scanId, 'capturing');
     try {
-      // Authenticated capture when the scan's workspace has a stored
-      // session — reaches the real product behind a login gate. Falls
-      // back to the ordinary anonymous capture otherwise.
+      // Workspace scans get the planned capture pipeline (auth session,
+      // mobile detect, journey-stage triage). Public/anonymous scans
+      // keep the cached single-shot captureSite.
       let authState: unknown | null = null;
       let capturePaths: string[] | null = null;
       let captureMobile = false;
+      let intendedStage: IntendedStage = 'any';
       if (scan.workspaceId) {
         const ws = await getWorkspaceById(scan.workspaceId);
         if (ws) {
           authState = getWorkspaceAuthState(ws);
           capturePaths = ws.capturePaths ?? null;
           captureMobile = ws.captureMobile ?? false;
+          intendedStage = (ws.intendedStage as IntendedStage) ?? 'any';
         }
       }
 
-      if (authState) {
-        const cap = await captureAuthenticatedSite(targetUrl, {
-          storageState: authState,
+      const usePlanned = Boolean(scan.workspaceId && (authState || captureMobile || intendedStage !== 'any'));
+
+      if (usePlanned) {
+        const { cap, plan } = await orchestrateCapture(targetUrl, {
+          authState,
           capturePaths,
-          mobile: captureMobile,
+          captureMobile,
+          intendedStage,
         });
         screenshotUrls = cap.primaryUrls;
         const authCapture = {
@@ -217,13 +223,21 @@ async function runScan(scanId: string): Promise<void> {
             captureCompletedAt: cap.capturedAt,
             captureSignals: cap.signals ?? null,
             authCapture,
+            capturePlan: plan ?? null,
           })
           .where(eq(schema.audienceFitScans.id, scanId));
         scan.captureSignals = cap.signals ?? null;
         scan.authCapture = authCapture;
+        scan.capturePlan = plan ?? null;
         log.info(
-          { scanId, screens: cap.screens.length, authenticated: true },
-          'authenticated capture complete',
+          {
+            scanId,
+            screens: cap.screens.length,
+            stage: plan?.journey_stage,
+            evaluable: plan?.evaluable,
+            matches: plan?.matches_intended_stage,
+          },
+          'planned capture complete',
         );
       } else {
         const cap = await captureSite(targetUrl);
@@ -421,6 +435,7 @@ async function runScan(scanId: string): Promise<void> {
         oneLinePitch: scan.oneLinePitch,
         pageFacts: pageFactsFrom(scan.captureSignals),
         structure: structureFrom(scan.authCapture),
+        stage: stageFrom(scan.capturePlan),
       },
     });
     if (r.errored) totalErrored += 1;
@@ -620,6 +635,7 @@ async function runModeBPipeline(args: {
         oneLinePitch: scan.oneLinePitch,
         pageFacts: pageFactsFrom(scan.captureSignals),
         structure: structureFrom(scan.authCapture),
+        stage: stageFrom(scan.capturePlan),
       },
     });
     if (r.errored) errored += 1;
@@ -786,6 +802,83 @@ function pageFactsFrom(
     popupDetected: sig.popup_detected,
     loginWall: sig.login_wall,
   };
+}
+
+// Planned capture orchestration (Console S4) — anonymous-first for the
+// onboarding stage, LLM triage, then ONE bounded correction pass:
+//   - render_frame mobile  → recapture at a phone viewport
+//   - login gate + session → recapture with the session (cross the gate)
+// then re-plan the corrected capture. Max 2 captures.
+async function planScreen(
+  targetUrl: string,
+  cap: AuthCaptureResult,
+  intendedStage: IntendedStage,
+): Promise<CapturePlan | null> {
+  const first = cap.screens[0];
+  return planCapture({
+    targetUrl,
+    screenshotUrls: cap.primaryUrls,
+    signals: cap.signals,
+    structure: first ? { actions: first.actions, nav: first.nav } : null,
+    intendedStage,
+  });
+}
+
+async function orchestrateCapture(
+  targetUrl: string,
+  opts: {
+    authState: unknown | null;
+    capturePaths: string[] | null;
+    captureMobile: boolean;
+    intendedStage: IntendedStage;
+  },
+): Promise<{ cap: AuthCaptureResult; plan: CapturePlan | null }> {
+  const onboarding = opts.intendedStage === 'onboarding';
+  let mobile = opts.captureMobile;
+  // Onboarding evaluates the NEW-visitor view → start anonymous; other
+  // stages use the session up front when present.
+  let useAuth = !onboarding && !!opts.authState;
+
+  let cap = await captureScreens(targetUrl, {
+    storageState: useAuth ? opts.authState : undefined,
+    capturePaths: opts.capturePaths,
+    mobile,
+  });
+  let plan = await planScreen(targetUrl, cap, opts.intendedStage);
+
+  let recap = false;
+  if (plan) {
+    if (plan.render_frame === 'mobile' && !mobile) {
+      mobile = true;
+      recap = true;
+    }
+    if (
+      (plan.next_action_hint === 'use_auth_session' || plan.blocking_state === 'login_wall') &&
+      opts.authState &&
+      !useAuth
+    ) {
+      useAuth = true;
+      recap = true;
+    }
+  }
+  if (recap) {
+    cap = await captureScreens(targetUrl, {
+      storageState: useAuth ? opts.authState : undefined,
+      capturePaths: opts.capturePaths,
+      mobile,
+    });
+    plan = await planScreen(targetUrl, cap, opts.intendedStage);
+  }
+  return { cap, plan };
+}
+
+// Capture-planner verdict → SiteContext.stage. Null when no plan, which
+// keeps the persona prompt byte-identical (dimension_llm.test.ts lock).
+function stageFrom(
+  plan: (typeof schema.audienceFitScans.$inferSelect)['capturePlan'],
+): SiteContext['stage'] {
+  if (!plan || !plan.journey_stage) return null;
+  return { journeyStage: plan.journey_stage, summary: plan.summary };
 }
 
 // Authenticated-capture structure → SiteContext.structure. Null on

@@ -257,6 +257,21 @@ export const audienceFitScans = pgTable('audience_fit_scans', {
     }[];
   }>(),
 
+  // Capture-planner verdict (Console S4, 2026-06-16) — the LLM
+  // pre-judgment of the primary captured screen: journey stage, whether
+  // it's evaluable, frame, blocking state, intended-stage match. null on
+  // scans that predate the planner or when the planner call failed.
+  capturePlan: jsonb('capture_plan').$type<{
+    journey_stage: string;
+    surface_type: string;
+    render_frame: string;
+    blocking_state: string;
+    evaluable: boolean;
+    matches_intended_stage: boolean;
+    next_action_hint: string;
+    summary: string;
+  }>(),
+
   // Synthesis output — filled at completion. All 0-100 unless noted.
   audienceFitScore: real('audience_fit_score'),
   bestCohortId: text('best_cohort_id'),
@@ -691,6 +706,11 @@ export const siteWorkspaces = pgTable('site_workspaces', {
    *  capture mis-reads as a modal (geulbat, 2026-06-16). null/false =
    *  desktop 1280×800. */
   captureMobile: boolean('capture_mobile'),
+  /** Which journey stage scans of this site should evaluate
+   *  ('onboarding' | 'main_app' | 'any'). Drives the capture planner:
+   *  'onboarding' starts capture anonymously (new-visitor view) and
+   *  crosses a login gate with the stored session. null = 'any'. */
+  intendedStage: text('intended_stage'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({

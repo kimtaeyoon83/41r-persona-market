@@ -448,9 +448,16 @@ const MOBILE_VIEWPORT = { width: 390, height: 844 };
 const MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1';
 
-export async function captureAuthenticatedSite(
+/**
+ * Multi-screen capture with optional session + viewport. When
+ * storageState is omitted the context is anonymous (used for the
+ * pre-login / new-visitor onboarding stage); when present it reuses a
+ * logged-in session to reach gated screens. mobile=true uses a phone
+ * viewport for mobile-first apps.
+ */
+export async function captureScreens(
   targetUrl: string,
-  opts: { storageState: unknown; capturePaths?: string[] | null; mobile?: boolean | null },
+  opts: { storageState?: unknown; capturePaths?: string[] | null; mobile?: boolean | null },
 ): Promise<AuthCaptureResult> {
   const guard = validateTargetUrl(targetUrl);
   if (!guard.ok) throw new Error(`unsafe_target_url:${guard.reason}`);
@@ -496,7 +503,9 @@ export async function captureAuthenticatedSite(
         ? MOBILE_UA
         : 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
       ...(opts.mobile ? { isMobile: true, hasTouch: true, deviceScaleFactor: 3 } : {}),
-      storageState: opts.storageState as BrowserContextOptions['storageState'],
+      ...(opts.storageState
+        ? { storageState: opts.storageState as BrowserContextOptions['storageState'] }
+        : {}),
     });
     const page = await ctx.newPage();
     for (const url of list) {
