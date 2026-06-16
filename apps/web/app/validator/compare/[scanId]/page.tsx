@@ -17,19 +17,21 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { scanApi, type ScanCompareReport } from "@/lib/api";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 import { C, FM, FS, Frame } from "../../_components/ui";
 
-const DIM_LABELS: Record<keyof ScanCompareReport["ai"]["dimension_means"], string> = {
-  engagement: "Engagement",
-  task_success: "Task success",
-  happiness: "Happiness",
-  adoption: "Adoption",
-  retention_d7: "Retention D-7",
-};
+const DIM_KEYS: Array<keyof ScanCompareReport["ai"]["dimension_means"]> = [
+  "engagement",
+  "task_success",
+  "happiness",
+  "adoption",
+  "retention_d7",
+];
 
 export default function ComparePage() {
   const params = useParams<{ scanId: string }>();
   const scanId = params?.scanId ?? "";
+  const { t } = useI18n();
 
   const [report, setReport] = useState<ScanCompareReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +77,7 @@ export default function ComparePage() {
     return (
       <Frame active="discovery">
         <div className="v-page-pad" style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <div style={{ color: C.textDim, fontSize: 13, fontFamily: FM }}>Loading comparison…</div>
+          <div style={{ color: C.textDim, fontSize: 13, fontFamily: FM }}>{t("compare.loading")}</div>
         </div>
       </Frame>
     );
@@ -84,9 +86,9 @@ export default function ComparePage() {
     return (
       <Frame active="discovery">
         <div className="v-page-pad" style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <div style={{ color: C.bad, fontSize: 13, marginBottom: 12 }}>{error ?? "No data"}</div>
+          <div style={{ color: C.bad, fontSize: 13, marginBottom: 12 }}>{error ?? t("compare.notFound")}</div>
           <Link href={`/validator/report/${scanId}`} style={{ color: C.accent, fontSize: 13 }}>
-            ← Back to report
+            {t("compare.backToReport")}
           </Link>
         </div>
       </Frame>
@@ -104,7 +106,7 @@ export default function ComparePage() {
             href={`/validator/report/${scanId}`}
             style={{ fontSize: 12, color: C.textFaint, fontFamily: FM, textDecoration: "none" }}
           >
-            ← Back to report
+            {t("compare.backToReport")}
           </Link>
         </div>
         <h1
@@ -116,7 +118,7 @@ export default function ComparePage() {
             marginBottom: 6,
           }}
         >
-          AI vs Human comparison
+          {t("compare.title")}
         </h1>
         <div style={{ fontSize: 13, color: C.textDim, marginBottom: 4 }}>
           {scan.target_url}
@@ -129,10 +131,10 @@ export default function ComparePage() {
             marginBottom: 22,
           }}
         >
-          AI: {ai.n_personas} personas · Human: {human ? `${human.n_respondents} responses` : "not yet aggregated"}
+          AI: {ai.n_personas} · Human: {human ? `${human.n_respondents} ${t("compare.responses")}` : t("compare.notAggregated")}
           {human && survey_response_count > human.n_respondents && (
             <span style={{ color: C.warn, marginLeft: 8 }}>
-              ({survey_response_count - human.n_respondents} new responses since last compute)
+              ({survey_response_count - human.n_respondents} {t("compare.newSince")})
             </span>
           )}
         </div>
@@ -153,8 +155,8 @@ export default function ComparePage() {
         >
           <div style={{ fontSize: 12, color: C.textDim, lineHeight: 1.5 }}>
             {human
-              ? `Human aggregate computed at ${new Date(human.computed_at).toLocaleString()}.`
-              : `${survey_response_count} survey response${survey_response_count === 1 ? "" : "s"} collected — click to compute the human report.`}
+              ? `${t("compare.computedAt")} ${new Date(human.computed_at).toLocaleString()}`
+              : `${survey_response_count} ${t("compare.responsesCollected")}`}
           </div>
           <button
             onClick={onRecompute}
@@ -173,7 +175,7 @@ export default function ComparePage() {
               whiteSpace: "nowrap",
             }}
           >
-            {recomputing ? "Computing…" : human ? "Recompute" : "Compute now"}
+            {recomputing ? t("compare.computing") : human ? t("compare.recompute") : t("compare.computeNow")}
           </button>
         </div>
 
@@ -187,20 +189,20 @@ export default function ComparePage() {
           }}
           className="v-grid-stack-sm"
         >
-          <ScoreCard label="AI score" value={ai.audience_fit_score} accent={C.text} />
+          <ScoreCard label={t("compare.aiScore")} value={ai.audience_fit_score} accent={C.text} />
           <ScoreCard
-            label="Δ (Human − AI)"
+            label={t("compare.deltaLabel")}
             value={diff?.audience_fit_delta ?? null}
             accent={diff ? deltaColor(diff.audience_fit_delta) : C.textFaint}
             showSign
             showWhenNull="—"
           />
-          <ScoreCard label="Human score" value={human?.audience_fit_score ?? null} accent={C.text} />
+          <ScoreCard label={t("compare.humanScore")} value={human?.audience_fit_score ?? null} accent={C.text} />
         </div>
 
         {/* Dimension breakdown */}
         <h2 style={{ fontSize: 16, fontWeight: 600, fontFamily: FS, marginBottom: 12 }}>
-          Dimension means
+          {t("compare.dimensionMeans")}
         </h2>
         <div
           style={{
@@ -225,12 +227,12 @@ export default function ComparePage() {
               letterSpacing: 0.4,
             }}
           >
-            <div>Dimension</div>
+            <div>{t("compare.colDimension")}</div>
             <div style={{ textAlign: "right" }}>AI</div>
             <div style={{ textAlign: "right" }}>Δ</div>
-            <div style={{ textAlign: "right" }}>Human</div>
+            <div style={{ textAlign: "right" }}>{t("compare.colHuman")}</div>
           </div>
-          {(Object.keys(DIM_LABELS) as Array<keyof typeof DIM_LABELS>).map((k) => {
+          {DIM_KEYS.map((k) => {
             const aiV = ai.dimension_means[k];
             const huV = human?.dimension_means[k];
             const dV = diff?.dimension_deltas[k];
@@ -246,7 +248,7 @@ export default function ComparePage() {
                   alignItems: "center",
                 }}
               >
-                <div>{DIM_LABELS[k]}</div>
+                <div>{t(`compare.dim.${k}` as MessageKey)}</div>
                 <div style={{ textAlign: "right", fontFamily: FM }}>{aiV.toFixed(1)}</div>
                 <div
                   style={{
@@ -268,7 +270,7 @@ export default function ComparePage() {
 
         {/* Friction overlap */}
         <h2 style={{ fontSize: 16, fontWeight: 600, fontFamily: FS, marginBottom: 12 }}>
-          Friction overlap
+          {t("compare.frictionOverlap")}
         </h2>
         {!human ? (
           <div
@@ -282,7 +284,7 @@ export default function ComparePage() {
               marginBottom: 28,
             }}
           >
-            Compute the human aggregate to see friction comparison.
+            {t("compare.computeToSee")}
           </div>
         ) : (
           <div
@@ -294,9 +296,9 @@ export default function ComparePage() {
             }}
             className="v-grid-stack-sm"
           >
-            <FrictionList title={`AI top frictions (${ai.frictions.length})`} items={ai.frictions} accent={C.accent} />
+            <FrictionList title={`${t("compare.aiTopFrictions")} (${ai.frictions.length})`} items={ai.frictions} accent={C.accent} />
             <FrictionList
-              title={`Human top frictions (${human.frictions?.length ?? 0})`}
+              title={`${t("compare.humanTopFrictions")} (${human.frictions?.length ?? 0})`}
               items={(human.frictions ?? []).map((f) => ({ rank: f.rank, title: f.title, n: f.n }))}
               accent={C.warn}
             />
@@ -314,8 +316,8 @@ export default function ComparePage() {
             }}
             className="v-grid-stack-sm"
           >
-            <CalloutBox title="AI saw, humans didn't" items={diff.ai_only_frictions} color={C.accent} />
-            <CalloutBox title="Humans saw, AI missed" items={diff.human_only_frictions} color={C.warn} />
+            <CalloutBox title={t("compare.aiSaw")} items={diff.ai_only_frictions} color={C.accent} />
+            <CalloutBox title={t("compare.humanSaw")} items={diff.human_only_frictions} color={C.warn} />
           </div>
         )}
 
@@ -323,7 +325,7 @@ export default function ComparePage() {
         {scan.custom_questions && scan.custom_questions.length > 0 && human && (
           <>
             <h2 style={{ fontSize: 16, fontWeight: 600, fontFamily: FS, marginBottom: 12 }}>
-              Site-specific questions
+              {t("compare.siteSpecific")}
             </h2>
             <div
               style={{
@@ -349,7 +351,7 @@ export default function ComparePage() {
                     <div style={{ fontSize: 13, marginBottom: 8 }}>{q.question}</div>
                     {q.type === "likert" && rollup?.likert ? (
                       <div style={{ fontSize: 13, fontFamily: FM, color: C.textDim }}>
-                        Mean:{" "}
+                        {t("compare.mean")}:{" "}
                         <span style={{ color: C.text, fontWeight: 600 }}>
                           {rollup.likert.mean.toFixed(2)}
                         </span>{" "}
@@ -375,7 +377,7 @@ export default function ComparePage() {
                       </div>
                     ) : (
                       <div style={{ fontSize: 12, color: C.textFaint, fontFamily: FM }}>
-                        No responses yet
+                        {t("compare.noResponses")}
                       </div>
                     )}
                   </div>
