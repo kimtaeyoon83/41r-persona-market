@@ -13,13 +13,8 @@ import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { usePrivy } from "@privy-io/react-auth";
-import {
-  useSignTransaction,
-  useWallets as useSolanaWallets,
-} from "@privy-io/react-auth/solana";
 import { scanApi, type ScanSummary } from "@/lib/api";
 import { checkTargetUrl } from "@/lib/url";
-import { performSponsoredPayment } from "@/lib/sponsored-payment";
 import { C, FM, FS, Frame, Pill } from "./validator/_components/ui";
 
 type AnalysisMode = "A" | "B";
@@ -36,12 +31,6 @@ function HomeInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { ready, authenticated, login } = usePrivy();
-  // Mode B sponsored-payment plumbing — same hooks Mode A's
-  // /validator/detail uses. Without these, Verify flow created scans
-  // without signing the sponsored 0 USDC tx and produced no Solscan
-  // receipt or userId-claim. Helper at lib/sponsored-payment.ts.
-  const { signTransaction } = useSignTransaction();
-  const { wallets: solanaWallets } = useSolanaWallets();
 
   // Initial mode honours `?mode=B` (used by the /validator redirect
   // and any legacy "Verify Mode B" links).
@@ -115,18 +104,8 @@ function HomeInner() {
         mode: "B",
         target_audience_text: trimmedAudience,
       });
-      // Sponsored 0 USDC tx — same flow as Mode A's /validator/detail.
-      // Helper returns ok / skipped / error; we surface the message
-      // but never abort the scan (server-side worker is decoupled).
-      const payment = await performSponsoredPayment({
-        scanId,
-        authenticated,
-        wallet: solanaWallets[0],
-        signTransaction,
-      });
-      if (payment.kind === "error") {
-        setError(`Payment skipped: ${payment.message}`);
-      }
+      // Scan is gated by the credit ledger server-side (debitScan);
+      // no client payment step (Sui migration removed the Solana tx).
       router.push(
         `/validator/processing/${scanId}?url=${encodeURIComponent(trimmedUrl)}`,
       );

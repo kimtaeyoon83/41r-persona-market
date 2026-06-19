@@ -398,39 +398,15 @@ export const scanApi = {
   /** Currently in-flight scans (capturing/sampling/responding/aggregating). */
   getLive: () => request<{ scans: ScanSummary[] }>('/api/scan/live'),
 
-  /** Phase 4 P4-5 — auth-gated list of scans owned by the current user.
-   *  Each summary includes payment_tx_signature + Solscan link.
-   *  Console S2 adds workspace_id (null = the console's Unassigned bucket). */
+  /** Auth-gated list of scans owned by the current user.
+   *  Console S2 adds workspace_id (null = the console's Unassigned bucket).
+   *  (Solana payment receipt fields removed in the Sui migration.) */
   getMyScans: () =>
     request<{
       scans: Array<ScanSummary & {
         workspace_id: string | null;
-        payment_tx_signature: string | null;
-        payment_solscan: string | null;
       }>;
     }>('/api/scan/me'),
-
-  /** Phase 4 D6 — request a Fee Payer-partial-signed 0 USDC tx for the
-   *  authenticated user to sign with their Privy wallet. */
-  getPaymentTx: (scanId: string) =>
-    request<{
-      txBase64: string;
-      blockhash: string;
-      lastValidBlockHeight: number;
-      feePayer: string;
-      expiresAt: string;
-    }>(`/api/scan/${scanId}/payment-tx`, { method: 'POST', body: '{}' }),
-
-  /** Broadcast the user-signed tx (base64). Backend persists the
-   *  signature on the scan row and returns a Solscan link. */
-  confirmPayment: (scanId: string, signedTxBase64: string) =>
-    request<{ signature: string; solscan: string }>(
-      `/api/scan/${scanId}/payment-confirm`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ signed_tx_base64: signedTxBase64 }),
-      },
-    ),
 
   /** Submit a human survey for an already-completed scan.
    *  Phase 5.1 — requires Privy auth (the AuthBridge attaches the

@@ -3,14 +3,8 @@
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Suspense, useState } from "react";
-import { usePrivy } from "@privy-io/react-auth";
-import {
-  useSignTransaction,
-  useWallets as useSolanaWallets,
-} from "@privy-io/react-auth/solana";
 import { scanApi } from "@/lib/api";
 import { checkTargetUrl } from "@/lib/url";
-import { performSponsoredPayment } from "@/lib/sponsored-payment";
 import { Btn, C, Card, FM, Frame } from "../_components/ui";
 
 // Screen 2: Discovery detail — sharpening questions.
@@ -52,14 +46,6 @@ function DetailInner() {
   >(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Phase 4 D6 — Privy embedded wallet + sign-transaction hook.
-  // wallets[0] is the user's Solana embedded wallet (auto-created on
-  // email login). Phantom users connect their external wallet which
-  // also surfaces here.
-  const { authenticated } = usePrivy();
-  const { signTransaction } = useSignTransaction();
-  const { wallets: solanaWallets } = useSolanaWallets();
-
   const toggle = (t: string) =>
     setSelected((prev) => ({ ...prev, [t]: !prev[t] }));
 
@@ -97,8 +83,9 @@ function DetailInner() {
     setSubmitStage("creating");
     setError(null);
     try {
-      // 1. Create the scan row (anonymous if not logged in; ownership
-      //    claimed lazily by /payment-tx if/when authenticated).
+      // Create the scan row (anonymous if not logged in). Scans are
+      // gated by the credit ledger server-side (debitScan) — no client
+      // payment step after the Sui migration removed the Solana tx.
       const cohorts = skipInputs ? [] : buildTargetCohorts();
       const { scanId } = await scanApi.createScan({
         target_url: check.normalized,
@@ -106,28 +93,6 @@ function DetailInner() {
         hypothesis: skipInputs ? undefined : buildHypothesisText(),
         target_cohorts: cohorts.length > 0 ? cohorts : undefined,
       });
-
-      // 2. Sponsored 0 USDC tx — Phase 4 D6, via the shared helper at
-      //    lib/sponsored-payment.ts. Returns ok / skipped / error so
-      //    we surface a friendly message but never abort the scan
-      //    (server-side worker is decoupled from payment).
-      const result = await performSponsoredPayment({
-        scanId,
-        authenticated,
-        wallet: solanaWallets[0],
-        signTransaction,
-        // Map helper stages to the local submitStage union. Helper's
-        // "done" is the terminal success — we transition straight to
-        // "redirecting" below, so no setSubmitStage is needed for it.
-        onStage: (stage) => {
-          if (stage === "signing" || stage === "broadcasting") {
-            setSubmitStage(stage);
-          }
-        },
-      });
-      if (result.kind === "error") {
-        setError(`Payment skipped: ${result.message}`);
-      }
 
       setSubmitStage("redirecting");
       router.push(

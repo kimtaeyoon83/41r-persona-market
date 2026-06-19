@@ -12,7 +12,6 @@
 // a Client Component. This file is the boundary.
 
 import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
-import { defaultSolanaRpcsPlugin } from "@privy-io/react-auth/solana";
 import { useEffect, type ReactNode } from "react";
 import { setAuthTokenGetter } from "@/lib/api";
 import { I18nProvider } from "@/lib/i18n";
@@ -44,26 +43,21 @@ export function Providers({ children }: { children: ReactNode }) {
     <PrivyProvider
       appId={PRIVY_APP_ID}
       config={{
-        // Login surface — order matters for the modal.
+        // Login surface — order matters for the modal. Privy is used
+        // purely for identity (email/Google → bearer token); the Sui
+        // chain transition (design v0.4 §0.1) moved persona ownership to
+        // server-custodied Sui wallets, so no client embedded wallet is
+        // created here.
         loginMethodsAndOrder: {
-          primary: ["email", "google", "phantom"],
+          primary: ["email", "google"],
         },
-        // Auto-create a Solana embedded wallet for users who sign in
-        // via email/Google (no external wallet). Phantom users keep
-        // their existing wallet. Decision §6.1 step 3.
         embeddedWallets: {
           ethereum: { createOnLogin: "off" },
-          solana: { createOnLogin: "users-without-wallets" },
+          solana: { createOnLogin: "off" },
         },
-        // Register Privy's default Solana RPC config (mainnet +
-        // devnet endpoints from solana-{cluster}.rpc.privy.systems).
-        // Without this plugin, useSignTransaction throws
-        // "No RPC configuration found for chain solana:devnet" when
-        // we pass chain='solana:devnet' for the sponsored 0 USDC tx.
-        plugins: [defaultSolanaRpcsPlugin()],
         appearance: {
           theme: "light",
-          accentColor: "#14F195", // Solana / 41R green
+          accentColor: "#14F195",
           showWalletLoginFirst: false,
         },
       }}
