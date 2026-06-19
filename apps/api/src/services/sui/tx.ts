@@ -75,11 +75,13 @@ export function buildBurnPersona(packageId: string, personaId: string): Transact
   return tx;
 }
 
-// ─── campaign.move ───────────────────────────────────────────────────
+// ─── campaign.move (generic Campaign<T>) ─────────────────────────────
 
-/** Create a campaign locking `rewardCoinId` as escrow; cap goes to sender. */
+/** Create a campaign locking `rewardCoinId` (coin type `coinType`) as escrow;
+ *  cap goes to sender (create_and_keep). */
 export function buildCreateCampaign(
   packageId: string,
+  coinType: string,
   rewardCoinId: string,
   target: string,
   personaCriteria: string,
@@ -87,6 +89,7 @@ export function buildCreateCampaign(
   const tx = new Transaction();
   tx.moveCall({
     target: `${packageId}::campaign::create_and_keep`,
+    typeArguments: [coinType],
     arguments: [
       tx.object(rewardCoinId),
       tx.pure.string(target),
@@ -97,8 +100,38 @@ export function buildCreateCampaign(
   return tx;
 }
 
+/** Create a USDC-escrow campaign: split `amount` from `coinId`, lock it via
+ *  campaign::create<usdcCoinType>, and send the owner cap to `capRecipient`
+ *  (the operator / §6 verification anchor) so the server can settle/close.
+ *  The signer (operator in tests, the user via Privy in prod) owns `coinId`. */
+export function buildCreateUsdcCampaign(
+  packageId: string,
+  usdcCoinType: string,
+  coinId: string,
+  amount: bigint,
+  target: string,
+  personaCriteria: string,
+  capRecipient: string,
+): Transaction {
+  const tx = new Transaction();
+  const [pay] = tx.splitCoins(tx.object(coinId), [tx.pure.u64(amount)]);
+  const cap = tx.moveCall({
+    target: `${packageId}::campaign::create`,
+    typeArguments: [usdcCoinType],
+    arguments: [
+      pay,
+      tx.pure.string(target),
+      tx.pure.string(personaCriteria),
+      tx.object(SUI_CLOCK_OBJECT_ID),
+    ],
+  });
+  tx.transferObjects([cap], tx.pure.address(capRecipient));
+  return tx;
+}
+
 export function buildSettleCampaign(
   packageId: string,
+  coinType: string,
   campaignId: string,
   capId: string,
   recipient: string,
@@ -107,6 +140,7 @@ export function buildSettleCampaign(
   const tx = new Transaction();
   tx.moveCall({
     target: `${packageId}::campaign::settle`,
+    typeArguments: [coinType],
     arguments: [
       tx.object(campaignId),
       tx.object(capId),
@@ -119,12 +153,14 @@ export function buildSettleCampaign(
 
 export function buildCloseCampaign(
   packageId: string,
+  coinType: string,
   campaignId: string,
   capId: string,
 ): Transaction {
   const tx = new Transaction();
   tx.moveCall({
     target: `${packageId}::campaign::close`,
+    typeArguments: [coinType],
     arguments: [tx.object(campaignId), tx.object(capId)],
   });
   return tx;

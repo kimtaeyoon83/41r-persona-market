@@ -31,7 +31,7 @@ fun create_settle_close_flow() {
     // Settle 600 to the persona owner.
     sc.next_tx(REQUESTER);
     {
-        let mut camp = sc.take_shared<Campaign>();
+        let mut camp = sc.take_shared<Campaign<SUI>>();
         let cap = sc.take_from_sender<CampaignOwnerCap>();
         assert!(campaign::pool_value(&camp) == 1000);
         campaign::settle(&mut camp, &cap, PERSONA, 600, sc.ctx());
@@ -51,7 +51,7 @@ fun create_settle_close_flow() {
     // Close refunds the remaining 400 to the requester and marks closed.
     sc.next_tx(REQUESTER);
     {
-        let mut camp = sc.take_shared<Campaign>();
+        let mut camp = sc.take_shared<Campaign<SUI>>();
         let cap = sc.take_from_sender<CampaignOwnerCap>();
         campaign::close(&mut camp, &cap, sc.ctx());
         assert!(campaign::pool_value(&camp) == 0);
@@ -83,7 +83,7 @@ fun settle_over_pool_aborts() {
     };
     sc.next_tx(REQUESTER);
     {
-        let mut camp = sc.take_shared<Campaign>();
+        let mut camp = sc.take_shared<Campaign<SUI>>();
         let cap = sc.take_from_sender<CampaignOwnerCap>();
         // Over-draw: only 100 in pool.
         campaign::settle(&mut camp, &cap, PERSONA, 9999, sc.ctx());

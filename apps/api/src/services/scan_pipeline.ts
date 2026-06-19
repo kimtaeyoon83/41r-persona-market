@@ -32,6 +32,7 @@ import {
 } from './workspaces.js';
 import { sendScanCompleteEmail } from './email.js';
 import { anchorScanReport } from './sui/anchor.js';
+import { settleAndClose } from './sui/escrow.js';
 import { logger } from '../logger.js';
 import {
   type CohortFit,
@@ -549,6 +550,7 @@ async function runScan(scanId: string): Promise<void> {
   await setWorkspaceAnchorFromScan(scanId);
   notifyScanComplete(scanId, result.best.cohort_label, result.audience_fit_score);
   anchorReportSafe(scanId);
+  settleAndCloseSafe(scanId);
 }
 
 // ─── Mode B: single-audience pipeline ────────────────────────────
@@ -727,6 +729,7 @@ async function runModeBPipeline(args: {
   await setWorkspaceAnchorFromScan(scanId);
   notifyScanComplete(scanId, parsed.label ?? null, cohortFitScore);
   anchorReportSafe(scanId);
+  settleAndCloseSafe(scanId);
 }
 
 // Scan-complete notification (Console S2, retention loop #1 — §6).
@@ -776,6 +779,20 @@ function anchorReportSafe(scanId: string): void {
       await anchorScanReport(scanId);
     } catch (err) {
       log.warn({ scanId, err }, 'scan-report anchor failed (non-fatal)');
+    }
+  })();
+}
+
+// Fire-and-forget USDC escrow settlement (chain wiring §4.3). Settles the
+// platform fee + closes the campaign (refund remainder) once the scan that
+// was paid via escrow completes. No-op for credit-paid scans (escrow_status
+// not 'escrowed'). Non-fatal — never blocks/fails a completed scan.
+function settleAndCloseSafe(scanId: string): void {
+  void (async () => {
+    try {
+      await settleAndClose(scanId);
+    } catch (err) {
+      log.warn({ scanId, err }, 'escrow settle/close failed (non-fatal)');
     }
   })();
 }

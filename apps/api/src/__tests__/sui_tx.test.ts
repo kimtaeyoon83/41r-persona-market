@@ -72,13 +72,14 @@ describe('persona PTB builders', () => {
 
 describe('campaign PTB builders', () => {
   it('create / settle / close', () => {
-    expect(moveCalls(buildCreateCampaign(PKG, OBJ, 'https://x', '{}'))).toEqual([
+    const SUI_T = '0x2::sui::SUI';
+    expect(moveCalls(buildCreateCampaign(PKG, SUI_T, OBJ, 'https://x', '{}'))).toEqual([
       { module: 'campaign', fn: 'create_and_keep', args: 4 },
     ]);
-    expect(moveCalls(buildSettleCampaign(PKG, OBJ, CAP, ADDR, 600n))).toEqual([
+    expect(moveCalls(buildSettleCampaign(PKG, SUI_T, OBJ, CAP, ADDR, 600n))).toEqual([
       { module: 'campaign', fn: 'settle', args: 4 },
     ]);
-    expect(moveCalls(buildCloseCampaign(PKG, OBJ, CAP))).toEqual([
+    expect(moveCalls(buildCloseCampaign(PKG, SUI_T, OBJ, CAP))).toEqual([
       { module: 'campaign', fn: 'close', args: 2 },
     ]);
   });

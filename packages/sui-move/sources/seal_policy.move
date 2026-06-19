@@ -22,9 +22,9 @@ entry fun seal_approve(id: vector<u8>) {
 /// `id` is namespaced to THIS campaign (id must start with the campaign's
 /// object id bytes). The namespace prefix stops a requester from
 /// decrypting a different campaign's evidence by passing another Campaign.
-entry fun seal_approve_evidence(
+entry fun seal_approve_evidence<T>(
     id: vector<u8>,
-    campaign: &Campaign,
+    campaign: &Campaign<T>,
     ctx: &TxContext,
 ) {
     assert!(is_prefix(object::id_bytes(campaign), id), ENoAccess);

@@ -45,6 +45,9 @@ import { awardSurveyPoints, isRewardAvailable } from '../services/rewards.js';
 import { notifySurveyMilestone } from '../services/notify.js';
 import { suiObjectUrl } from '../services/sui/anchor.js';
 import { walrusBlobUrl } from '../services/walrus.js';
+import { getSuiSigner } from '../services/sui/client.js';
+import { usdcAmountFromCents, verifyCampaignCreation } from '../services/sui/escrow.js';
+import { env } from '../config/env.js';
 
 const router: RouterType = Router();
 
@@ -88,6 +91,17 @@ const createScanBody = z.object({
   // Mode A optional — restricts the analysis to a subset of the 8
   // standard cohorts. Empty array or absent → all 8 run.
   target_cohorts: z.array(z.string().min(1).max(40)).max(8).optional(),
+  // Payment rail (chain wiring §4.3). Default 'credits' (off-chain ledger,
+  // unchanged). 'usdc' → two-step USDC escrow: this returns pending_payment +
+  // the escrow envelope; the client funds a Campaign<USDC> then calls
+  // POST /:id/pay. Requires an authenticated user.
+  payment_method: z.enum(['credits', 'usdc']).optional(),
+});
+
+const payBody = z.object({
+  sui_digest: z.string().min(1).max(120),
+  campaign_object_id: z.string().min(3).max(80),
+  cap_id: z.string().min(3).max(80),
 });
 
 const UUID_RE =
@@ -155,6 +169,15 @@ router.post('/', scanCreateIpLimiter, optionalPrivyAuth, scanCreateUserLimiter, 
     recordDemoIpScan(ip);
   }
 
+  // Payment rail. USDC escrow requires an authed user (the cap + refund bind
+  // to their identity); anonymous demos stay credit/free only.
+  const paymentMethod = parsed.data.payment_method ?? 'credits';
+  if (paymentMethod === 'usdc' && !req.privyUser) {
+    res.status(401).json({ error: 'auth_required', message: 'USDC payment requires sign-in' });
+    return;
+  }
+  const usdcAmount = usdcAmountFromCents(SCAN_PRICE_CENTS[mode]);
+
   // Console S2 — auto-link to the user's workspace for this host
   // (when one exists). Anonymous scans stay unlinked forever.
   const workspace = req.privyUser
@@ -175,13 +198,34 @@ router.post('/', scanCreateIpLimiter, optionalPrivyAuth, scanCreateUserLimiter, 
       // Anonymous requests still allowed (legacy / pre-login demos).
       userId: req.privyUser?.id ?? null,
       workspaceId: workspace?.id ?? null,
-      status: 'pending',
+      status: paymentMethod === 'usdc' ? 'pending_payment' : 'pending',
+      paymentMethod,
+      escrowStatus: paymentMethod === 'usdc' ? 'pending_payment' : null,
+      escrowCoinType: paymentMethod === 'usdc' ? env.SUI_USDC_COIN_TYPE : null,
+      escrowAmount: paymentMethod === 'usdc' ? Number(usdcAmount) : null,
       weightsVersion: 'v1.0',
     })
     .returning();
 
   if (!scan) {
     res.status(500).json({ error: 'insert_failed' });
+    return;
+  }
+
+  // ── USDC escrow path: two-step. Don't debit/run yet — return the escrow
+  // envelope so the client funds a Campaign<USDC>, then calls POST /:id/pay.
+  if (paymentMethod === 'usdc') {
+    res.json({
+      scanId: scan.id,
+      status: 'pending_payment',
+      escrow: {
+        usdc_amount: usdcAmount.toString(),
+        coin_type: env.SUI_USDC_COIN_TYPE,
+        cap_recipient: getSuiSigner().toSuiAddress(),
+        target: safeUrl,
+        criteria: JSON.stringify(target_cohorts ?? []),
+      },
+    });
     return;
   }
 
@@ -209,6 +253,75 @@ router.post('/', scanCreateIpLimiter, optionalPrivyAuth, scanCreateUserLimiter, 
   startScanWorker(scan.id);
 
   res.json({ scanId: scan.id, status: scan.status });
+});
+
+// POST /api/scan/:id/pay — step 2 of the USDC escrow flow (§4.3).
+// The client has funded a Campaign<USDC> on Sui; verify it on-chain, then
+// flip the scan to pending + start the worker. The create digest is recorded
+// on payment_tx_signature (partial UNIQUE → one digest pays one scan).
+router.post('/:id/pay', requirePrivyAuth, mutationLimiter, async (req, res) => {
+  // requirePrivyAuth widens req.params.id typing to string|string[] — coerce
+  // (same pattern as the survey/human-aggregate authed routes below).
+  const id = String(req.params.id ?? '');
+  if (!UUID_RE.test(id)) {
+    res.status(400).json({ error: 'invalid_id' });
+    return;
+  }
+  const parsed = payBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
+    return;
+  }
+  const { sui_digest, campaign_object_id, cap_id } = parsed.data;
+
+  const [scan] = await db
+    .select()
+    .from(schema.audienceFitScans)
+    .where(eq(schema.audienceFitScans.id, id));
+  if (!scan) {
+    res.status(404).json({ error: 'scan_not_found' });
+    return;
+  }
+  if (scan.userId !== req.privyUser!.id) {
+    res.status(403).json({ error: 'forbidden' });
+    return;
+  }
+  if (scan.status !== 'pending_payment' || scan.escrowStatus !== 'pending_payment') {
+    res.status(409).json({ error: 'not_awaiting_payment', status: scan.status });
+    return;
+  }
+
+  const verdict = await verifyCampaignCreation({
+    digest: sui_digest,
+    campaignObjectId: campaign_object_id,
+    capId: cap_id,
+    expectedAmount: BigInt(scan.escrowAmount ?? 0),
+  });
+  if (!verdict.ok) {
+    res.status(402).json({ error: 'payment_unverified', reason: verdict.reason });
+    return;
+  }
+
+  // The partial UNIQUE on payment_tx_signature is the anti-replay net: a digest
+  // already claimed by another scan makes this UPDATE throw → 409.
+  try {
+    await db
+      .update(schema.audienceFitScans)
+      .set({
+        paymentTxSignature: sui_digest,
+        campaignObjectId: campaign_object_id,
+        campaignCapId: cap_id,
+        escrowStatus: 'escrowed',
+        status: 'pending',
+      })
+      .where(eq(schema.audienceFitScans.id, id));
+  } catch {
+    res.status(409).json({ error: 'digest_already_used' });
+    return;
+  }
+
+  startScanWorker(id);
+  res.json({ scanId: id, status: 'pending', escrow_status: 'escrowed' });
 });
 
 // ─── Public homepage feeds (Phase 2 §8.1, P2-4) ──────────────────

@@ -105,6 +105,16 @@ const envSchema = z.object({
   SEAL_KEY_SERVER_IDS: z.string().optional(),
   SEAL_THRESHOLD: z.coerce.number().int().positive().default(1),
 
+  // ── USDC escrow (pay-per-scan campaigns, §4.3) ──
+  // Circle native USDC coin type. Default = Sui testnet. The reward escrow
+  // (rpm::campaign Campaign<T>) is funded in this coin; the server verifies
+  // the create tx + settles/closes the campaign. 6 decimals.
+  SUI_USDC_COIN_TYPE: z
+    .string()
+    .default(
+      '0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC',
+    ),
+
   // ── Mode C build gate (behavior simulation §11) ──
   // THE single source of truth for whether autonomous (Mode C) traversal
   // sessions are allowed. Stays false in production until the human

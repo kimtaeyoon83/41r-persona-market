@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, date, integer, real, boolean, jsonb, uuid, varchar, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, date, integer, bigint, real, boolean, jsonb, uuid, varchar, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 // ─── Companies ───────────────────────────────────────
@@ -362,11 +362,23 @@ export const audienceFitScans = pgTable('audience_fit_scans', {
    *  SET NULL so deleting a user preserves their public scans. */
   userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
 
-  /** Solana base58 sig of the sponsored 0 USDC payment tx (D6).
-   *  Set after the user signs + the tx confirms. Null until paid.
-   *  Used by /me/analyses for Solscan link rendering and by Phase 5
-   *  reward distribution to verify payment. */
+  /** Payment/settlement tx digest. Pre-Sui: Solana sponsored-payment sig
+   *  (legacy rows). Post-Sui USDC escrow: the `campaign::create` tx digest
+   *  (UNIQUE — one digest pays one scan). Null for credit-paid scans. */
   paymentTxSignature: text('payment_tx_signature'),
+
+  /** USDC escrow campaign (chain wiring, §4.3). Null for credit-paid scans.
+   *  payment_method: credits | usdc. escrow_status:
+   *  pending_payment → escrowed → settled → closed. campaign_object_id =
+   *  the shared rpm::campaign Campaign<USDC>; campaign_cap_id = the
+   *  CampaignOwnerCap (held by the operator/verification anchor) that gates
+   *  settle/close. escrow_amount = locked base units (USDC, 6 dp). */
+  paymentMethod: text('payment_method'),
+  campaignObjectId: text('campaign_object_id'),
+  campaignCapId: text('campaign_cap_id'),
+  escrowCoinType: text('escrow_coin_type'),
+  escrowAmount: bigint('escrow_amount', { mode: 'number' }),
+  escrowStatus: text('escrow_status'),
 
   /** On-chain report anchor (chain wiring Phase 2, 2026-06-19). The shaped
    *  AI report is Seal-encrypted → stored on Walrus at scan completion
