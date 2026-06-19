@@ -95,7 +95,13 @@ export default function ComparePage() {
     );
   }
 
-  const { scan, ai, human, diff, survey_response_count } = report;
+  const { scan, ai, human, diff, survey_response_count, fidelity } = report;
+
+  const fidelityRows = (fidelity?.cohorts ?? []).filter((c) => c.absDeltaMean != null);
+  const fidelityGaps = (fidelity?.cohorts ?? []).filter((c) => c.absDeltaMean == null && c.nAi > 0);
+  // Lower |Δ| = AI closer to humans. Closest cohorts first.
+  fidelityRows.sort((a, b) => (a.absDeltaMean ?? 0) - (b.absDeltaMean ?? 0));
+  const deltaBand = (x: number) => (x < 15 ? C.ok : x < 30 ? C.warn : C.bad);
 
   return (
     <Frame active="discovery">
@@ -199,6 +205,96 @@ export default function ComparePage() {
           />
           <ScoreCard label={t("compare.humanScore")} value={human?.audience_fit_score ?? null} accent={C.text} />
         </div>
+
+        {/* Fidelity by cohort (Stage 1/T0 PoC) — the honest by-cohort
+            signal, never a single mixed-cohort number. */}
+        <h2 style={{ fontSize: 16, fontWeight: 600, fontFamily: FS, marginBottom: 6 }}>
+          {t("compare.fidelityTitle")}
+        </h2>
+        <div style={{ fontSize: 12, color: C.textDim, lineHeight: 1.5, marginBottom: 12, maxWidth: 760 }}>
+          {t("compare.fidelityCaption")}
+        </div>
+        {fidelityRows.length === 0 ? (
+          <div
+            style={{
+              marginBottom: 28,
+              padding: 14,
+              background: C.panel,
+              border: `1px solid ${C.border}`,
+              borderRadius: 8,
+              fontSize: 13,
+              color: C.textDim,
+            }}
+          >
+            {t("compare.fidelityEmpty")}
+          </div>
+        ) : (
+          <div
+            style={{
+              marginBottom: 12,
+              border: `1px solid ${C.border}`,
+              borderRadius: 8,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1.4fr 0.5fr 0.5fr 0.6fr 0.6fr",
+                padding: "10px 14px",
+                background: C.panel,
+                borderBottom: `1px solid ${C.border}`,
+                fontSize: 11,
+                fontFamily: FM,
+                color: C.textDim,
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+              }}
+            >
+              <div>{t("compare.colDimension")}</div>
+              <div style={{ textAlign: "right" }}>AI n</div>
+              <div style={{ textAlign: "right" }}>Hu n</div>
+              <div style={{ textAlign: "right" }}>|Δ|</div>
+              <div style={{ textAlign: "right" }}>conf</div>
+            </div>
+            {fidelityRows.map((c) => (
+              <div
+                key={c.cohortId}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1.4fr 0.5fr 0.5fr 0.6fr 0.6fr",
+                  padding: "9px 14px",
+                  borderBottom: `1px solid ${C.border}`,
+                  fontSize: 13,
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ fontWeight: 500 }}>{c.cohortLabel}</div>
+                <div style={{ textAlign: "right", fontFamily: FM, color: C.textDim }}>{c.nAi}</div>
+                <div style={{ textAlign: "right", fontFamily: FM, color: C.textDim }}>{c.nHuman}</div>
+                <div
+                  style={{
+                    textAlign: "right",
+                    fontFamily: FM,
+                    fontWeight: 600,
+                    color: deltaBand(c.absDeltaMean ?? 0),
+                  }}
+                >
+                  {(c.absDeltaMean ?? 0).toFixed(1)}
+                </div>
+                <div style={{ textAlign: "right", fontFamily: FM, color: C.textFaint }}>
+                  {(c.matchConfidenceMean ?? 0).toFixed(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {fidelityGaps.length > 0 && (
+          <div style={{ fontSize: 11, color: C.textFaint, fontFamily: FM, marginBottom: 28 }}>
+            {t("compare.fidelityGaps")}: {fidelityGaps.map((c) => `${c.cohortLabel} (${c.nAi})`).join(" · ")}
+          </div>
+        )}
 
         {/* Dimension breakdown */}
         <h2 style={{ fontSize: 16, fontWeight: 600, fontFamily: FS, marginBottom: 12 }}>

@@ -341,6 +341,32 @@ export type ScanCompareReport = {
   /** Live count of survey_responses rows for this scan — independent
    *  of human.n_respondents (which is frozen at last compute). */
   survey_response_count: number;
+  /** Per-cohort AI↔human fidelity (Stage 1/T0 PoC). By-cohort |Δ|, never
+   *  a single mixed-cohort number. cohort.delta/absDeltaMean are null
+   *  until that cohort has BOTH AI personas and matched humans. */
+  fidelity: {
+    nAiPersonas: number;
+    nHumans: number;
+    nHumansMatched: number;
+    nHumansUnmatched: number;
+    overallAbsDeltaMean: number | null;
+    nCohortsCompared: number;
+    cohorts: Array<{
+      cohortId: string;
+      cohortLabel: string;
+      nAi: number;
+      nHuman: number;
+      delta: {
+        happiness: number;
+        engagement: number;
+        adoption: number;
+        retentionD7: number;
+        taskSuccess: number;
+      } | null;
+      absDeltaMean: number | null;
+      matchConfidenceMean: number | null;
+    }>;
+  } | null;
 };
 
 export const scanApi = {

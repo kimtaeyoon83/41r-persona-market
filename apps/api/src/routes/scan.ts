@@ -24,6 +24,7 @@ import {
 } from '../services/audience_fit.js';
 import { startScanWorker } from '../services/scan_pipeline.js';
 import { recomputeHumanAggregate } from '../services/human_aggregate.js';
+import { computeScanFidelity } from '../services/fidelity/index.js';
 import { getCategoryBenchmark } from '../services/benchmark.js';
 import {
   computeAarrr,
@@ -1331,6 +1332,12 @@ router.get('/:id/compare', async (req, res) => {
       }
     : null;
 
+  // Per-cohort AI↔human fidelity (Stage 1/T0 PoC). Surfaces by-cohort
+  // |Δ| so the operator sees fidelity build as surveys arrive — never a
+  // single mixed-cohort number (§8 honesty contract). cohorts carry a
+  // null delta until a cohort has BOTH AI personas and matched humans.
+  const fidelity = await computeScanFidelity(id);
+
   res.json({
     scan: {
       id: scan.id,
@@ -1350,6 +1357,7 @@ router.get('/:id/compare', async (req, res) => {
     human, // null when not yet aggregated
     diff,  // null when human is null
     survey_response_count: respondentCount?.n ?? 0,
+    fidelity, // per-cohort |Δ| (camelCase service shape)
   });
 });
 
