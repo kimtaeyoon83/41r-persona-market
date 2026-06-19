@@ -3,8 +3,8 @@
  * Seed the DB with 8 STANDARD_COHORTS × 100 = 800 synthetic personas
  * for the Audience-Fit Validator (Phase 2 §D2).
  *
- * Wallet generation — HD-derived (BIP-39 + SLIP-10 ed25519):
- *   master mnemonic → seed → m/44'/501'/<hd_index>'/0' → Solana keypair
+ * Wallet generation — HD-derived (BIP-39, Sui Ed25519):
+ *   master mnemonic → m/44'/784'/<hd_index>'/0'/0' → Sui address
  *
  *   hd_index assignment:
  *     cohort_index 0 (crypto_native)     → indices 0..99
@@ -30,7 +30,7 @@ import 'dotenv/config';
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { STANDARD_COHORTS, type CohortDef } from '@41rpm/shared';
-import { getPersonaAddress } from '../apps/api/src/services/persona_wallets.js';
+import { getPersonaAddress } from '../apps/api/src/services/sui/persona_wallets.js';
 
 const { Client } = pg;
 

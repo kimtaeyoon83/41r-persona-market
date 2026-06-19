@@ -7,7 +7,7 @@
  * Production safety:
  *   - SKIP_PAYMENT_VERIFY is forced to false when NODE_ENV=production
  *     regardless of input.
- *   - Missing production-only keys (R2_*, X402_RESOURCE_WALLET) log a
+ *   - Missing production-only keys (R2_*, PRIVY_*) log a
  *     warning at boot via logEnvSummary() instead of throwing, so the
  *     server can still start in degraded mode.
  *
@@ -70,19 +70,12 @@ const envSchema = z.object({
   CLAUDE_HAIKU_MODEL: z.string().default('claude-haiku-4-5-20251001'),
   USAGE_LOG_PATH: z.string().default('/tmp/llm-usage.jsonl'),
 
-  // Solana
-  SOLANA_RPC_URL: z.string().url().default('https://api.devnet.solana.com'),
-  SOLANA_WSS_URL: z.string().default('wss://api.devnet.solana.com'),
-  SOLANA_KEYPAIR_JSON: z.string().optional(),
-  SOLANA_KEYPAIR_PATH: z.string().optional(),
-  TOKEN_41R_MINT: z.string().optional(),
-  USDC_MINT: z.string().default('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU'),
   HOME: z.string().optional(),
 
-  // ── Sui (chain transition, design doc v0.4 §0.1) ──
-  // Optional until the Sui layer goes live alongside Solana (staged
-  // migration, not big-bang). SUI_PACKAGE_ID is set after publishing the
-  // rpm Move package (scripts/sui-publish.ts).
+  // ── Sui (chain — design doc v0.4 §0.1; Solana fully removed) ──
+  // SUI_PACKAGE_ID is set after publishing the rpm Move package
+  // (scripts/sui-publish.ts). PERSONA_MASTER_MNEMONIC (below) HD-derives
+  // the server-custodied Sui persona wallets.
   SUI_RPC_URL: z.string().url().default('https://fullnode.testnet.sui.io:443'),
   SUI_NETWORK: z
     .enum(['testnet', 'mainnet', 'devnet', 'localnet'])
@@ -112,10 +105,7 @@ const envSchema = z.object({
   SEAL_KEY_SERVER_IDS: z.string().optional(),
   SEAL_THRESHOLD: z.coerce.number().int().positive().default(1),
 
-  // x402 + SAS
-  X402_RESOURCE_WALLET: z.string().default('8Vm3ys3kwLSy2qThejn56E2j6fptwSE2qcLkEeiLrdB8'),
-  SAS_CREDENTIAL_PDA: z.string().optional(),
-  SAS_SCHEMA_PDA: z.string().optional(),
+  // Payment verification flags (credit-ledger gating).
   SKIP_PAYMENT_VERIFY: boolFromString(false),
   USE_X402_FALLBACK: boolFromString(false),
 
@@ -132,10 +122,6 @@ const envSchema = z.object({
   // 64 hex chars or base64. Absent ⇒ session storage is disabled (the
   // console rejects uploads), so gated-app capture just isn't offered.
   SESSION_ENC_KEY: z.string().optional(),
-
-  // 41R Fee Payer wallet (Phase 2 §3 / D6) — sponsored 0 USDC SPL
-  // transfer + future USDC reward distribution.
-  FEE_PAYER_KEYPAIR_JSON: z.string().optional(),
 
   // Master mnemonic for HD-derived synthetic persona wallets
   // (Phase 2 §D2). Only seed scripts + show-persona-key CLI need it —

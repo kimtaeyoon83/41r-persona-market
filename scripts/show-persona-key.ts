@@ -1,29 +1,26 @@
 #!/usr/bin/env npx tsx
 /**
- * Show the Solana keypair for a synthetic-cohort persona.
+ * Show the Sui keypair for a synthetic-cohort persona.
  *
  * Two modes:
  *   pnpm tsx scripts/show-persona-key.ts 42                  # by hd_index
  *   pnpm tsx scripts/show-persona-key.ts <persona-uuid>      # by personas.id
  *
- * Output (stdout):
- *   hd_index, public address (base58), private key (base58),
- *   secret key (32 bytes hex), JSON-array form (Solana CLI compatible).
+ * Output (stdout): hd_index, derivation path, Sui address, private key
+ * (bech32 suiprivkey — `sui keytool import`).
  *
  * Required env (loaded from .env):
  *   PERSONA_MASTER_MNEMONIC   - 24-word BIP-39 mnemonic
  *   DATABASE_URL              - only when looking up by persona-uuid
  *
- * SECURITY: this prints raw private key material to stdout. Don't
- * paste output into chat/issues/PRs. The mnemonic itself remains the
- * single backup point — losing this output is OK as long as the
- * mnemonic is preserved.
+ * SECURITY: this prints raw private key material to stdout. Don't paste
+ * output into chat/issues/PRs. The mnemonic itself remains the single
+ * backup point.
  */
 
 import 'dotenv/config';
-import bs58 from 'bs58';
 import pg from 'pg';
-import { getPersonaKeypair } from '../apps/api/src/services/persona_wallets.js';
+import { getPersonaKeypair } from '../apps/api/src/services/sui/persona_wallets.js';
 
 const { Client } = pg;
 
@@ -72,23 +69,13 @@ async function main(): Promise<void> {
   const hdIndex = await resolveHdIndex(arg!);
   const kp = getPersonaKeypair(hdIndex);
 
-  const pubBase58 = kp.publicKey.toBase58();
-  const secretBytes = kp.secretKey; // Uint8Array(64) — first 32 = seed, last 32 = pubkey
-  const seedBytes = secretBytes.slice(0, 32);
-  const secretBase58 = bs58.encode(secretBytes);
-  const seedHex = Buffer.from(seedBytes).toString('hex');
-  const jsonArray = JSON.stringify(Array.from(secretBytes));
-
   console.log('─────────────────────────────────────────────');
   console.log(`hd_index:           ${hdIndex}`);
-  console.log(`derivation path:    m/44'/501'/${hdIndex}'/0'`);
-  console.log(`public address:     ${pubBase58}`);
+  console.log(`derivation path:    m/44'/784'/${hdIndex}'/0'/0'`);
+  console.log(`sui address:        ${kp.toSuiAddress()}`);
   console.log('─────────────────────────────────────────────');
-  console.log(`private key (b58):  ${secretBase58}`);
-  console.log(`seed (32B hex):     ${seedHex}`);
-  console.log('─────────────────────────────────────────────');
-  console.log('Solana CLI keypair file (paste into id.json):');
-  console.log(jsonArray);
+  console.log(`private key:        ${kp.getSecretKey()}`);
+  console.log("  (bech32 suiprivkey — import: sui keytool import <key> ed25519)");
   console.log('─────────────────────────────────────────────');
 }
 
