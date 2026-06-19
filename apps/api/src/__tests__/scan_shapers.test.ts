@@ -541,6 +541,30 @@ describe('shapePersonaDetailResponse', () => {
     expect(out.response.is_flagged).toBe(true);
     expect(out.response.flag_reason).toBe('persona response failed');
   });
+
+  it('chain is null when the persona is unanchored', () => {
+    const out = shapePersonaDetailResponse(fakeScan, makeDetailRow());
+    expect(out.persona.chain).toBeNull();
+  });
+
+  it('chain surfaces ids + explorer url when anchored', () => {
+    const out = shapePersonaDetailResponse(
+      fakeScan,
+      makeDetailRow({
+        suiObjectId: '0xabc123',
+        walrusBlobId: 'blob_xyz',
+        sealId: 'p1',
+        anchoredAt: new Date('2026-06-19T00:00:00.000Z'),
+      })
+    );
+    expect(out.persona.chain).toEqual({
+      sui_object_id: '0xabc123',
+      walrus_blob_id: 'blob_xyz',
+      seal_id: 'p1',
+      anchored_at: '2026-06-19T00:00:00.000Z',
+      object_url: 'https://suiscan.xyz/testnet/object/0xabc123',
+    });
+  });
 });
 
 // ───────────── name + age helpers (B2/B3 trust restoration) ─────────────

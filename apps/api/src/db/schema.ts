@@ -169,6 +169,15 @@ export const personas = pgTable('personas', {
    *  the persona's wallet is m/44'/501'/<hd_index>'/0' under the
    *  PERSONA_MASTER_MNEMONIC. UNIQUE so one slot maps to one wallet. */
   hdIndex: integer('hd_index').unique(),
+  /** On-chain anchor (chain wiring, 2026-06-19). Null until the persona is
+   *  anchored via scripts/anchor-personas.ts → services/sui/anchor.ts.
+   *  sui_object_id = the minted rpm::persona object (operator-owned);
+   *  walrus_blob_id = the Seal-encrypted `vector` memory blob linked on-chain
+   *  via add_memwal_ref; seal_id = the Seal identity namespace (the persona id). */
+  suiObjectId: text('sui_object_id'),
+  walrusBlobId: text('walrus_blob_id'),
+  sealId: text('seal_id'),
+  anchoredAt: timestamp('anchored_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

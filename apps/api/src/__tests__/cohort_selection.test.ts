@@ -51,6 +51,10 @@ function makePersona(
     isActive: true,
     sasAttestId: null,
     hdIndex: null,
+    suiObjectId: null,
+    walrusBlobId: null,
+    sealId: null,
+    anchoredAt: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
   };

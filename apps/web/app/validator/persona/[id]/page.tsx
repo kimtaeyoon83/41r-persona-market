@@ -548,6 +548,62 @@ function PersonaInner() {
               </Card>
             )}
 
+            {persona.chain && (
+              <Card padding={14}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: C.accent,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    marginBottom: 10,
+                    fontWeight: 600,
+                    fontFamily: FS,
+                  }}
+                >
+                  On-chain · Sui testnet
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: C.textFaint, marginBottom: 3 }}>
+                      Persona object
+                    </div>
+                    <a
+                      href={persona.chain.object_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        fontFamily: FM,
+                        fontSize: 12,
+                        color: C.accent,
+                        wordBreak: "break-all",
+                        textDecoration: "none",
+                      }}
+                    >
+                      {persona.chain.sui_object_id} ↗
+                    </a>
+                  </div>
+                  {persona.chain.walrus_blob_id && (
+                    <div>
+                      <div style={{ fontSize: 10, color: C.textFaint, marginBottom: 3 }}>
+                        Memory blob (Walrus) · Seal-encrypted
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: FM,
+                          fontSize: 12,
+                          color: C.textDim,
+                          wordBreak: "break-all",
+                        }}
+                      >
+                        {persona.chain.walrus_blob_id}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            )}
+
             <Card padding={14} style={{ background: "#fbf8f0", borderColor: "#ecdcb4" }}>
               <div
                 style={{

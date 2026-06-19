@@ -43,6 +43,7 @@ import { findWorkspaceByHost } from '../services/workspaces.js';
 import { validateTargetUrl } from '../services/url_guard.js';
 import { awardSurveyPoints, isRewardAvailable } from '../services/rewards.js';
 import { notifySurveyMilestone } from '../services/notify.js';
+import { suiObjectUrl } from '../services/sui/anchor.js';
 
 const router: RouterType = Router();
 
@@ -1393,6 +1394,10 @@ router.get('/:scanId/persona/:personaId', async (req, res) => {
       personaVector: schema.personas.vector,
       displayName: schema.testers.displayName,
       testerAddr: schema.personas.testerAddr,
+      suiObjectId: schema.personas.suiObjectId,
+      walrusBlobId: schema.personas.walrusBlobId,
+      sealId: schema.personas.sealId,
+      anchoredAt: schema.personas.anchoredAt,
     })
     .from(schema.scanPersonaResponses)
     .innerJoin(
@@ -1475,6 +1480,10 @@ export function shapePersonaDetailResponse(
     personaVector: typeof schema.personas.$inferSelect.vector;
     displayName: string;
     testerAddr: string;
+    suiObjectId?: string | null;
+    walrusBlobId?: string | null;
+    sealId?: string | null;
+    anchoredAt?: Date | null;
   }
 ) {
   const cohort = COHORT_BY_ID[row.cohortId];
@@ -1520,6 +1529,17 @@ export function shapePersonaDetailResponse(
       cohort_label: cohort?.label ?? row.cohortId,
       voice_sample: v.voice_sample ?? null,
       vector_axes: vectorAxes,
+      // On-chain anchor (chain wiring). Null until the persona is anchored
+      // via scripts/anchor-personas.ts — the UI hides the card when null.
+      chain: row.suiObjectId
+        ? {
+            sui_object_id: row.suiObjectId,
+            walrus_blob_id: row.walrusBlobId ?? null,
+            seal_id: row.sealId ?? null,
+            anchored_at: row.anchoredAt ? row.anchoredAt.toISOString() : null,
+            object_url: suiObjectUrl(row.suiObjectId),
+          }
+        : null,
     },
     response: {
       happiness: row.happiness,

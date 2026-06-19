@@ -233,6 +233,14 @@ export type ScanPersonaDetail = {
     cohort_label: string;
     voice_sample: string | null;
     vector_axes: { k: string; v: number }[];
+    /** On-chain anchor (chain wiring). Null until anchored on Sui testnet. */
+    chain: {
+      sui_object_id: string;
+      walrus_blob_id: string | null;
+      seal_id: string | null;
+      anchored_at: string | null;
+      object_url: string;
+    } | null;
   };
   response: {
     happiness: number | null;
