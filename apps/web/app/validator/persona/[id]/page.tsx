@@ -588,16 +588,33 @@ function PersonaInner() {
                       <div style={{ fontSize: 10, color: C.textFaint, marginBottom: 3 }}>
                         Memory blob (Walrus) · Seal-encrypted
                       </div>
-                      <div
-                        style={{
-                          fontFamily: FM,
-                          fontSize: 12,
-                          color: C.textDim,
-                          wordBreak: "break-all",
-                        }}
-                      >
-                        {persona.chain.walrus_blob_id}
-                      </div>
+                      {persona.chain.walrus_url ? (
+                        <a
+                          href={persona.chain.walrus_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            fontFamily: FM,
+                            fontSize: 12,
+                            color: C.accent,
+                            wordBreak: "break-all",
+                            textDecoration: "none",
+                          }}
+                        >
+                          {persona.chain.walrus_blob_id} ↗
+                        </a>
+                      ) : (
+                        <div
+                          style={{
+                            fontFamily: FM,
+                            fontSize: 12,
+                            color: C.textDim,
+                            wordBreak: "break-all",
+                          }}
+                        >
+                          {persona.chain.walrus_blob_id}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

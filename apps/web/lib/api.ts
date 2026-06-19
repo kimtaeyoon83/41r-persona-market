@@ -240,6 +240,7 @@ export type ScanPersonaDetail = {
       seal_id: string | null;
       anchored_at: string | null;
       object_url: string;
+      walrus_url: string | null;
     } | null;
   };
   response: {

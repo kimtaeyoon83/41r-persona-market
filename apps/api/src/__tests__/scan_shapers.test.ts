@@ -557,13 +557,15 @@ describe('shapePersonaDetailResponse', () => {
         anchoredAt: new Date('2026-06-19T00:00:00.000Z'),
       })
     );
-    expect(out.persona.chain).toEqual({
+    expect(out.persona.chain).toMatchObject({
       sui_object_id: '0xabc123',
       walrus_blob_id: 'blob_xyz',
       seal_id: 'p1',
       anchored_at: '2026-06-19T00:00:00.000Z',
       object_url: 'https://suiscan.xyz/testnet/object/0xabc123',
     });
+    // walrus_url points at the aggregator blob endpoint
+    expect(out.persona.chain?.walrus_url).toContain('/v1/blobs/blob_xyz');
   });
 });
 

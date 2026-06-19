@@ -44,6 +44,7 @@ import { validateTargetUrl } from '../services/url_guard.js';
 import { awardSurveyPoints, isRewardAvailable } from '../services/rewards.js';
 import { notifySurveyMilestone } from '../services/notify.js';
 import { suiObjectUrl } from '../services/sui/anchor.js';
+import { walrusBlobUrl } from '../services/walrus.js';
 
 const router: RouterType = Router();
 
@@ -1538,6 +1539,7 @@ export function shapePersonaDetailResponse(
             seal_id: row.sealId ?? null,
             anchored_at: row.anchoredAt ? row.anchoredAt.toISOString() : null,
             object_url: suiObjectUrl(row.suiObjectId),
+            walrus_url: row.walrusBlobId ? walrusBlobUrl(row.walrusBlobId) : null,
           }
         : null,
     },

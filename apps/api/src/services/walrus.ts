@@ -51,6 +51,12 @@ export async function putBlob(
   return parseWalrusPutResponse(await res.json());
 }
 
+/** Public aggregator URL for a blob id — the same GET getBlob() uses, for
+ *  surfacing in the UI so a blob is inspectable (returns Seal ciphertext). */
+export function walrusBlobUrl(blobId: string): string {
+  return `${env.WALRUS_AGGREGATOR_URL}/v1/blobs/${encodeURIComponent(blobId)}`;
+}
+
 /** Fetch a blob's raw bytes by id from the aggregator. */
 export async function getBlob(blobId: string): Promise<Uint8Array> {
   const url = `${env.WALRUS_AGGREGATOR_URL}/v1/blobs/${encodeURIComponent(blobId)}`;
