@@ -37,7 +37,10 @@ function main(): void {
     process.exitCode = 1;
     return;
   }
-  const files = readdirSync(dir).filter((f) => f.endsWith('.json') && f !== '_sim.json');
+  // Sessions only — exclude every `_`-prefixed sidecar (_sim.json,
+  // _relevance.json, …), matching gen-sim.ts. Reading _relevance.json as a
+  // session crashes validateSession (no subjectId).
+  const files = readdirSync(dir).filter((f) => f.endsWith('.json') && !f.startsWith('_'));
   const humans: ThinkAloudSession[] = [];
   for (const f of files) {
     const s = JSON.parse(readFileSync(join(dir, f), 'utf8')) as ThinkAloudSession;
