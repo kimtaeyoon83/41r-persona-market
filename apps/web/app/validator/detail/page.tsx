@@ -6,6 +6,7 @@ import { Suspense, useState } from "react";
 import { scanApi } from "@/lib/api";
 import { checkTargetUrl } from "@/lib/url";
 import { Btn, C, Card, FM, Frame } from "../_components/ui";
+import { PayWithUsdcButton } from "../_components/pay-with-usdc";
 
 // Screen 2: Discovery detail — sharpening questions.
 // Maps to ScreenDiscoveryDetail in screens-v2.jsx.
@@ -366,13 +367,27 @@ function DetailInner() {
               "~$1.80 · ~6 min · 113 personas across 8 cohorts"
             )}
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
             <Btn onClick={() => startAnalysis(true)}>
               {submitting ? "Skip…" : "Skip"}
             </Btn>
             <Btn primary onClick={() => startAnalysis(false)}>
               {submitting ? stageLabel(submitStage) : "Start analysis →"}
             </Btn>
+            {/* On-chain alternative: pay per scan with USDC escrow on Sui
+                (chain wiring §4.3). Opt-in; credits stays the default. */}
+            <PayWithUsdcButton
+              scanBody={{
+                target_url: url,
+                mode: "A",
+                hypothesis: buildHypothesisText(),
+                target_cohorts: buildTargetCohorts().length ? buildTargetCohorts() : undefined,
+              }}
+              onPaid={(scanId) =>
+                router.push(`/validator/processing/${scanId}?url=${encodeURIComponent(url)}`)
+              }
+              disabled={submitting || !url}
+            />
           </div>
         </div>
       </div>

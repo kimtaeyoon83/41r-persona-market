@@ -394,11 +394,36 @@ export const scanApi = {
     /** Mode A only — restrict the analysis to a subset of the 8
      *  STANDARD_COHORTS by id. Omit / empty to run all 8. */
     target_cohorts?: string[];
+    /** Payment rail. Default 'credits' (off-chain). 'usdc' → the response
+     *  carries an `escrow` envelope; pay it via payScan. */
+    payment_method?: 'credits' | 'usdc';
   }) =>
-    request<{ scanId: string; status: string }>('/api/scan', {
+    request<{
+      scanId: string;
+      status: string;
+      escrow?: {
+        usdc_amount: string;
+        coin_type: string;
+        cap_recipient: string;
+        package_id: string;
+        target: string;
+        criteria: string;
+      };
+    }>('/api/scan', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  /** Step 2 of the USDC escrow flow: submit the on-chain create-tx digest +
+   *  campaign/cap object ids; the server verifies + starts the scan. */
+  payScan: (
+    scanId: string,
+    body: { sui_digest: string; campaign_object_id: string; cap_id: string },
+  ) =>
+    request<{ scanId: string; status: string; escrow_status: string }>(
+      `/api/scan/${scanId}/pay`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
 
   getReport: (id: string) => request<ScanReport>(`/api/scan/${id}/report`),
 

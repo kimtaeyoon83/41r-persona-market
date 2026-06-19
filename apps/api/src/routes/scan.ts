@@ -45,7 +45,7 @@ import { awardSurveyPoints, isRewardAvailable } from '../services/rewards.js';
 import { notifySurveyMilestone } from '../services/notify.js';
 import { suiObjectUrl } from '../services/sui/anchor.js';
 import { walrusBlobUrl } from '../services/walrus.js';
-import { getSuiSigner } from '../services/sui/client.js';
+import { getSuiSigner, requirePackageId } from '../services/sui/client.js';
 import { usdcAmountFromCents, verifyCampaignCreation } from '../services/sui/escrow.js';
 import { env } from '../config/env.js';
 
@@ -222,6 +222,7 @@ router.post('/', scanCreateIpLimiter, optionalPrivyAuth, scanCreateUserLimiter, 
         usdc_amount: usdcAmount.toString(),
         coin_type: env.SUI_USDC_COIN_TYPE,
         cap_recipient: getSuiSigner().toSuiAddress(),
+        package_id: requirePackageId(),
         target: safeUrl,
         criteria: JSON.stringify(target_cohorts ?? []),
       },
