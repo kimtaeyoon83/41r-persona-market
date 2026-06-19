@@ -756,6 +756,35 @@ measure different funnel stages), graph mode first, labeled
 people, NHIS protocol in the spike doc) — do not iterate the
 simulator further without it (risk: tuning toward aesthetics).**
 
+### Mode C rail — wired but gated (planner → traverse)
+
+The agent body + dispatch rail exist in code, deliberately unreachable
+until the gate opens. The pieces, in dependency order:
+
+- `services/behavior_sim/traverse.ts::traverseGraph` — the autonomous
+  agent body (graph mode). WIRES the existing leave-gate (`state.ts`)
+  into a per-step loop; does NOT tune it (building the harness ≠ tuning
+  the simulator the gate protects). Outcomes: completed / left(mode,
+  atStep) / stuck. `relevanceOf` + `chooseNext` are injected (LLM in
+  prod) so the loop is pure + tested (`behavior_traverse.test.ts`).
+- `services/session/mode_c.ts::runModeCSession` — the planner → traverse
+  connection + per-persona fan-out. FORCES `mode:'autonomous'` so
+  `planSession` always applies the Mode C gate; throws
+  `SessionPlanError('mode_c_gated')` before any traversal when the gate
+  is shut. Tests inject `ctx.thinkAloudGatePassed`
+  (`mode_c_session.test.ts`).
+- `routes/session.ts` — `POST /api/session/plan` (mounted under
+  `readLimiter`). HTTP face of the cross-axis rules: `capture_react`
+  resolves to a plan; `autonomous` returns **422 `mode_c_gated`** until
+  the gate opens. Dispatch (running traverse over a real captured graph
+  + LLM perception/decision) is intentionally NOT exposed yet — it
+  lands when the gate opens.
+- **The gate is ONE flag**: `env.THINK_ALOUD_GATE_PASSED`
+  (`THINK_ALOUD_GATE_PASSED`, boolFromString, default false). Exported
+  as `thinkAloudGatePassed`. Flipping it to `1` is the only switch that
+  unblocks Mode C. Do NOT add a second gate path or bypass it elsewhere
+  — `runModeCSession` is the single choke point.
+
 ## Capture Signals (Ch1, 2026-06-10 spike transfer)
 
 `captureSite()` measures objective page facts in the capture page
@@ -898,6 +927,10 @@ NEXT_PUBLIC_API_URL=http://localhost:4100
 CORS_ALLOWED_ORIGINS=...    # comma-separated; overrides the default allowlist
 USE_VISION=1                # Use Sonnet vision for persona response (otherwise Haiku text)
 USE_SIMULATOR=0             # Skip LLM, use synthetic responses (dev iteration)
+THINK_ALOUD_GATE_PASSED=0   # Mode C build gate (§Behavior Simulation). false
+                            # until human think-aloud calibration passes; the
+                            # ONLY switch that unblocks autonomous traversal
+                            # (POST /api/session/plan autonomous → 422 while 0)
 ADMIN_API_KEY=...           # Gates /api/admin/* (≥12 chars; absent ⇒ 404).
                             # Console S1: when set, also demotes /api/calibration
                             # to operator-only (x-admin-key) and acts as the

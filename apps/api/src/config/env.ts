@@ -105,6 +105,14 @@ const envSchema = z.object({
   SEAL_KEY_SERVER_IDS: z.string().optional(),
   SEAL_THRESHOLD: z.coerce.number().int().positive().default(1),
 
+  // ── Mode C build gate (behavior simulation §11) ──
+  // THE single source of truth for whether autonomous (Mode C) traversal
+  // sessions are allowed. Stays false in production until the human
+  // think-aloud calibration passes (scripts/spike-behavior-sim/calibrate.ts).
+  // planSession() reads this via runModeCSession; flipping it to 1 is the
+  // ONLY switch that unblocks Mode C — do not bypass the gate elsewhere.
+  THINK_ALOUD_GATE_PASSED: boolFromString(false),
+
   // Payment verification flags (credit-ledger gating).
   SKIP_PAYMENT_VERIFY: boolFromString(false),
   USE_X402_FALLBACK: boolFromString(false),
@@ -185,6 +193,8 @@ export const env = loadEnv();
 
 export const skipPaymentVerify = env.SKIP_PAYMENT_VERIFY;
 export const useX402Fallback = env.USE_X402_FALLBACK;
+/** Mode C build gate — false until think-aloud calibration passes (§11). */
+export const thinkAloudGatePassed = env.THINK_ALOUD_GATE_PASSED;
 export const isProd = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
 

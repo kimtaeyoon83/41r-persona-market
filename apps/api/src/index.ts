@@ -9,6 +9,7 @@ import benchmarkRouter from './routes/benchmark.js';
 import meResponsesRouter from './routes/me_responses.js';
 import consoleRouter from './routes/console.js';
 import partnerRouter from './routes/partner.js';
+import sessionRouter from './routes/session.js';
 import { startCalibrationCron } from './services/calibration/cron.js';
 import { startDigestCron } from './services/notify.js';
 import { allowedOrigins, corsOptions } from './config/cors.js';
@@ -71,6 +72,10 @@ app.use('/api/me', readLimiter, meResponsesRouter);
 app.use('/api/console', readLimiter, consoleRouter);
 // Partner S2S ingest (geulbat pilot) — key-gated, see middleware/partner.ts
 app.use('/api/partner', partnerRouter);
+// Session planner (design doc §3.5) — POST /api/session/plan resolves a
+// session or returns 422 mode_c_gated. Mode C dispatch stays gated by
+// env THINK_ALOUD_GATE_PASSED (false in prod until calibration passes).
+app.use('/api/session', readLimiter, sessionRouter);
 
 // Static file serving for screenshots (local dev fallback, production uses R2 CDN)
 if (process.env.NODE_ENV !== 'production') {
