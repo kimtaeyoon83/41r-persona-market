@@ -90,6 +90,20 @@ const envSchema = z.object({
   SUI_KEYPAIR_JSON: z.string().optional(), // bech32 `suiprivkey1...`
   SUI_PACKAGE_ID: z.string().optional(),
 
+  // ── Walrus (MemWal blob storage, §4.2) ──
+  // Public-by-default object storage; sensitive data MUST be Seal-
+  // encrypted before putBlob (§4.4). Defaults point at the testnet
+  // publisher/aggregator.
+  WALRUS_PUBLISHER_URL: z
+    .string()
+    .url()
+    .default('https://publisher.walrus-testnet.walrus.space'),
+  WALRUS_AGGREGATOR_URL: z
+    .string()
+    .url()
+    .default('https://aggregator.walrus-testnet.walrus.space'),
+  WALRUS_EPOCHS: z.coerce.number().int().positive().default(1),
+
   // x402 + SAS
   X402_RESOURCE_WALLET: z.string().default('8Vm3ys3kwLSy2qThejn56E2j6fptwSE2qcLkEeiLrdB8'),
   SAS_CREDENTIAL_PDA: z.string().optional(),
