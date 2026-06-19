@@ -69,8 +69,10 @@ function computeSusScore(responses: readonly number[]): number {
 }
 
 // Per-respondent scores in the same key set the AI pipeline writes
-// to scan_persona_responses.
-type RespondentScores = {
+// to scan_persona_responses. Exported so the fidelity PoC
+// (services/fidelity) scores humans through the SAME formula the
+// comparison report uses — single source for human dimension scoring.
+export type RespondentScores = {
   happiness: number;
   taskSuccess: number;
   adoption: number;
@@ -78,7 +80,7 @@ type RespondentScores = {
   engagement: number;
 };
 
-function scoreRespondent(
+export function scoreRespondent(
   row: typeof schema.surveyResponses.$inferSelect,
 ): RespondentScores {
   const di = row.dimensionInputs;
