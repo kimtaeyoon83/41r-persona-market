@@ -80,9 +80,11 @@ describe('anchorPersona', () => {
     expect(deps.persist).toHaveBeenCalledWith('p1', {
       suiObjectId: '0xMINT',
       walrusBlobId: 'blobX',
-      sealId: 'p1',
+      sealId: '7031', // hex of 'p1' — seal id must be a hex namespace
       anchoredAt: now,
     });
+    // the seal/walrus store is keyed by the hex id, not the raw persona id
+    expect(deps.encryptStore).toHaveBeenCalledWith({ id: '7031', data: expect.any(Uint8Array) });
   });
 
   it('is idempotent — skips when already anchored, runs no chain calls', async () => {

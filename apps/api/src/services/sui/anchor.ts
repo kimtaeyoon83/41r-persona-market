@@ -28,6 +28,13 @@ export function suiObjectUrl(objectId: string): string {
   return `https://suiscan.xyz/testnet/object/${objectId}`;
 }
 
+/** Seal's `id` is the policy identity namespace — it must be a HEX string
+ *  (fromHex-parseable), not an arbitrary id. Persona ids are UUIDs (dashes,
+ *  non-hex), so encode the id's bytes to hex for a stable, valid namespace. */
+export function toSealHexId(personaId: string): string {
+  return Buffer.from(personaId, 'utf8').toString('hex');
+}
+
 type ObjectChange = { type: string; objectType?: string; objectId?: string };
 
 /**
@@ -53,11 +60,15 @@ export async function executeTx(
   tx: Transaction,
   opts?: { typeNeedle?: string },
 ): Promise<{ digest: string; createdObjectId: string | null }> {
-  const result = await getSuiClient().signAndExecuteTransaction({
+  const client = getSuiClient();
+  const result = await client.signAndExecuteTransaction({
     transaction: tx,
     signer: getSuiSigner(),
     options: { showObjectChanges: true, showEffects: true },
   });
+  // Wait until the node has indexed the tx, so objects it created are readable
+  // by the NEXT dependent tx (mint → add_memwal_ref read-after-write).
+  await client.waitForTransaction({ digest: result.digest });
   return {
     digest: result.digest,
     createdObjectId: extractCreatedObjectId(
@@ -128,7 +139,8 @@ export async function anchorPersona(
   }
 
   const data = new TextEncoder().encode(JSON.stringify(persona.vector));
-  const { blobId } = await deps.encryptStore({ id: personaId, data });
+  const sealId = toSealHexId(personaId);
+  const { blobId } = await deps.encryptStore({ id: sealId, data });
 
   const { createdObjectId } = await deps.mint();
   if (!createdObjectId) throw new Error('mint returned no created object id');
@@ -138,7 +150,7 @@ export async function anchorPersona(
   await deps.persist(personaId, {
     suiObjectId: createdObjectId,
     walrusBlobId: blobId,
-    sealId: personaId,
+    sealId,
     anchoredAt: now,
   });
 
