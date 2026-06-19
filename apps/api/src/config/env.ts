@@ -104,6 +104,14 @@ const envSchema = z.object({
     .default('https://aggregator.walrus-testnet.walrus.space'),
   WALRUS_EPOCHS: z.coerce.number().int().positive().default(1),
 
+  // ── Seal (threshold encryption / gating, §4.4, §6.3) ──
+  // The t-of-n key-server COMMITTEE is a residual-trust decision (§6.3),
+  // deliberately deferred: supply the testnet committee object IDs via
+  // SEAL_KEY_SERVER_IDS (comma-separated) rather than hardcoding a
+  // provider set. SEAL_THRESHOLD = how many must cooperate to decrypt.
+  SEAL_KEY_SERVER_IDS: z.string().optional(),
+  SEAL_THRESHOLD: z.coerce.number().int().positive().default(1),
+
   // x402 + SAS
   X402_RESOURCE_WALLET: z.string().default('8Vm3ys3kwLSy2qThejn56E2j6fptwSE2qcLkEeiLrdB8'),
   SAS_CREDENTIAL_PDA: z.string().optional(),

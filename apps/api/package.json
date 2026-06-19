@@ -74,6 +74,7 @@
     "@anthropic-ai/sdk": "^0.78.0",
     "@aws-sdk/client-s3": "^3.1022.0",
     "@browserbasehq/stagehand": "^3.1.0",
+    "@mysten/seal": "^1.2.1",
     "@mysten/sui": "^2.19.0",
     "@privy-io/server-auth": "^1.32.5",
     "@solana/spl-token": "^0.4.14",
