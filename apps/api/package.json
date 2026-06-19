@@ -70,7 +70,6 @@
   },
   "dependencies": {
     "@41rpm/shared": "workspace:*",
-    "@41rpm/solana-utils": "workspace:*",
     "@anthropic-ai/sdk": "^0.78.0",
     "@aws-sdk/client-s3": "^3.1022.0",
     "@browserbasehq/stagehand": "^3.1.0",
