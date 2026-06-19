@@ -2,17 +2,17 @@
 
 ## Overview
 
-AI Persona-driven product validation marketplace on Solana.
-Human testers complete tests → earn USDC rewards → generate AI Personas → Personas run autonomous browser tests.
+AI Persona-driven product validation marketplace on Sui (migrated from
+Solana 2026-06; see "Sui Integration" below).
+Human testers complete tests → earn rewards → generate AI Personas → Personas run autonomous browser tests.
 
 ## Architecture
 
 ```
-apps/api             (Express :4100)  — routes, validator pipeline, Solana sponsored tx
+apps/api             (Express :4100)  — routes, validator pipeline, Sui chain bridge
 apps/web             (Next.js :3000)  — app-router pages (/, /validator/*, /me/*)
 packages/shared            — TypeScript interfaces (@41rpm/shared)
-packages/solana-utils      — Token-2022 utilities (@41rpm/solana-utils)
-packages/contracts         — Solana program / IDL stubs
+packages/sui-move          — Sui Move package `rpm` (persona/campaign/mutual)
 scripts/                   — seed / migration / backfill / usage-summary
 ```
 
@@ -117,8 +117,11 @@ pnpm tsx scripts/spike-behavior-sim/run.ts spike/<id>/graph.json [--start=<node>
 - Active services in `src/services/`: `llm.ts`, `audience_fit.ts`,
   `scan_pipeline.ts`, `site_classifier.ts`, `site_capture.ts`,
   `cohort_selection.ts`, `anthropic_client.ts`, `aarrr.ts`,
-  `dimension_simulator.ts`, `persona_wallets.ts`, `sponsored_tx.ts`,
-  `fee_payer.ts`, `r2.ts`, `health.ts`, `benchmark.ts`,
+  `dimension_simulator.ts`, `r2.ts`, `health.ts`, `benchmark.ts`,
+  `sui/` (Sui chain bridge — `client.ts` + `tx.ts` PTB builders +
+  `persona_wallets.ts` server-custodied HD Sui wallets),
+  `walrus.ts` (MemWal blob store), `seal.ts` (threshold encrypt-before-put),
+  `fidelity/` (per-cohort AI↔human |Δ| + variant-ranking PoC),
   `credits.ts` (Console S1 2026-06-11 — founder credit ledger, see
   Console section below),
   `human_aggregate.ts` (Phase 5 — survey_responses → AI-shape human
@@ -161,10 +164,10 @@ pnpm tsx scripts/spike-behavior-sim/run.ts spike/<id>/graph.json [--start=<node>
   `calibrationApi`. All authenticated calls ride the Privy bearer
   auto-attached by `setAuthTokenGetter()` (see Auth section).
 - Auth provider: **Privy** (`@privy-io/react-auth`) wraps the app via
-  `apps/web/app/providers.tsx`. Single auth layer for Email / Google /
-  Phantom / Solflare / Discord / X login + optional embedded Solana
-  wallet. `defaultSolanaRpcsPlugin()` is registered so chain-aware
-  signing on `solana:devnet` works.
+  `apps/web/app/providers.tsx`. Identity-only after the Sui migration:
+  Email / Google login → bearer token. No client embedded wallet (the
+  Solana embedded-wallet + `defaultSolanaRpcsPlugin` were removed);
+  persona ownership uses server-custodied Sui wallets.
 - Loading / error UI: each page renders its own inline pattern (small
   text + retry button). No shared primitives.
 - Components: `app-shell.tsx` is the only shared wrapper. Earlier
@@ -195,15 +198,23 @@ Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
   `.v-page-pad`, `.v-stack-sm`, `.v-grid-stack-sm`, `.v-row-wrap`,
   `.hide-mobile` + the global `html, body { overflow-x: hidden }` rule.
 
-### Solana Integration
-- Network: devnet
-- USDC: devnet mock mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
-  (6 decimals). Sponsored 0-USDC tx is the validator scan payment
-  pattern (see `services/sponsored_tx.ts` + `services/fee_payer.ts`).
-- Keypair: `SOLANA_KEYPAIR_JSON` env var (production) or
-  `~/.config/solana/id.json` (local).
-- Persona wallets: HD-derived from `PERSONA_MASTER_MNEMONIC`. See
-  `services/persona_wallets.ts::getPersonaAddress(hdIndex)`.
+### Sui Integration (chain transition 2026-06 — Solana fully removed)
+The chain layer migrated Solana → Sui (design doc
+`docs/RPM_기술설계서_v0.4.md` §0.1). The Solana payment cluster
+(`sponsored_tx`/`fee_payer`/`persona_wallets`, payment-tx/confirm routes,
+`@solana/*` deps, `packages/solana-utils`) was deleted — scans are gated
+by the **credit ledger** (`debitScan`), not an on-chain tx.
+- Network: Sui testnet (`SUI_NETWORK`, `SUI_RPC_URL`). On-chain Move
+  package `packages/sui-move` (`rpm::persona` / `rpm::campaign` /
+  `rpm::mutual`); publish via `scripts/sui-publish.ts` → `SUI_PACKAGE_ID`.
+- TS bridge: `services/sui/client.ts` (SuiJsonRpcClient + Ed25519 signer)
+  + `services/sui/tx.ts` (PTB builders mirroring every Move entry fn).
+- Persona wallets: **server-custodied**, HD-derived from
+  `PERSONA_MASTER_MNEMONIC` (m/44'/784'/<hdIndex>'/0'/0', Ed25519). See
+  `services/sui/persona_wallets.ts::getPersonaAddress(hdIndex)`.
+- Storage/gating: Walrus (`services/walrus.ts`, MemWal blobs) + Seal
+  encrypt-before-put (`services/seal.ts`; committee/threshold deferred,
+  §6.3). Sui Move objects are the persona/campaign/escrow data model.
 
 ### Auth (Privy + middleware)
 - Web: Privy is the single auth provider. `usePrivy()` gives
@@ -832,7 +843,7 @@ strip. Capture falls back networkidle → domcontentloaded on timeout
 - **Structured logging** — `apps/api/src/logger.ts` exports a pino instance
   (+ `childLogger(bindings)`). Railway surfaces JSON logs cleanly. Replace
   remaining `console.*` as you touch files.
-- **Deep health** — `GET /api/health?deep=1` pings DB + Solana RPC with
+- **Deep health** — `GET /api/health?deep=1` pings DB + Sui RPC with
   per-dep latency (`services/health.ts`). 503 when any dep is down.
   Basic `/api/health` stays synchronous + cheap.
 - **Settlement worker** — exponential backoff 30s → 1m → 5m → 15m cap,
@@ -859,9 +870,13 @@ Required in root `.env` (local) or Railway env vars (production):
 ```
 DATABASE_URL          # PostgreSQL connection string
 ANTHROPIC_API_KEY     # Claude API key (Sonnet + Haiku)
-SOLANA_KEYPAIR_PATH   # Path to Solana keypair JSON (local)
-SOLANA_KEYPAIR_JSON   # Solana keypair as JSON string (production — takes priority over PATH)
-PERSONA_MASTER_MNEMONIC   # BIP-39 mnemonic for HD-derived persona wallets
+SUI_RPC_URL           # Sui fullnode RPC (default testnet)
+SUI_NETWORK           # testnet | mainnet | devnet | localnet (default testnet)
+SUI_KEYPAIR_JSON      # Operator signer, bech32 suiprivkey1... (optional until publish)
+SUI_PACKAGE_ID        # Published rpm Move package id (set after scripts/sui-publish.ts)
+PERSONA_MASTER_MNEMONIC   # BIP-39 mnemonic for HD-derived Sui persona wallets
+WALRUS_PUBLISHER_URL / WALRUS_AGGREGATOR_URL  # MemWal blob store (default testnet)
+SEAL_KEY_SERVER_IDS / SEAL_THRESHOLD          # Seal committee (deferred, §6.3)
 PRIVY_APP_ID          # Public Privy app id (also embedded in client bundle)
 PRIVY_APP_SECRET      # Privy server secret (validates access tokens)
 NEXT_PUBLIC_PRIVY_APP_ID   # Mirrors PRIVY_APP_ID for the web bundle
@@ -913,8 +928,9 @@ LOG_LEVEL=info              # pino level (default: info in prod, debug in dev)
 - Validator scan screenshots are stored in `audience_fit_scans.captureScreenshotUrls` (jsonb array of full URLs)
 
 ### Workspace Packages
-- `packages/shared` and `packages/solana-utils` have `main` pointing to `dist/` (built output)
-- Must build packages before API: `pnpm --filter @41rpm/shared build && pnpm --filter @41rpm/solana-utils build`
+- `packages/shared` has `main` pointing to `dist/` (built output)
+- Must build shared before API: `pnpm --filter @41rpm/shared build`
+- Sui Move package: `cd packages/sui-move && sui move test` (sui CLI)
 
 ## Do NOT
 
