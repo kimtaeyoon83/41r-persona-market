@@ -216,6 +216,42 @@ by the **credit ledger** (`debitScan`), not an on-chain tx.
   encrypt-before-put (`services/seal.ts`; committee/threshold deferred,
   §6.3). Sui Move objects are the persona/campaign/escrow data model.
 
+### Chain wiring — on-chain anchoring (Sui + Walrus + Seal, 2026-06-19)
+
+The chain layer was testnet-verified but **unwired** (only `health.ts`
+pinged the RPC). `services/sui/anchor.ts` is the bridge that makes it real
+per record, surfaced on screen:
+
+- **`anchorPersona(personaId)`** — the canonical design flow, operator-signed:
+  Seal-encrypt `personas.vector` → Walrus blob → `persona::mint_to_sender`
+  → `persona::add_memwal_ref(blob)` → persist
+  `personas.sui_object_id/walrus_blob_id/seal_id/anchored_at` (migration
+  0021). Idempotent (skips when `sui_object_id` set). Run via
+  **`scripts/anchor-personas.ts [--max N] [--dry-run]`** — bounded, the only
+  sanctioned way to mint real testnet objects.
+- **`anchorScanReport(scanId)`** — Walrus+Seal ONLY (no Sui mint; scan ≈
+  Campaign would need an escrow coin, deferred). Seal-encrypts the report
+  snapshot (`buildScanReportPayload`) → Walrus → persist
+  `audience_fit_scans.report_walrus_blob_id/report_seal_id/report_anchored_at`
+  (migration 0022). Called **fire-and-forget non-fatal** at BOTH
+  `scan_pipeline` completion points (`anchorReportSafe`, mirrors
+  `notifyScanComplete`) — must never block/fail a completed scan.
+- **`executeTx`** signs+executes a built tx with the operator signer and
+  `await`s `waitForTransaction` before returning, so a freshly-minted object
+  is node-indexed before the next dependent tx (mint → add_memwal_ref).
+- **`toSealHexId`** — Seal's `id` must be a hex namespace; persona/scan ids
+  are UUIDs (non-hex), so encode their bytes to hex. seal_id stores the hex.
+- **UI**: persona detail (`/validator/persona/[id]`) shows an On-chain card
+  (Sui `object_url` + Walrus `walrus_url`, both links; hidden when
+  unanchored). Report page footer shows a "Report anchored · Walrus" strip
+  when `report_anchor` is set. `walrusBlobUrl()` (walrus.ts) builds the
+  aggregator link. **Hidden entirely when unanchored — no fake/empty state.**
+- Both migrations are idempotent `ADD COLUMN IF NOT EXISTS`, registered in
+  `scripts/apply-prod-console-migrations.ts` (empty prod journal — never
+  `db:migrate` against prod). 0021+0022 applied to prod 2026-06-19.
+- Tests: `anchor.test.ts` (executeTx extraction, persona + scan-report order,
+  idempotent, error paths) + `scan_shapers.test.ts` chain block.
+
 ### Auth (Privy + middleware)
 - Web: Privy is the single auth provider. `usePrivy()` gives
   `{ ready, authenticated, getAccessToken }`; `AuthBridge` in

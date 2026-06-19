@@ -91,8 +91,10 @@ export default function WalletPage() {
               </Link>
             </div>
             <div style={{ fontSize: 11, color: C.textFaint, marginTop: 14, lineHeight: 1.5 }}>
-              Sui testnet. Balance + on-chain activity appear here once the
-              settlement layer is live.
+              Sui testnet. Personas are anchored on-chain as Sui objects with
+              Seal-encrypted memory on Walrus — open any persona to see its
+              object + blob. Reward balance + settlement activity appear here
+              once the settlement layer is live.
             </div>
           </Card>
         )}

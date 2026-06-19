@@ -157,3 +157,97 @@ export async function anchorPersona(
   log.info({ personaId, suiObjectId: createdObjectId, blobId }, 'persona anchored on-chain');
   return { status: 'anchored', suiObjectId: createdObjectId, walrusBlobId: blobId, digest };
 }
+
+// ─── Scan report anchor (Walrus + Seal, Phase 2) ─────────────────────
+// Unlike personas, a scan report is NOT minted as a Sui object (scan ≈
+// Campaign would need an escrow coin — deferred). The honest scan-level
+// artifact is the Seal-encrypted report blob on Walrus, a tamper-evident
+// snapshot of the AI verdict. Called fire-and-forget at scan completion.
+
+export type ScanReportAnchorResult =
+  | { status: 'skipped'; walrusBlobId: string }
+  | { status: 'anchored'; walrusBlobId: string };
+
+/** Compact, stable report snapshot — what gets sealed + stored. */
+export function buildScanReportPayload(scan: typeof schema.audienceFitScans.$inferSelect) {
+  return {
+    scan_id: scan.id,
+    target_url: scan.targetUrl,
+    mode: scan.mode,
+    category: scan.category,
+    one_line_pitch: scan.oneLinePitch,
+    audience_fit_score: scan.audienceFitScore,
+    best_cohort_id: scan.bestCohortId,
+    best_cohort_score: scan.bestCohortScore,
+    worst_cohort_id: scan.worstCohortId,
+    worst_cohort_score: scan.worstCohortScore,
+    median_cohort_score: scan.medianCohortScore,
+    personas_completed: scan.personasCompleted,
+    mode_b_verdict: scan.modeBVerdict,
+    completed_at: scan.completedAt ? scan.completedAt.toISOString() : null,
+  };
+}
+
+export type ScanAnchorDeps = {
+  loadScan: (
+    scanId: string,
+  ) => Promise<{ reportWalrusBlobId: string | null; payload: unknown } | null>;
+  encryptStore: (args: { id: string; data: Uint8Array }) => Promise<{ blobId: string }>;
+  persist: (
+    scanId: string,
+    fields: { reportWalrusBlobId: string; reportSealId: string; reportAnchoredAt: Date },
+  ) => Promise<void>;
+};
+
+export function defaultScanAnchorDeps(): ScanAnchorDeps {
+  const packageId = requirePackageId();
+  return {
+    loadScan: async (scanId) => {
+      const [row] = await db
+        .select()
+        .from(schema.audienceFitScans)
+        .where(eq(schema.audienceFitScans.id, scanId))
+        .limit(1);
+      if (!row) return null;
+      return { reportWalrusBlobId: row.reportWalrusBlobId, payload: buildScanReportPayload(row) };
+    },
+    encryptStore: ({ id, data }) => sealEncryptAndStore({ packageId, id, data }),
+    persist: async (scanId, fields) => {
+      await db
+        .update(schema.audienceFitScans)
+        .set(fields)
+        .where(eq(schema.audienceFitScans.id, scanId));
+    },
+  };
+}
+
+/**
+ * Anchor a completed scan's report: Seal-encrypt the report snapshot →
+ * Walrus → persist the blob id. Idempotent (skips when already anchored).
+ * No Sui mint — Walrus+Seal only. Throws on failure; callers run it
+ * fire-and-forget so it never blocks scan completion.
+ */
+export async function anchorScanReport(
+  scanId: string,
+  deps: ScanAnchorDeps = defaultScanAnchorDeps(),
+  now: Date = new Date(),
+): Promise<ScanReportAnchorResult> {
+  const scan = await deps.loadScan(scanId);
+  if (!scan) throw new Error(`scan ${scanId} not found`);
+  if (scan.reportWalrusBlobId) {
+    return { status: 'skipped', walrusBlobId: scan.reportWalrusBlobId };
+  }
+
+  const data = new TextEncoder().encode(JSON.stringify(scan.payload));
+  const sealId = toSealHexId(scanId);
+  const { blobId } = await deps.encryptStore({ id: sealId, data });
+
+  await deps.persist(scanId, {
+    reportWalrusBlobId: blobId,
+    reportSealId: sealId,
+    reportAnchoredAt: now,
+  });
+
+  log.info({ scanId, blobId }, 'scan report anchored on-chain (Walrus+Seal)');
+  return { status: 'anchored', walrusBlobId: blobId };
+}

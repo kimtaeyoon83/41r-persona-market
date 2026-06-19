@@ -214,6 +214,13 @@ export type ScanReport = {
    *  once. Lets the Compare button decide whether to land directly
    *  on the comparison page or trigger a recompute first. */
   human_aggregate_computed: boolean;
+  /** Chain wiring Phase 2 — Seal-encrypted report blob on Walrus.
+   *  Null until anchored at scan completion. */
+  report_anchor?: {
+    walrus_blob_id: string;
+    walrus_url: string;
+    anchored_at: string | null;
+  } | null;
 };
 
 export type ScanPersonaDetail = {

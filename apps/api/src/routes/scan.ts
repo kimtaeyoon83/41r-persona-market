@@ -579,6 +579,16 @@ router.get('/:id/report', async (req, res) => {
       completed && scan.mode === 'A'
         ? await computeWeightedAarrrFor(id, scan.category, scan.categoryConfidence)
         : null,
+    // Chain wiring Phase 2 — Seal-encrypted report blob on Walrus, anchored
+    // at completion (fire-and-forget). Null until anchored; the report page
+    // hides the strip when absent.
+    report_anchor: scan.reportWalrusBlobId
+      ? {
+          walrus_blob_id: scan.reportWalrusBlobId,
+          walrus_url: walrusBlobUrl(scan.reportWalrusBlobId),
+          anchored_at: scan.reportAnchoredAt ? scan.reportAnchoredAt.toISOString() : null,
+        }
+      : null,
   });
 });
 

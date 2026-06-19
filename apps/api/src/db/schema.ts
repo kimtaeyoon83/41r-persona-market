@@ -368,6 +368,14 @@ export const audienceFitScans = pgTable('audience_fit_scans', {
    *  reward distribution to verify payment. */
   paymentTxSignature: text('payment_tx_signature'),
 
+  /** On-chain report anchor (chain wiring Phase 2, 2026-06-19). The shaped
+   *  AI report is Seal-encrypted → stored on Walrus at scan completion
+   *  (fire-and-forget). Null until anchored. report_seal_id = hex Seal
+   *  identity namespace (the scan id). */
+  reportWalrusBlobId: text('report_walrus_blob_id'),
+  reportSealId: text('report_seal_id'),
+  reportAnchoredAt: timestamp('report_anchored_at'),
+
   createdAt: timestamp('created_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),
 });

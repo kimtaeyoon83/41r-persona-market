@@ -1298,6 +1298,35 @@ strong      85   70   55   30`}
             <Btn href="/validator/calibration">{t("report.calibrationReport")}</Btn>
           </div>
         </div>
+
+        {r.report_anchor && (
+          <div
+            style={{
+              marginTop: 8,
+              padding: "10px 14px",
+              borderRadius: 8,
+              border: `1px solid ${C.border}`,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+              fontFamily: FM,
+              fontSize: 11,
+              color: C.textFaint,
+            }}
+          >
+            <span style={{ color: C.accent, letterSpacing: "0.06em" }}>ON-CHAIN</span>
+            <span>Report anchored · Walrus · Seal-encrypted:</span>
+            <a
+              href={r.report_anchor.walrus_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: C.accent, wordBreak: "break-all", textDecoration: "none" }}
+            >
+              {r.report_anchor.walrus_blob_id} ↗
+            </a>
+          </div>
+        )}
       </div>
     </Frame>
   );

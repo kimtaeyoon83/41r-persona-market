@@ -31,6 +31,7 @@ import {
   getWorkspaceAuthState,
 } from './workspaces.js';
 import { sendScanCompleteEmail } from './email.js';
+import { anchorScanReport } from './sui/anchor.js';
 import { logger } from '../logger.js';
 import {
   type CohortFit,
@@ -547,6 +548,7 @@ async function runScan(scanId: string): Promise<void> {
   // there — partner surveys resolve their scanId from the workspace.
   await setWorkspaceAnchorFromScan(scanId);
   notifyScanComplete(scanId, result.best.cohort_label, result.audience_fit_score);
+  anchorReportSafe(scanId);
 }
 
 // ─── Mode B: single-audience pipeline ────────────────────────────
@@ -724,6 +726,7 @@ async function runModeBPipeline(args: {
   );
   await setWorkspaceAnchorFromScan(scanId);
   notifyScanComplete(scanId, parsed.label ?? null, cohortFitScore);
+  anchorReportSafe(scanId);
 }
 
 // Scan-complete notification (Console S2, retention loop #1 — §6).
@@ -759,6 +762,20 @@ function notifyScanComplete(
       });
     } catch (err) {
       log.warn({ scanId, err }, 'scan-complete notify failed (non-fatal)');
+    }
+  })();
+}
+
+// Fire-and-forget on-chain report anchor (chain wiring Phase 2). Seal-
+// encrypts the report snapshot → Walrus. Non-fatal + idempotent: it must
+// never block or fail a completed scan; an unconfigured/unfunded chain just
+// logs a warning. Mirrors notifyScanComplete's void-IIFE pattern.
+function anchorReportSafe(scanId: string): void {
+  void (async () => {
+    try {
+      await anchorScanReport(scanId);
+    } catch (err) {
+      log.warn({ scanId, err }, 'scan-report anchor failed (non-fatal)');
     }
   })();
 }

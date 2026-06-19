@@ -3,7 +3,9 @@ import {
   extractCreatedObjectId,
   suiObjectUrl,
   anchorPersona,
+  anchorScanReport,
   type AnchorDeps,
+  type ScanAnchorDeps,
 } from '../services/sui/anchor.js';
 
 describe('extractCreatedObjectId (pure)', () => {
@@ -106,5 +108,47 @@ describe('anchorPersona', () => {
   it('throws when mint returns no created object id', async () => {
     const deps = makeDeps({ mint: vi.fn(async () => ({ digest: 'd', createdObjectId: null })) });
     await expect(anchorPersona('p1', deps)).rejects.toThrow('no created object id');
+  });
+});
+
+function makeScanDeps(over: Partial<ScanAnchorDeps> = {}): ScanAnchorDeps {
+  return {
+    loadScan: vi.fn(async () => ({ reportWalrusBlobId: null, payload: { scan_id: 's1' } })),
+    encryptStore: vi.fn(async () => ({ blobId: 'rblob' })),
+    persist: vi.fn(async () => {}),
+    ...over,
+  };
+}
+
+describe('anchorScanReport (Walrus+Seal, no mint)', () => {
+  it('seal-encrypts the report → walrus → persists, keyed by hex scan id', async () => {
+    const deps = makeScanDeps();
+    const now = new Date('2026-06-19T00:00:00.000Z');
+    const r = await anchorScanReport('s1', deps, now);
+    expect(r).toEqual({ status: 'anchored', walrusBlobId: 'rblob' });
+    expect(deps.encryptStore).toHaveBeenCalledWith({
+      id: '7331', // hex of 's1'
+      data: expect.any(Uint8Array),
+    });
+    expect(deps.persist).toHaveBeenCalledWith('s1', {
+      reportWalrusBlobId: 'rblob',
+      reportSealId: '7331',
+      reportAnchoredAt: now,
+    });
+  });
+
+  it('is idempotent — skips when already anchored', async () => {
+    const deps = makeScanDeps({
+      loadScan: vi.fn(async () => ({ reportWalrusBlobId: 'existing', payload: {} })),
+    });
+    const r = await anchorScanReport('s1', deps);
+    expect(r).toEqual({ status: 'skipped', walrusBlobId: 'existing' });
+    expect(deps.encryptStore).not.toHaveBeenCalled();
+    expect(deps.persist).not.toHaveBeenCalled();
+  });
+
+  it('throws when the scan does not exist', async () => {
+    const deps = makeScanDeps({ loadScan: vi.fn(async () => null) });
+    await expect(anchorScanReport('missing', deps)).rejects.toThrow('not found');
   });
 });

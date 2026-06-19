@@ -35,6 +35,7 @@ const FILES = [
   '0019_workspace_capture_mobile.sql',
   '0020_capture_planner.sql',
   '0021_persona_chain.sql',
+  '0022_scan_report_chain.sql',
 ];
 const DRY_RUN = process.argv.includes('--dry-run');
 
