@@ -1,0 +1,16 @@
+[package]
+name = "rpm"
+edition = "2024.beta"
+version = "0.0.1"
+
+# RPM on-chain backbone (design doc v0.4 §4) — Sui Move objects for the
+# user-owned persona / campaign / escrow layer. Chain transition from
+# Solana is a confirmed strategic decision (§0.1); this package is the
+# first scaffolding slice: the Persona ownership root (§4.1). Campaign /
+# Escrow (§4.3, §4.5) land next.
+
+# Sui / MoveStdlib are auto-added by the toolchain for the active env
+# (testnet) — no explicit [dependencies] needed.
+
+[addresses]
+rpm = "0x0"
