@@ -79,6 +79,17 @@ const envSchema = z.object({
   USDC_MINT: z.string().default('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU'),
   HOME: z.string().optional(),
 
+  // ── Sui (chain transition, design doc v0.4 §0.1) ──
+  // Optional until the Sui layer goes live alongside Solana (staged
+  // migration, not big-bang). SUI_PACKAGE_ID is set after publishing the
+  // rpm Move package (scripts/sui-publish.ts).
+  SUI_RPC_URL: z.string().url().default('https://fullnode.testnet.sui.io:443'),
+  SUI_NETWORK: z
+    .enum(['testnet', 'mainnet', 'devnet', 'localnet'])
+    .default('testnet'),
+  SUI_KEYPAIR_JSON: z.string().optional(), // bech32 `suiprivkey1...`
+  SUI_PACKAGE_ID: z.string().optional(),
+
   // x402 + SAS
   X402_RESOURCE_WALLET: z.string().default('8Vm3ys3kwLSy2qThejn56E2j6fptwSE2qcLkEeiLrdB8'),
   SAS_CREDENTIAL_PDA: z.string().optional(),
