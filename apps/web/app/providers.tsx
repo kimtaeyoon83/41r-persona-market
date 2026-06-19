@@ -43,17 +43,18 @@ export function Providers({ children }: { children: ReactNode }) {
     <PrivyProvider
       appId={PRIVY_APP_ID}
       config={{
-        // Login surface — order matters for the modal. Privy is used
-        // purely for identity (email/Google → bearer token); the Sui
-        // chain transition (design v0.4 §0.1) moved persona ownership to
-        // server-custodied Sui wallets, so no client embedded wallet is
-        // created here.
+        // Login surface — order matters for the modal.
         loginMethodsAndOrder: {
           primary: ["email", "google"],
         },
+        // Auto-create the embedded Ed25519 wallet (Privy calls it
+        // "solana"). Decision 나': Solana and Sui share Ed25519, so the
+        // SAME user-held key derives the user's Sui address
+        // (lib/sui-wallet.ts) — self-custody (§4.1/§8) via Privy login,
+        // without native Sui support. We never use the Solana side.
         embeddedWallets: {
           ethereum: { createOnLogin: "off" },
-          solana: { createOnLogin: "off" },
+          solana: { createOnLogin: "users-without-wallets" },
         },
         appearance: {
           theme: "light",
