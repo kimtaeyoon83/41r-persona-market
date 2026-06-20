@@ -261,6 +261,40 @@ per record, surfaced on screen:
 - Tests: `anchor.test.ts` (executeTx extraction, persona + scan-report order,
   idempotent, error paths) + `scan_shapers.test.ts` chain block.
 
+### Content-hash commitment + Proof panel (Method B, 2026-06-20)
+
+The sealed Walrus blob proves a record EXISTS but its Seal ciphertext hides the
+content (committee deferred, §6.3). Method B adds a verifiable INTEGRITY layer
+without re-publishing Move:
+
+- **Write** (`anchor.ts::commitPersonaContentHash`, migration 0026 —
+  `personas.content_hash/content_manifest_blob_id`): `sha256(personaPlaintext(
+  vector))` → a PUBLIC (un-encrypted) Walrus manifest blob → `add_memwal_ref`
+  onto the persona's Sui object. Now the plaintext holder can re-hash in-browser
+  and match the on-chain commitment. Idempotent; run via
+  `scripts/backfill-content-hash.ts [--max N] [--dry-run]` (gas-aware, stops
+  below 0.05 SUI). Reports get `report_content_hash` only — DB hash over the
+  snapshot, NO Sui object (scan≈Campaign escrow deferred), honest weaker claim.
+  Prod 2026-06-20: 83/85 personas + 5/5 reports committed; the 2 skips are
+  LEGACY personas anchored under the OLD package (`0x15136a9e…`) whose Persona
+  type rejects the current package's `add_memwal_ref` (`CommandArgumentError
+  arg_idx:0`) — un-committable without re-anchoring, not a bug.
+- **Read** (`services/sui/proof.ts` — `buildPersonaProof` / `buildReportProof`,
+  deps-injected + pure-tested in `proof.test.ts`): `GET /api/scan/:scanId/
+  persona/:personaId/proof` (live getObject + public Walrus manifest + plaintext
+  + DB hash) + `GET /:scanId/report-proof`. `content.decryption` is ALWAYS
+  `'gated'` — never claim the sealed bytes are in-browser readable.
+- **Proof panel** (`app/validator/_components/proof-panel.tsx`, replaces the
+  read-only link strip on persona detail + report footer): 3 escalating layers —
+  (1) live on-chain object, (2) sealed blob (gated), (3) plaintext + in-browser
+  WebCrypto `sha256` matched against the PUBLIC manifest hash → "내용 검증됨 ·
+  sha256 일치". Mismatch surfaces LOUDLY (red), unanchored/no-manifest states are
+  honest, never faked. Persona variant gated on `persona.chain` (hidden when
+  unanchored); report variant self-hides when not anchored. Verdict copy
+  escalates: "앵커됨·봉인됨" (existence) → "내용 검증됨·sha256 일치" (integrity).
+- Migration 0026 registered in `apply-prod-console-migrations.ts`, applied prod
+  2026-06-20. Endpoints verified live (browser==manifest==DB hash all match).
+
 ### Chain reality check — shipped vs designed (be honest in copy)
 
 The 2026-06-20 Sui-conversion audit found the chain *mechanics* are real
