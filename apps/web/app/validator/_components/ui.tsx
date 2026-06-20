@@ -254,19 +254,19 @@ export function TopBar() {
     >
       <Link
         href="/"
+        aria-label="41R"
         style={{
           display: "flex",
           alignItems: "center",
           textDecoration: "none",
           color: C.text,
+          fontFamily: FD,
+          fontSize: 20,
+          fontWeight: 700,
+          letterSpacing: "-0.02em",
         }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/logo/rpm_black_horizontal.png"
-          alt="41R"
-          style={{ height: 22, width: "auto", display: "block" }}
-        />
+        41R
       </Link>
       <div style={{ flex: 1 }} />
       {showAuthControls && (
