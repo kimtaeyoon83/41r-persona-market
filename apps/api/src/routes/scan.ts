@@ -215,18 +215,31 @@ router.post('/', scanCreateIpLimiter, optionalPrivyAuth, scanCreateUserLimiter, 
   // ── USDC escrow path: two-step. Don't debit/run yet — return the escrow
   // envelope so the client funds a Campaign<USDC>, then calls POST /:id/pay.
   if (paymentMethod === 'usdc') {
-    res.json({
-      scanId: scan.id,
-      status: 'pending_payment',
-      escrow: {
+    // The envelope needs the operator address + package id; both throw when
+    // the chain env (SUI_KEYPAIR_JSON / SUI_PACKAGE_ID) isn't configured.
+    // Return a clean 503 (and drop the pending row) instead of crashing the
+    // request to a 502.
+    let escrow;
+    try {
+      escrow = {
         usdc_amount: usdcAmount.toString(),
         coin_type: env.SUI_USDC_COIN_TYPE,
         cap_recipient: getSuiSigner().toSuiAddress(),
         package_id: requirePackageId(),
         target: safeUrl,
         criteria: JSON.stringify(target_cohorts ?? []),
-      },
-    });
+      };
+    } catch {
+      await db
+        .delete(schema.audienceFitScans)
+        .where(eq(schema.audienceFitScans.id, scan.id));
+      res.status(503).json({
+        error: 'usdc_unavailable',
+        message: 'On-chain USDC payment is not available right now — use credits.',
+      });
+      return;
+    }
+    res.json({ scanId: scan.id, status: 'pending_payment', escrow });
     return;
   }
 
@@ -292,12 +305,22 @@ router.post('/:id/pay', requirePrivyAuth, mutationLimiter, async (req, res) => {
     return;
   }
 
-  const verdict = await verifyCampaignCreation({
-    digest: sui_digest,
-    campaignObjectId: campaign_object_id,
-    capId: cap_id,
-    expectedAmount: BigInt(scan.escrowAmount ?? 0),
-  });
+  let verdict;
+  try {
+    verdict = await verifyCampaignCreation({
+      digest: sui_digest,
+      campaignObjectId: campaign_object_id,
+      capId: cap_id,
+      expectedAmount: BigInt(scan.escrowAmount ?? 0),
+    });
+  } catch {
+    // Chain env missing (no operator key) or RPC failure — clean 503, not 502.
+    res.status(503).json({
+      error: 'chain_unavailable',
+      message: 'On-chain verification is unavailable right now.',
+    });
+    return;
+  }
   if (!verdict.ok) {
     res.status(402).json({ error: 'payment_unverified', reason: verdict.reason });
     return;
