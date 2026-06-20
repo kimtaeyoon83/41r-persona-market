@@ -18,6 +18,14 @@ const SUI_NETWORK = (process.env.NEXT_PUBLIC_SUI_NETWORK || "testnet") as
   | "devnet"
   | "localnet";
 
+/** USDC pay-with-escrow is OFF by default — it depends on the Privy raw-sign
+ *  → Sui signature path which is not yet live-verified in-browser, and on the
+ *  operator chain env being configured server-side. Flip
+ *  NEXT_PUBLIC_USDC_ENABLED=1 only after the in-browser live-verify passes, so
+ *  we never show a non-working payment button (same discipline as the Mode C
+ *  gate). Credits stays the working default rail. */
+export const USDC_PAY_ENABLED = process.env.NEXT_PUBLIC_USDC_ENABLED === "1";
+
 /** Circle native USDC on Sui (default testnet). Mirrors api env
  *  SUI_USDC_COIN_TYPE — keep in sync. */
 export const USDC_COIN_TYPE =

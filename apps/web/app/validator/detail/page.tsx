@@ -7,6 +7,7 @@ import { scanApi } from "@/lib/api";
 import { checkTargetUrl } from "@/lib/url";
 import { Btn, C, Card, FM, Frame } from "../_components/ui";
 import { PayWithUsdcButton } from "../_components/pay-with-usdc";
+import { USDC_PAY_ENABLED } from "@/lib/sui-pay";
 
 // Screen 2: Discovery detail — sharpening questions.
 // Maps to ScreenDiscoveryDetail in screens-v2.jsx.
@@ -375,19 +376,23 @@ function DetailInner() {
               {submitting ? stageLabel(submitStage) : "Start analysis →"}
             </Btn>
             {/* On-chain alternative: pay per scan with USDC escrow on Sui
-                (chain wiring §4.3). Opt-in; credits stays the default. */}
-            <PayWithUsdcButton
-              scanBody={{
-                target_url: url,
-                mode: "A",
-                hypothesis: buildHypothesisText(),
-                target_cohorts: buildTargetCohorts().length ? buildTargetCohorts() : undefined,
-              }}
-              onPaid={(scanId) =>
-                router.push(`/validator/processing/${scanId}?url=${encodeURIComponent(url)}`)
-              }
-              disabled={submitting || !url}
-            />
+                (chain wiring §4.3). Gated OFF until the Privy raw-sign path is
+                live-verified in-browser — we never show a non-working payment
+                button. Flip NEXT_PUBLIC_USDC_ENABLED=1 to surface it. */}
+            {USDC_PAY_ENABLED && (
+              <PayWithUsdcButton
+                scanBody={{
+                  target_url: url,
+                  mode: "A",
+                  hypothesis: buildHypothesisText(),
+                  target_cohorts: buildTargetCohorts().length ? buildTargetCohorts() : undefined,
+                }}
+                onPaid={(scanId) =>
+                  router.push(`/validator/processing/${scanId}?url=${encodeURIComponent(url)}`)
+                }
+                disabled={submitting || !url}
+              />
+            )}
           </div>
         </div>
       </div>

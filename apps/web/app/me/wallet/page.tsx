@@ -13,7 +13,7 @@ import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
 import { deriveSuiAddress } from "@/lib/sui-wallet";
-import { getUsdcBalance, USDC_COIN_TYPE } from "@/lib/sui-pay";
+import { getUsdcBalance, USDC_COIN_TYPE, USDC_PAY_ENABLED } from "@/lib/sui-pay";
 import { Btn, C, Card, FM, FS, Frame } from "../../validator/_components/ui";
 
 export default function WalletPage() {
@@ -31,7 +31,7 @@ export default function WalletPage() {
   }
 
   useEffect(() => {
-    if (!suiAddr) return;
+    if (!suiAddr || !USDC_PAY_ENABLED) return;
     let live = true;
     getUsdcBalance(suiAddr, USDC_COIN_TYPE)
       .then((b) => live && setUsdc((Number(b) / 1e6).toFixed(2)))
@@ -97,31 +97,35 @@ export default function WalletPage() {
             >
               {suiAddr}
             </div>
-            <div
-              style={{
-                fontSize: 11,
-                fontFamily: FM,
-                color: C.textFaint,
-                textTransform: "uppercase",
-                letterSpacing: 0.4,
-                marginBottom: 8,
-              }}
-            >
-              USDC balance
-            </div>
-            <div style={{ fontFamily: FM, fontSize: 15, color: C.text, marginBottom: 14 }}>
-              {usdc === null ? "—" : `${usdc} USDC`}{" "}
-              {usdc === "0.00" && (
-                <a
-                  href="https://faucet.circle.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ fontSize: 11, color: C.accent }}
+            {USDC_PAY_ENABLED && (
+              <>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontFamily: FM,
+                    color: C.textFaint,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.4,
+                    marginBottom: 8,
+                  }}
                 >
-                  faucet ↗
-                </a>
-              )}
-            </div>
+                  USDC balance
+                </div>
+                <div style={{ fontFamily: FM, fontSize: 15, color: C.text, marginBottom: 14 }}>
+                  {usdc === null ? "—" : `${usdc} USDC`}{" "}
+                  {usdc === "0.00" && (
+                    <a
+                      href="https://faucet.circle.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: 11, color: C.accent }}
+                    >
+                      faucet ↗
+                    </a>
+                  )}
+                </div>
+              </>
+            )}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <Btn onClick={copy}>{copied ? "Copied ✓" : "Copy address"}</Btn>
               <Link href="/me/points" style={{ textDecoration: "none" }}>
