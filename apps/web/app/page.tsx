@@ -1,13 +1,15 @@
 "use client";
 
-// Public homepage — Phase 2 §8.1 / P2-4 + Phase 4 IA cleanup.
+// Public homepage — Project RPM site redesign (Claude Design handoff).
 //
-// Single entry point for both analysis modes (the legacy /validator
-// route now redirects here):
+// Single entry point for both analysis modes (the legacy /validator route
+// redirects here):
 //   Mode A (Discovery)    URL only       → /validator/detail (sharpening)
 //   Mode B (Verification) URL + audience → POST /api/scan → /validator/processing/<id>
 //
-// Three live feeds fill the body: Live Now / Top PMF / Recent.
+// Visual language: _pr/ui.tsx (indigo-on-blue Stripe style). The hero matches
+// Prototype.dc.html; the live feeds (Live / Top / Recent) below stay wired to
+// scanApi — CLAUDE.md forbids hardcoding them.
 
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
@@ -15,7 +17,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { usePrivy } from "@privy-io/react-auth";
 import { scanApi, type ScanSummary } from "@/lib/api";
 import { checkTargetUrl } from "@/lib/url";
-import { C, FM, FS, Frame, Pill } from "./validator/_components/ui";
+import { PR, FD, FB, FM, PrShell, PrButton, PrCard, scoreTone } from "./_pr/ui";
 
 type AnalysisMode = "A" | "B";
 
@@ -32,12 +34,8 @@ function HomeInner() {
   const searchParams = useSearchParams();
   const { ready, authenticated, login } = usePrivy();
 
-  // Initial mode honours `?mode=B` (used by the /validator redirect
-  // and any legacy "Verify Mode B" links).
   const initialMode: AnalysisMode = searchParams.get("mode") === "B" ? "B" : "A";
   const [mode, setMode] = useState<AnalysisMode>(initialMode);
-  // `?url=...` prefill — used by the Report page's Re-run button so a
-  // viewer can re-analyze the same target without retyping it.
   const [url, setUrl] = useState(searchParams.get("url") ?? "");
   const [audience, setAudience] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -61,7 +59,9 @@ function HomeInner() {
       setLive(l.scans);
       setFeedsLoaded(true);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const onAnalyze = async () => {
@@ -72,8 +72,6 @@ function HomeInner() {
       setError("Enter a URL to analyze");
       return;
     }
-    // Security gate (2026-06-15) — block hostile / non-public URLs
-    // before they leave the browser (server re-validates authoritatively).
     const check = checkTargetUrl(trimmedUrl);
     if (!check.ok) {
       setError(
@@ -104,11 +102,7 @@ function HomeInner() {
         mode: "B",
         target_audience_text: trimmedAudience,
       });
-      // Scan is gated by the credit ledger server-side (debitScan);
-      // no client payment step (Sui migration removed the Solana tx).
-      router.push(
-        `/validator/processing/${scanId}?url=${encodeURIComponent(trimmedUrl)}`,
-      );
+      router.push(`/validator/processing/${scanId}?url=${encodeURIComponent(trimmedUrl)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start verify");
       setSubmitting(false);
@@ -116,100 +110,105 @@ function HomeInner() {
   };
 
   return (
-    <Frame active="discovery">
-      <div
-        style={{
-          padding: "clamp(32px, 6vw, 60px) clamp(16px, 4vw, 32px) 80px",
-          maxWidth: 1080,
-          margin: "0 auto",
-        }}
-      >
-        {/* ─── Hero ─── */}
-        <div style={{ textAlign: "center", marginBottom: 56 }}>
-          <div
+    <PrShell
+      right={
+        authenticated ? (
+          <Link
+            href="/console"
+            className="pr-link"
+            style={{ fontSize: 13, fontWeight: 600, color: PR.dim, textDecoration: "none" }}
+          >
+            Console →
+          </Link>
+        ) : (
+          <button
+            onClick={() => ready && login()}
             style={{
-              fontSize: 12,
-              fontFamily: FM,
-              color: C.textFaint,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              marginBottom: 12,
+              fontSize: 13,
+              fontWeight: 600,
+              color: PR.dim,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontFamily: FB,
             }}
           >
-            41R · AI Persona Audience Discovery
+            Sign in
+          </button>
+        )
+      }
+    >
+      <div className="pr-fade" style={{ maxWidth: 940, margin: "0 auto", padding: "56px 28px 80px" }}>
+        {/* ─── Hero ─── */}
+        <div style={{ textAlign: "center" }}>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 7,
+              background: PR.panel,
+              border: `1px solid ${PR.border}`,
+              borderRadius: 999,
+              padding: "5px 13px",
+              marginBottom: 20,
+            }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: 999, background: PR.green }} />
+            <span style={{ fontSize: 12, color: PR.dim }}>
+              112 AI personas · 8 audience cohorts · no traffic needed
+            </span>
           </div>
+
           <h1
             style={{
-              fontSize: "clamp(30px, 6.5vw, 54px)",
-              fontWeight: 650,
-              lineHeight: 1.12,
-              letterSpacing: "-0.03em",
-              margin: 0,
-              marginBottom: 16,
-              color: C.text,
-              fontFamily: FS,
+              fontFamily: FD,
+              fontSize: "clamp(34px,6vw,52px)",
+              lineHeight: 1.04,
+              letterSpacing: "-0.02em",
+              margin: "0 0 16px",
+              color: PR.ink,
             }}
           >
             {mode === "A" ? (
               <>
-                Find your{" "}
-                <span className="e-hero-accent" style={{ color: C.accent }}>
-                  customers
-                </span>{" "}
-                — before launch.
+                Who&apos;s actually going to <span style={{ color: PR.accent }}>use this?</span>
               </>
             ) : (
               <>
-                Verify a <span style={{ color: C.accent }}>specific audience</span>.
+                Verify a <span style={{ color: PR.accent }}>specific audience.</span>
               </>
             )}
           </h1>
-          <div
+          <p
             style={{
-              fontSize: "clamp(13px, 3vw, 15px)",
-              color: C.textDim,
-              marginBottom: 8,
-              lineHeight: 1.55,
-              padding: "0 8px",
+              fontSize: 17,
+              color: PR.text,
+              maxWidth: 460,
+              margin: "0 auto 22px",
+              lineHeight: 1.5,
             }}
           >
             {mode === "A"
-              ? "Drop a URL. 112 AI personas react to it and tell you who your product is for — your best-fit audience, who bounces, and why. No traffic, no test users needed."
-              : "Tell us who you're targeting. ~50 matching personas run a pass/conditional/fail check."}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: C.textFaint,
-              marginBottom: 22,
-              lineHeight: 1.55,
-              padding: "0 8px",
-              fontFamily: FM,
-            }}
-          >
-            {mode === "A"
-              ? "Audience research panel — not a traffic predictor. Predictions are calibrated against real surveys and visitors."
-              : ""}
-          </div>
+              ? "Paste a link to your site. 112 AI personas try it out and tell you who falls in love — and who quietly leaves."
+              : "Tell us who you're targeting. ~50 matching personas run a pass / conditional / fail check."}
+          </p>
 
-          {/* Mode toggle — squared segmented control (instrument look) */}
+          {/* Mode toggle */}
           <div
             style={{
               display: "inline-flex",
-              gap: 4,
-              marginBottom: 22,
-              padding: 4,
-              background: "#eef0f2",
-              borderRadius: 9,
-              border: `1px solid ${C.border}`,
+              gap: 3,
+              marginBottom: 18,
+              padding: 3,
+              background: PR.panelAlt,
+              borderRadius: 10,
+              border: `1px solid ${PR.border}`,
             }}
           >
-            {(
-              [
-                { id: "A" as const, label: "Discovery" },
-                { id: "B" as const, label: "Verify audience" },
-              ]
-            ).map((m) => (
+            {([
+              { id: "A" as const, label: "Discovery" },
+              { id: "B" as const, label: "Verify audience" },
+            ]).map((m) => (
               <button
                 key={m.id}
                 onClick={() => {
@@ -218,18 +217,15 @@ function HomeInner() {
                 }}
                 style={{
                   padding: "6px 14px",
-                  fontSize: 12,
-                  borderRadius: 6,
-                  background: mode === m.id ? C.panel : "transparent",
-                  color: mode === m.id ? C.text : C.textDim,
-                  border:
-                    mode === m.id
-                      ? `1px solid ${C.borderStrong}`
-                      : "1px solid transparent",
-                  boxShadow: mode === m.id ? "0 1px 2px rgba(21,23,27,0.06)" : "none",
+                  fontSize: 12.5,
+                  borderRadius: 7,
+                  background: mode === m.id ? PR.panel : "transparent",
+                  color: mode === m.id ? PR.ink : PR.dim,
+                  border: mode === m.id ? `1px solid ${PR.borderStrong}` : "1px solid transparent",
+                  boxShadow: mode === m.id ? "0 1px 2px rgba(10,37,64,.08)" : "none",
                   cursor: "pointer",
-                  fontFamily: FS,
-                  fontWeight: mode === m.id ? 600 : 400,
+                  fontFamily: FB,
+                  fontWeight: mode === m.id ? 600 : 500,
                 }}
               >
                 {m.label}
@@ -237,137 +233,106 @@ function HomeInner() {
             ))}
           </div>
 
+          {/* URL input */}
           <div
             style={{
               display: "flex",
-              gap: 0,
-              maxWidth: 560,
+              maxWidth: 460,
               margin: "0 auto",
-              border: `1px solid ${C.borderStrong}`,
-              borderRadius: 12,
+              background: PR.panel,
+              border: `1.5px solid ${PR.borderStrong}`,
+              borderRadius: 14,
               overflow: "hidden",
-              background: C.panel,
-              boxShadow:
-                "0 10px 30px -12px rgba(21, 23, 27, 0.18), 0 2px 6px rgba(21, 23, 27, 0.05)",
+              padding: 5,
+              boxShadow: "0 12px 30px -18px rgba(10,37,64,.32)",
             }}
           >
             <input
-              type="text"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") onAnalyze(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onAnalyze();
+              }}
               placeholder="yoursite.com"
               style={{
                 flex: 1,
-                padding: "14px 22px",
-                fontSize: 14,
-                fontFamily: FS,
-                background: "transparent",
                 border: "none",
                 outline: "none",
-                color: C.text,
+                background: "transparent",
+                padding: "12px 16px",
+                fontSize: 15,
+                fontFamily: FB,
+                color: PR.ink,
               }}
             />
-            <button
+            <PrButton
               onClick={onAnalyze}
               disabled={submitting || !url.trim()}
-              className="e-cta"
-              style={{
-                padding: "14px 26px",
-                fontSize: 13,
-                fontWeight: 600,
-                background: submitting || !url.trim() ? C.textFaint : C.accent,
-                color: "#fff",
-                border: "none",
-                cursor: submitting || !url.trim() ? "not-allowed" : "pointer",
-                fontFamily: FS,
-                whiteSpace: "nowrap",
-              }}
+              style={{ fontSize: 15, padding: "12px 24px", borderRadius: 10 }}
             >
-              {submitting ? "Starting…" : mode === "A" ? "Analyze →" : "Verify →"}
-            </button>
+              {submitting ? "Starting…" : mode === "A" ? "Try it →" : "Verify →"}
+            </PrButton>
           </div>
 
           {mode === "B" && (
             <div
               style={{
                 display: "flex",
-                maxWidth: 560,
+                maxWidth: 460,
                 margin: "10px auto 0",
-                border: `1px solid ${C.borderStrong}`,
+                background: PR.panel,
+                border: `1px solid ${PR.borderStrong}`,
                 borderRadius: 12,
                 overflow: "hidden",
-                background: C.panel,
               }}
             >
               <input
-                type="text"
                 value={audience}
                 onChange={(e) => setAudience(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") onAnalyze(); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") onAnalyze();
+                }}
                 placeholder='Target audience — e.g. "30s DeFi expert mobile-first"'
                 style={{
                   flex: 1,
-                  padding: "12px 22px",
-                  fontSize: 13,
-                  fontFamily: FS,
-                  background: "transparent",
                   border: "none",
                   outline: "none",
-                  color: C.text,
+                  background: "transparent",
+                  padding: "12px 16px",
+                  fontSize: 14,
+                  fontFamily: FB,
+                  color: PR.ink,
                 }}
               />
             </div>
           )}
 
-          {error && (
-            <div style={{ color: C.bad, fontSize: 12, marginTop: 12 }}>{error}</div>
-          )}
+          {error && <div style={{ color: PR.redInk, fontSize: 13, marginTop: 12 }}>{error}</div>}
 
-          <div
-            style={{
-              marginTop: 14,
-              fontSize: 11,
-              color: C.textFaint,
-              fontFamily: FM,
-            }}
-          >
+          <div style={{ fontSize: 12.5, color: PR.faint, marginTop: 12 }}>
             {mode === "A"
-              ? "~6 min · 112 personas across 8 cohorts · $30 free credit on signup ≈ 15 analyses"
-              : "~2 min · up to 50 personas matching audience · $30 free credit on signup"}
+              ? "Free to start · about 6 minutes · no test users needed"
+              : "~2 min · up to 50 personas · $30 free credit on signup"}
           </div>
         </div>
 
-        {/* ─── Why 41R (vs GA / user-testing panels — §0.3 fights we win) ─── */}
+        {/* ─── Value cards ─── */}
         <div
-          className="v-grid-stack-sm"
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-            gap: 12,
-            marginBottom: 48,
+            gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
+            gap: 14,
+            marginTop: 48,
           }}
         >
-          <ValueCard
-            n="01"
-            title="Works with zero traffic"
-            body="Analytics needs visitors. 41R's persona panel reacts to your page itself — get audience-fit signal pre-launch, pre-marketing."
-          />
-          <ValueCard
-            n="02"
-            title="Works on any URL"
-            body="Yours, a competitor's, an idea you're sizing up. If it has a URL, you can see who it resonates with."
-          />
-          <ValueCard
-            n="03"
-            title="Predictions meet reality"
-            body="Share a survey, install the tracking snippet — every real response calibrates the personas. We show you where they're right and wrong."
-          />
+          <ValueCard n="01" title="Works with zero traffic" body="Get audience signal before launch — no visitors required." />
+          <ValueCard n="02" title="Works on any URL" body="Yours, a competitor's, or an idea you're sizing up." />
+          <ValueCard n="03" title="Checked against real people" body="Real surveys grade the AI — we show where it's right." />
         </div>
 
         {/* ─── Live Now ─── */}
         {feedsLoaded && live.length > 0 && (
-          <div style={{ marginBottom: 40 }}>
+          <div style={{ marginTop: 48 }}>
             <SectionHeader label="LIVE NOW" pulse />
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               {live.slice(0, 6).map((s) => (
@@ -377,11 +342,11 @@ function HomeInner() {
           </div>
         )}
 
-        {/* ─── Top PMF Leaderboard ─── */}
+        {/* ─── Top fit ─── */}
         {feedsLoaded && top.length > 0 && (
-          <div style={{ marginBottom: 48 }}>
-            <SectionHeader label="TOP AUDIENCE FIT · LEADERBOARD" />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+          <div style={{ marginTop: 40 }}>
+            <SectionHeader label="TOP AUDIENCE FIT" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(250px,1fr))", gap: 12 }}>
               {top.map((s, i) => (
                 <ScanCard key={s.id} scan={s} rank={i + 1} variant="top" />
               ))}
@@ -389,19 +354,17 @@ function HomeInner() {
           </div>
         )}
 
-        {/* ─── Recent Analyses ─── */}
-        <div>
+        {/* ─── Recent ─── */}
+        <div style={{ marginTop: 40 }}>
           <SectionHeader label="RECENT ANALYSES" />
           {!feedsLoaded ? (
-            <div style={{ padding: 40, textAlign: "center", color: C.textDim, fontSize: 13 }}>
-              Loading…
-            </div>
+            <div style={{ padding: 40, textAlign: "center", color: PR.faint, fontSize: 13 }}>Loading…</div>
           ) : recent.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", color: C.textDim, fontSize: 13 }}>
+            <div style={{ padding: 40, textAlign: "center", color: PR.faint, fontSize: 13 }}>
               No analyses yet. Be the first — drop a URL above.
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(250px,1fr))", gap: 12 }}>
               {recent.map((s) => (
                 <ScanCard key={s.id} scan={s} variant="recent" />
               ))}
@@ -412,64 +375,38 @@ function HomeInner() {
         <div
           style={{
             marginTop: 56,
-            padding: "20px 0",
-            borderTop: `1px solid ${C.border}`,
-            fontSize: 11,
-            color: C.textFaint,
-            fontFamily: FM,
+            paddingTop: 20,
+            borderTop: `1px solid ${PR.border}`,
+            fontSize: 12,
+            color: PR.faint,
             display: "flex",
             justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 12,
           }}
         >
           <span>41R · find your customers before launch</span>
           <span style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-            <Link
-              href="/validator/how-it-works"
-              style={{ color: C.textDim, textDecoration: "none" }}
-            >
-              How it works — no black box →
+            <Link href="/validator/how-it-works" className="pr-link" style={{ color: PR.dim, textDecoration: "none" }}>
+              How it works →
             </Link>
-            {authenticated && (
-              <Link
-                href="/console"
-                style={{ color: C.textDim, textDecoration: "none" }}
-              >
-                Console →
-              </Link>
-            )}
+            <Link href="/proof" className="pr-link" style={{ color: PR.dim, textDecoration: "none" }}>
+              On-chain proof →
+            </Link>
           </span>
         </div>
       </div>
-    </Frame>
+    </PrShell>
   );
 }
 
 function ValueCard({ n, title, body }: { n: string; title: string; body: string }) {
   return (
-    <div
-      className="e-card"
-      style={{
-        background: C.panel,
-        border: `1px solid ${C.border}`,
-        borderRadius: 14,
-        padding: 20,
-        textAlign: "left",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 10,
-          fontFamily: FM,
-          color: C.accent,
-          letterSpacing: "0.1em",
-          marginBottom: 8,
-        }}
-      >
-        {n}
-      </div>
-      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{title}</div>
-      <div style={{ fontSize: 12, color: C.textDim, lineHeight: 1.65 }}>{body}</div>
-    </div>
+    <PrCard pad={22} style={{ textAlign: "left" }}>
+      <div style={{ fontFamily: FM, fontSize: 11, color: PR.accent, marginBottom: 9 }}>{n}</div>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 5, color: PR.ink }}>{title}</div>
+      <p style={{ fontSize: 13, color: PR.dim, margin: 0, lineHeight: 1.55 }}>{body}</p>
+    </PrCard>
   );
 }
 
@@ -483,53 +420,33 @@ function SectionHeader({ label, pulse }: { label: string; pulse?: boolean }) {
         marginBottom: 14,
         fontSize: 11,
         fontFamily: FM,
-        letterSpacing: "0.12em",
-        color: C.textDim,
+        letterSpacing: "0.1em",
+        color: PR.faint,
       }}
     >
       {pulse && (
-        <span
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 999,
-            background: C.bad,
-            animation: "pulse 1.6s ease-in-out infinite",
-          }}
-        />
+        <span style={{ width: 7, height: 7, borderRadius: 999, background: PR.green }} />
       )}
       {label}
-      <div style={{ flex: 1, height: 1, background: C.border }} />
+      <div style={{ flex: 1, height: 1, background: PR.border }} />
     </div>
   );
 }
 
-function ScanCard({
-  scan,
-  rank,
-  variant,
-}: {
-  scan: ScanSummary;
-  rank?: number;
-  variant: "top" | "recent";
-}) {
+function ScanCard({ scan, rank, variant }: { scan: ScanSummary; rank?: number; variant: "top" | "recent" }) {
   const score = scan.audience_fit_score != null ? Math.round(scan.audience_fit_score) : null;
-  const tone =
-    score == null ? "faint" : score >= 60 ? "ok" : score >= 40 ? "warn" : "bad";
   const cohort = scan.best_cohort_label ?? scan.best_cohort_id ?? "—";
-
   return (
     <Link
       href={`/validator/report/${scan.id}`}
-      className="e-card"
       style={{
         display: "block",
-        padding: 16,
-        background: C.panel,
-        border: `1px solid ${C.border}`,
-        borderRadius: 14,
         textDecoration: "none",
-        color: C.text,
+        color: PR.ink,
+        background: PR.panel,
+        border: `1px solid ${PR.border}`,
+        borderRadius: 14,
+        padding: 16,
         position: "relative",
       }}
     >
@@ -538,11 +455,11 @@ function ScanCard({
           style={{
             position: "absolute",
             top: 12,
-            right: 12,
-            fontSize: 11,
+            right: 14,
             fontFamily: FM,
-            color: rank <= 3 ? C.accent : C.textFaint,
-            fontWeight: 600,
+            fontSize: 11,
+            fontWeight: 700,
+            color: rank <= 3 ? PR.accent : PR.faint,
           }}
         >
           #{rank}
@@ -551,9 +468,9 @@ function ScanCard({
       <div
         style={{
           fontSize: 12,
-          color: C.textDim,
+          color: PR.dim,
           fontFamily: FM,
-          marginBottom: 4,
+          marginBottom: 6,
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
@@ -562,29 +479,31 @@ function ScanCard({
         {trimUrl(scan.target_url)}
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
-        <div
-          style={{
-            fontSize: 28,
-            fontWeight: 600,
-            fontFamily: FM,
-            color:
-              tone === "ok" ? C.ok : tone === "warn" ? C.warn : tone === "bad" ? C.bad : C.textFaint,
-          }}
-        >
+        <div style={{ fontFamily: FD, fontSize: 30, fontWeight: 700, color: scoreTone(score) }}>
           {score ?? "—"}
         </div>
-        <div style={{ fontSize: 11, color: C.textFaint, fontFamily: FM }}>
-          {scan.mode === "B" ? "VERIFY" : "FIT"}
-        </div>
+        <div style={{ fontSize: 11, color: PR.faint, fontFamily: FM }}>{scan.mode === "B" ? "VERIFY" : "FIT"}</div>
       </div>
-      <div style={{ fontSize: 11, color: C.textDim, marginBottom: 6, lineHeight: 1.4 }}>
+      <div style={{ fontSize: 12, color: PR.dim, marginBottom: 6, lineHeight: 1.4 }}>
         {scan.category && (
-          <Pill style={{ marginRight: 6, fontSize: 9 }}>{scan.category}</Pill>
+          <span
+            style={{
+              fontFamily: FM,
+              fontSize: 9,
+              background: PR.accentSoft,
+              color: PR.accent,
+              padding: "2px 7px",
+              borderRadius: 999,
+              marginRight: 6,
+            }}
+          >
+            {scan.category}
+          </span>
         )}
         Best: {cohort}
         {scan.best_cohort_score != null && ` (${Math.round(scan.best_cohort_score)})`}
       </div>
-      <div style={{ fontSize: 10, color: C.textFaint, fontFamily: FM }}>
+      <div style={{ fontSize: 10, color: PR.faint, fontFamily: FM }}>
         {timeAgo(scan.completed_at ?? scan.created_at)} · {scan.personas_completed}p
       </div>
     </Link>
@@ -597,27 +516,19 @@ function LiveChip({ scan }: { scan: ScanSummary }) {
       href={`/validator/processing/${scan.id}`}
       style={{
         padding: "6px 12px",
-        background: C.panel,
-        border: `1px solid ${C.border}`,
+        background: PR.panel,
+        border: `1px solid ${PR.border}`,
         borderRadius: 999,
         fontSize: 11,
         fontFamily: FM,
-        color: C.textDim,
+        color: PR.dim,
         textDecoration: "none",
         display: "inline-flex",
         alignItems: "center",
         gap: 6,
       }}
     >
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: 999,
-          background: C.bad,
-          animation: "pulse 1.4s ease-in-out infinite",
-        }}
-      />
+      <span style={{ width: 6, height: 6, borderRadius: 999, background: PR.green }} />
       {trimUrl(scan.target_url)} · {scan.status}
     </Link>
   );

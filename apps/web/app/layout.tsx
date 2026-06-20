@@ -1,5 +1,11 @@
 import type { Metadata, Viewport } from "next";
-import { Inter_Tight, Inter, JetBrains_Mono } from "next/font/google";
+import {
+  Inter_Tight,
+  Inter,
+  JetBrains_Mono,
+  Hanken_Grotesk,
+  Space_Grotesk,
+} from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
 import { Providers } from "./providers";
@@ -22,7 +28,24 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-mono-loaded",
   display: "swap",
-  weight: ["400", "500"],
+  weight: ["400", "500", "600"],
+});
+
+// Redesign (Project RPM site refresh) — Stripe-style type pairing used by the
+// new funnel pages (_pr/ui.tsx): Hanken Grotesk body + Space Grotesk display.
+// Additive — existing Inter pages keep their --font-* vars untouched.
+const hankenGrotesk = Hanken_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-pr-body",
+  display: "swap",
+  weight: ["400", "500", "600", "700", "800"],
+});
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-pr-display",
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -71,7 +94,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${interTight.variable} ${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
+        className={`${interTight.variable} ${inter.variable} ${jetbrainsMono.variable} ${hankenGrotesk.variable} ${spaceGrotesk.variable} font-sans antialiased`}
       >
         <Providers>
           <AppShell>{children}</AppShell>

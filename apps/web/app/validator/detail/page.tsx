@@ -1,45 +1,35 @@
 "use client";
 
-import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Suspense, useState } from "react";
 import { scanApi } from "@/lib/api";
 import { checkTargetUrl } from "@/lib/url";
-import { Btn, C, Card, FM, Frame } from "../_components/ui";
+import { PR, FD, FB, FM, PrShell, PrButton } from "../../_pr/ui";
 import { PayWithUsdcButton } from "../_components/pay-with-usdc";
 import { USDC_PAY_ENABLED } from "@/lib/sui-pay";
 
-// Screen 2: Discovery detail — sharpening questions.
-// Maps to ScreenDiscoveryDetail in screens-v2.jsx.
+// Screen 2: Discovery detail — "Sharpen" (Prototype.dc.html). Audience chips +
+// hypothesis. Logic (cohort ids, hypothesis, startAnalysis) is unchanged from
+// the prior version; only the visual layer moved to the _pr theme.
 
 function DetailInner() {
   const params = useSearchParams();
   const router = useRouter();
   const url = params.get("url") || "yoursite.com";
 
-  // Each entry maps to a STANDARD_COHORTS id so the selection can
-  // restrict the analysis to a real subset (not just hint to the LLM).
-  // ghost rows have no cohort id — they're decorative ("+ Custom"
-  // belongs to the Mode B audience flow).
-  const TARGET_USERS: Array<{
-    t: string;
-    sel: boolean;
-    cohort?: string;
-    ghost?: boolean;
-  }> = [
-    { t: "DeFi power users (30s)", sel: true, cohort: "web3_pro" },
+  const TARGET_USERS: Array<{ t: string; sel: boolean; cohort: string }> = [
+    { t: "DeFi power users", sel: true, cohort: "web3_pro" },
     { t: "DeFi beginners", sel: true, cohort: "defi_beginner" },
-    { t: "Teen students", sel: false, cohort: "teen_newcomer" },
-    { t: "Seniors (50+)", sel: false, cohort: "senior" },
-    { t: "Designers", sel: false, cohort: "designer_20s" },
+    { t: "Crypto natives", sel: false, cohort: "crypto_native" },
     { t: "Mobile-first", sel: false, cohort: "mobile_power" },
-    { t: "Crypto Native", sel: false, cohort: "crypto_native" },
+    { t: "Designers", sel: false, cohort: "designer_20s" },
     { t: "Non-technical 30s", sel: false, cohort: "non_tech_30s" },
-    { t: "+ Custom", sel: false, ghost: true },
+    { t: "Seniors (50+)", sel: false, cohort: "senior" },
+    { t: "Teen students", sel: false, cohort: "teen_newcomer" },
   ];
 
   const [selected, setSelected] = useState<Record<string, boolean>>(
-    Object.fromEntries(TARGET_USERS.map((o) => [o.t, !!o.sel]))
+    Object.fromEntries(TARGET_USERS.map((o) => [o.t, !!o.sel])),
   );
   const [hypothesis, setHypothesis] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -48,30 +38,21 @@ function DetailInner() {
   >(null);
   const [error, setError] = useState<string | null>(null);
 
-  const toggle = (t: string) =>
-    setSelected((prev) => ({ ...prev, [t]: !prev[t] }));
+  const toggle = (t: string) => setSelected((prev) => ({ ...prev, [t]: !prev[t] }));
 
-  // Free-text hypothesis sent verbatim to the LLM persona prompt.
-  // (Cohort selection is sent separately as target_cohorts so the
-  // pipeline actually filters which 8 cohorts run, not just hints.)
   const buildHypothesisText = (): string | undefined => {
     const trimmed = hypothesis.trim();
     return trimmed ? trimmed : undefined;
   };
 
-  // List of selected cohort ids — empty array (or skip) means
-  // "run all 8 STANDARD_COHORTS".
-  const buildTargetCohorts = (): string[] => {
-    return Object.entries(selected)
+  const buildTargetCohorts = (): string[] =>
+    Object.entries(selected)
       .filter(([, on]) => on)
       .map(([t]) => TARGET_USERS.find((o) => o.t === t)?.cohort)
       .filter((c): c is string => typeof c === "string");
-  };
 
   const startAnalysis = async (skipInputs = false) => {
     if (submitting) return;
-    // Security gate (2026-06-15) — `url` arrives from the query string;
-    // validate before spending a scan. Server re-validates authoritatively.
     const check = checkTargetUrl(url);
     if (!check.ok) {
       setError(
@@ -85,318 +66,135 @@ function DetailInner() {
     setSubmitStage("creating");
     setError(null);
     try {
-      // Create the scan row (anonymous if not logged in). Scans are
-      // gated by the credit ledger server-side (debitScan) — no client
-      // payment step after the Sui migration removed the Solana tx.
       const cohorts = skipInputs ? [] : buildTargetCohorts();
       const { scanId } = await scanApi.createScan({
         target_url: check.normalized,
-        mode: 'A',
+        mode: "A",
         hypothesis: skipInputs ? undefined : buildHypothesisText(),
         target_cohorts: cohorts.length > 0 ? cohorts : undefined,
       });
-
       setSubmitStage("redirecting");
-      router.push(
-        `/validator/processing/${scanId}?url=${encodeURIComponent(url)}`
-      );
+      router.push(`/validator/processing/${scanId}?url=${encodeURIComponent(url)}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start analysis');
+      setError(err instanceof Error ? err.message : "Failed to start analysis");
       setSubmitting(false);
       setSubmitStage(null);
     }
   };
 
+  const urlShown = url.replace(/^https?:\/\//, "");
+
   return (
-    <Frame active="discovery">
-      <div style={{ padding: "clamp(20px, 5vw, 32px) clamp(16px, 4vw, 48px)", maxWidth: 780, margin: "0 auto" }}>
+    <PrShell step="2 / 4 · Sharpen">
+      <div className="pr-fade" style={{ maxWidth: 640, margin: "0 auto", padding: "48px 28px" }}>
         <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            marginBottom: 8,
-          }}
+          onClick={() => router.push("/")}
+          style={{ fontSize: 13, color: PR.faint, cursor: "pointer", marginBottom: 18 }}
         >
-          <Link
-            href="/validator"
-            style={{
-              fontSize: 12,
-              color: C.textFaint,
-              textDecoration: "none",
-            }}
-          >
-            ← Back
-          </Link>
-          <span style={{ fontSize: 12, color: C.textFaint }}>·</span>
-          <span style={{ fontSize: 12, color: C.textDim, fontFamily: FM }}>
-            https://{url}
-          </span>
+          ← Back
         </div>
-        <h1
-          style={{
-            fontSize: 30,
-            fontWeight: 600,
-            letterSpacing: "-0.02em",
-            margin: "8px 0 6px",
-          }}
-        >
-          A few questions to sharpen the analysis
+        <div style={{ fontFamily: FM, fontSize: 11, color: PR.accent, marginBottom: 8 }}>
+          ANALYZING {urlShown}
+        </div>
+        <h1 style={{ fontFamily: FD, fontSize: 28, margin: "0 0 6px", color: PR.ink }}>
+          Two quick questions{" "}
+          <span style={{ color: PR.faint, fontSize: 16, fontWeight: 400 }}>(optional)</span>
         </h1>
-        <p
-          style={{
-            fontSize: 13,
-            color: C.textDim,
-            marginBottom: 24,
-            lineHeight: 1.55,
-          }}
-        >
-          Optional — we&apos;ll fall back to auto-inferred values if you skip.
+        <p style={{ fontSize: 14, color: PR.dim, margin: "0 0 26px" }}>
+          Focus the panel — or skip and we&apos;ll check all 8 audiences.
         </p>
 
-        <Card style={{ marginBottom: 14 }} padding={20}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              gap: 10,
-              marginBottom: 10,
-            }}
-          >
-            <div
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 999,
-                background: C.text,
-                color: C.bg,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 11,
-                fontWeight: 600,
-                fontFamily: FM,
-                flexShrink: 0,
-              }}
-            >
-              1
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>
-                Who are your target users?
-              </div>
-              <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>
-                Multi-select — free text also welcome
-              </div>
-            </div>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 6,
-              marginBottom: 10,
-            }}
-          >
-            {TARGET_USERS.map((o) => {
-              const sel = selected[o.t];
-              return (
-                <button
-                  key={o.t}
-                  onClick={() => toggle(o.t)}
-                  style={{
-                    fontSize: 12,
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    background: sel
-                      ? C.accent
-                      : o.ghost
-                      ? "transparent"
-                      : "#f3f0e8",
-                    color: sel ? "#fff" : o.ghost ? C.textFaint : C.textDim,
-                    border: `1px ${o.ghost ? "dashed" : "solid"} ${
-                      sel ? C.accent : C.border
-                    }`,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {o.t}
-                </button>
-              );
-            })}
-          </div>
-        </Card>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 11, color: PR.ink }}>
+          Who do you think it&apos;s for?
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 26 }}>
+          {TARGET_USERS.map((o) => {
+            const sel = selected[o.t];
+            return (
+              <span
+                key={o.t}
+                className="pr-chip"
+                onClick={() => toggle(o.t)}
+                style={{
+                  fontSize: 12.5,
+                  padding: "8px 14px",
+                  borderRadius: 999,
+                  border: `1px solid ${sel ? PR.accent : PR.border}`,
+                  background: sel ? PR.accent : PR.panel,
+                  color: sel ? "#fff" : PR.dim,
+                  fontWeight: sel ? 600 : 400,
+                }}
+              >
+                {o.t}
+              </span>
+            );
+          })}
+        </div>
 
-        <Card style={{ marginBottom: 14 }} padding={20}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              gap: 10,
-              marginBottom: 10,
-            }}
-          >
-            <div
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 999,
-                background: C.text,
-                color: C.bg,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 11,
-                fontWeight: 600,
-                fontFamily: FM,
-                flexShrink: 0,
-              }}
-            >
-              2
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>
-                Category / one-line pitch
-              </div>
-              <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>
-                Auto-detected during scan from the captured page content
-              </div>
-            </div>
-          </div>
-          <div
-            style={{
-              padding: 12,
-              background: "#f7f4ec",
-              borderRadius: 6,
-              border: `1px solid ${C.border}`,
-              fontSize: 12,
-              color: C.textFaint,
-              lineHeight: 1.55,
-              fontStyle: "italic",
-            }}
-          >
-            We&apos;ll capture {url} on scan start and extract the category +
-            one-line pitch automatically. You&apos;ll see the result on the
-            report screen.
-          </div>
-        </Card>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 11, color: PR.ink }}>
+          What are you hoping to learn?
+        </div>
+        <textarea
+          value={hypothesis}
+          onChange={(e) => setHypothesis(e.target.value)}
+          maxLength={1000}
+          placeholder="e.g. Will first-timers understand how to make their first swap?"
+          style={{
+            width: "100%",
+            minHeight: 70,
+            background: PR.panel,
+            border: `1px solid ${PR.borderStrong}`,
+            borderRadius: 12,
+            padding: "13px 15px",
+            fontSize: 14,
+            fontFamily: FB,
+            color: PR.ink,
+            resize: "vertical",
+            outline: "none",
+            marginBottom: 26,
+            boxSizing: "border-box",
+          }}
+        />
 
-        <Card style={{ marginBottom: 20 }} padding={20}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              gap: 10,
-              marginBottom: 10,
-            }}
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <PrButton
+            onClick={() => startAnalysis(false)}
+            disabled={submitting}
+            style={{ flex: 1, minWidth: 200, padding: 14 }}
           >
-            <div
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 999,
-                background: C.text,
-                color: C.bg,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 11,
-                fontWeight: 600,
-                fontFamily: FM,
-                flexShrink: 0,
+            {submitting ? stageLabel(submitStage) : "Start the scan →"}
+          </PrButton>
+          <PrButton variant="ghost" onClick={() => startAnalysis(true)} disabled={submitting}>
+            Skip — check all 8
+          </PrButton>
+          {USDC_PAY_ENABLED && (
+            <PayWithUsdcButton
+              scanBody={{
+                target_url: url,
+                mode: "A",
+                hypothesis: buildHypothesisText(),
+                target_cohorts: buildTargetCohorts().length ? buildTargetCohorts() : undefined,
               }}
-            >
-              3
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>
-                Any specific hypothesis you want to validate?
-              </div>
-              <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>
-                Optional — used as a priority probe in persona responses
-              </div>
-            </div>
-          </div>
-          <textarea
-            value={hypothesis}
-            onChange={(e) => setHypothesis(e.target.value)}
-            placeholder='e.g. "Suspect drop-off at checkout" · "Verify usability for teen students" · "Is wallet onboarding friendly enough?"'
-            rows={3}
-            maxLength={1000}
-            style={{
-              width: "100%",
-              padding: 12,
-              background: "#f7f4ec",
-              borderRadius: 6,
-              border: `1px solid ${C.border}`,
-              fontSize: 13,
-              color: C.text,
-              lineHeight: 1.55,
-              fontFamily: "inherit",
-              resize: "vertical",
-              outline: "none",
-              boxSizing: "border-box",
-            }}
-          />
-          <div
-            style={{
-              marginTop: 6,
-              fontSize: 11,
-              color: C.textFaint,
-              fontFamily: FM,
-              textAlign: "right",
-            }}
-          >
-            {hypothesis.length} / 1000
-          </div>
-        </Card>
-
+              onPaid={(scanId) =>
+                router.push(`/validator/processing/${scanId}?url=${encodeURIComponent(url)}`)
+              }
+              disabled={submitting || !url}
+            />
+          )}
+        </div>
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
+            fontFamily: FM,
+            fontSize: 11,
+            color: error ? PR.redInk : PR.faint,
+            marginTop: 14,
+            textAlign: "center",
           }}
         >
-          <div style={{ fontSize: 12, color: C.textFaint, fontFamily: FM }}>
-            {error ? (
-              <span style={{ color: C.bad }}>{error}</span>
-            ) : submitting ? (
-              "Creating scan…"
-            ) : (
-              "~$1.80 · ~6 min · 113 personas across 8 cohorts"
-            )}
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <Btn onClick={() => startAnalysis(true)}>
-              {submitting ? "Skip…" : "Skip"}
-            </Btn>
-            <Btn primary onClick={() => startAnalysis(false)}>
-              {submitting ? stageLabel(submitStage) : "Start analysis →"}
-            </Btn>
-            {/* On-chain alternative: pay per scan with USDC escrow on Sui
-                (chain wiring §4.3). Gated OFF until the Privy raw-sign path is
-                live-verified in-browser — we never show a non-working payment
-                button. Flip NEXT_PUBLIC_USDC_ENABLED=1 to surface it. */}
-            {USDC_PAY_ENABLED && (
-              <PayWithUsdcButton
-                scanBody={{
-                  target_url: url,
-                  mode: "A",
-                  hypothesis: buildHypothesisText(),
-                  target_cohorts: buildTargetCohorts().length ? buildTargetCohorts() : undefined,
-                }}
-                onPaid={(scanId) =>
-                  router.push(`/validator/processing/${scanId}?url=${encodeURIComponent(url)}`)
-                }
-                disabled={submitting || !url}
-              />
-            )}
-          </div>
+          {error ? error : "~6 MIN · USES 1 CREDIT ($2)"}
         </div>
       </div>
-    </Frame>
+    </PrShell>
   );
 }
 
@@ -404,12 +202,8 @@ function stageLabel(stage: string | null): string {
   switch (stage) {
     case "creating":
       return "Creating scan…";
-    case "signing":
-      return "Sign in your wallet…";
-    case "broadcasting":
-      return "Broadcasting tx…";
     case "redirecting":
-      return "Loading processing…";
+      return "Loading…";
     default:
       return "Starting…";
   }
@@ -417,9 +211,8 @@ function stageLabel(stage: string | null): string {
 
 export default function ValidatorDiscoveryDetailPage() {
   return (
-    <Suspense fallback={<Frame active="discovery">{null}</Frame>}>
+    <Suspense fallback={<PrShell>{null}</PrShell>}>
       <DetailInner />
     </Suspense>
   );
 }
-
