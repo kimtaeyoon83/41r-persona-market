@@ -502,7 +502,7 @@ a.e-card:hover,
   width: 232px;
   flex-shrink: 0;
   background: #ffffff;
-  border-right: 1px solid #e4e6e8;
+  border-right: 1px solid #e7ecf3;
   position: sticky;
   top: 57px;
   height: calc(100vh - 57px);
@@ -536,18 +536,18 @@ a.e-card:hover,
   text-overflow: ellipsis;
 }
 .cs-item:hover {
-  background: #f3f4f4;
-  color: #15171b;
+  background: #f6f9fc;
+  color: #0a2540;
 }
 .cs-item.active {
-  background: #f3f4f4;
-  color: #15171b;
+  background: #f6f9fc;
+  color: #0a2540;
   font-weight: 600;
-  border-left-color: #e04e14;
+  border-left-color: #635bff;
 }
 .cs-sub {
   margin-left: 14px;
-  border-left: 1px solid #e4e6e8;
+  border-left: 1px solid #e7ecf3;
   padding-left: 6px;
   display: flex;
   flex-direction: column;
@@ -557,14 +557,14 @@ a.e-card:hover,
   font-size: 10px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #969ca6;
+  color: #8693a6;
   padding: 14px 10px 6px;
   font-family: var(--font-mono-loaded), "JetBrains Mono", monospace;
 }
 .cs-foot {
   margin-top: auto;
   padding-top: 14px;
-  border-top: 1px solid #e4e6e8;
+  border-top: 1px solid #e7ecf3;
 }
 @media (max-width: 768px) {
   .cs-layout {
@@ -578,7 +578,7 @@ a.e-card:hover,
     align-items: center;
     overflow-x: auto;
     border-right: none;
-    border-bottom: 1px solid #e4e6e8;
+    border-bottom: 1px solid #e7ecf3;
     padding: 8px 12px;
     gap: 6px;
   }
@@ -600,6 +600,6 @@ a.e-card:hover,
   }
   .cs-item.active {
     border-left-color: transparent;
-    border-bottom-color: #e04e14;
+    border-bottom-color: #635bff;
   }
 }

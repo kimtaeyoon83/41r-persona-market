@@ -189,7 +189,7 @@ export default function ValidatorCalibrationPage() {
             <div
               style={{
                 padding: 12,
-                background: "#f3f0e8",
+                background: "#eef3f9",
                 border: `1px solid ${C.border}`,
                 borderRadius: 8,
               }}
@@ -329,7 +329,7 @@ export default function ValidatorCalibrationPage() {
                   <Bar
                     value={r === null ? 0 : Math.abs(r) * 100}
                     color={color}
-                    bg="#f3f0e8"
+                    bg="#eef3f9"
                     height={6}
                   />
                   <span

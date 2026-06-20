@@ -144,7 +144,7 @@ function NewSiteInner() {
               style={{
                 padding: 16,
                 background: C.warnSoft,
-                border: "1px solid #ecdcb4",
+                border: "1px solid #dbe3ee",
                 borderRadius: 14,
                 marginTop: 16,
                 marginBottom: 14,

@@ -7,7 +7,6 @@ import { API_BASE, scanApi, type ScanFriction, type ScanReport } from "@/lib/api
 import { useI18n } from "@/lib/i18n";
 import {
   Bar,
-  PMFGauge,
   PersonaBoard,
   Pill,
   RetentionCurve,
@@ -883,7 +882,7 @@ export default function ValidatorReportPage() {
                     style={{
                       margin: "0 0 10px",
                       padding: 10,
-                      background: "#f3f0e8",
+                      background: "#eef3f9",
                       borderRadius: 6,
                       fontSize: 11.5,
                       lineHeight: 1.6,
@@ -907,7 +906,7 @@ export default function ValidatorReportPage() {
                     style={{
                       margin: "0 0 10px",
                       padding: 10,
-                      background: "#f3f0e8",
+                      background: "#eef3f9",
                       borderRadius: 6,
                       fontSize: 11.5,
                       lineHeight: 1.6,
@@ -951,7 +950,7 @@ export default function ValidatorReportPage() {
           <div
             style={{
               background: C.warnSoft,
-              border: "1px solid #ecdcb4",
+              border: "1px solid #dbe3ee",
               borderRadius: 12,
               padding: 16,
               marginBottom: 24,
@@ -981,17 +980,18 @@ export default function ValidatorReportPage() {
         {result && r.scan.mode === "A" && <div
           className="v-stack-sm"
           style={{
-            background: C.warnSoft,
-            border: "1px solid #ecdcb4",
-            borderRadius: 12,
-            padding: 20,
-            alignItems: "center",
+            background: C.panel,
+            border: `1px solid ${C.border}`,
+            borderRadius: 16,
+            padding: 22,
             gap: 24,
             marginBottom: 24,
           }}
         >
-          <PMFGauge value={Math.round(effectiveResult!.audience_fit_score)} />
           <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: FM, fontSize: 11, color: C.textFaint, letterSpacing: "0.08em", marginBottom: 14 }}>
+              SCORE BREAKDOWN
+            </div>
             <div
               style={{
                 display: "inline-flex",
@@ -1107,7 +1107,7 @@ export default function ValidatorReportPage() {
                         <Bar
                           value={row.c * 100}
                           color={row.c >= 0.7 ? C.ok : row.c >= 0.4 ? C.warn : C.bad}
-                          bg="#f3f0e8"
+                          bg="#eef3f9"
                           height={3}
                         />
                         <span style={{ fontFamily: FM, color: C.textFaint, fontSize: 10 }}>
@@ -1149,7 +1149,7 @@ export default function ValidatorReportPage() {
                   style={{
                     margin: "0 0 10px",
                     padding: 10,
-                    background: "#f3f0e8",
+                    background: "#eef3f9",
                     borderRadius: 6,
                     fontSize: 11.5,
                     lineHeight: 1.7,
@@ -1172,7 +1172,7 @@ extended  90   ← >15min deep         (~3%)`}
                   style={{
                     margin: "0 0 10px",
                     padding: 10,
-                    background: "#f3f0e8",
+                    background: "#eef3f9",
                     borderRadius: 6,
                     fontSize: 11.5,
                     lineHeight: 1.7,
@@ -1274,7 +1274,7 @@ strong      85   70   55   30`}
                       {m.suffix || ""}
                     </span>
                   </div>
-                  {!m.suffix && <Bar value={m.v} color={tone} bg="#f3f0e8" height={4} />}
+                  {!m.suffix && <Bar value={m.v} color={tone} bg="#eef3f9" height={4} />}
                 </div>
               );
             })}
@@ -1405,7 +1405,7 @@ strong      85   70   55   30`}
                 <div
                   style={{
                     padding: "8px 12px",
-                    background: "#f7f4ec",
+                    background: "#f0f4f9",
                     borderLeft: `2px solid ${C.accent}`,
                     fontSize: 12,
                     fontStyle: "italic",
@@ -1495,7 +1495,7 @@ strong      85   70   55   30`}
                     <thead>
                       <tr
                         style={{
-                          background: "#f7f4ec",
+                          background: "#f0f4f9",
                           textAlign: "left",
                           color: C.textDim,
                           fontFamily: FM,
@@ -1788,7 +1788,7 @@ strong      85   70   55   30`}
           style={{
             marginTop: 8,
             padding: "14px 18px",
-            background: "#f3f0e8",
+            background: "#eef3f9",
             borderRadius: 8,
             display: "flex",
             alignItems: "center",
@@ -1918,7 +1918,7 @@ function AarrrFunnelBlock({
                 style={{
                   margin: "0 0 10px",
                   padding: 10,
-                  background: "#f3f0e8",
+                  background: "#eef3f9",
                   borderRadius: 6,
                   fontSize: 11.5,
                   lineHeight: 1.7,
@@ -2032,7 +2032,7 @@ Revenue      + adoption ≥ 30`}
                     flex: 1,
                     position: "relative",
                     height: 28,
-                    background: "#f3f0e8",
+                    background: "#eef3f9",
                     borderRadius: 6,
                     overflow: "hidden",
                   }}
@@ -2167,7 +2167,7 @@ const VERDICT_CONFIG: Record<
     label: "CONDITIONAL",
     color: C.warn,
     soft: C.warnSoft,
-    border: "#ecdcb4",
+    border: "#dbe3ee",
   },
   fail: {
     label: "FAIL",
@@ -2253,7 +2253,7 @@ function ModeBVerdictBlock({
                 style={{
                   margin: "0 0 10px",
                   padding: 10,
-                  background: "#f3f0e8",
+                  background: "#eef3f9",
                   borderRadius: 6,
                   fontSize: 11.5,
                   lineHeight: 1.7,
@@ -2281,7 +2281,7 @@ function ModeBVerdictBlock({
       <div
         style={{
           background: cfg?.soft ?? C.warnSoft,
-          border: `1px solid ${cfg?.border ?? "#ecdcb4"}`,
+          border: `1px solid ${cfg?.border ?? "#dbe3ee"}`,
           borderRadius: 12,
           padding: 24,
           marginBottom: 24,
@@ -2526,7 +2526,7 @@ function ShareWithAi({ scanId }: { scanId: string }) {
                     flex: 1,
                     minWidth: 0,
                     padding: "10px 12px",
-                    background: "#f3f0e8",
+                    background: "#eef3f9",
                     borderRadius: 8,
                     fontSize: 11.5,
                     fontFamily: FM,
@@ -2576,7 +2576,7 @@ function ShareWithAi({ scanId }: { scanId: string }) {
                 style={{
                   margin: 0,
                   padding: "12px",
-                  background: "#f3f0e8",
+                  background: "#eef3f9",
                   borderRadius: 8,
                   fontSize: 11.5,
                   fontFamily: FM,

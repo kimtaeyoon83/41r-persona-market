@@ -12,46 +12,47 @@ import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 
 // ─── Theme constants ──────────────────────────────────────────────
-// 2026-06-12 full redesign — "Swiss instrument": cool gallery gray,
-// ink-black type, ONE signal-orange accent, squared tags, ruled
-// hairlines, oversized numerals. The look says "measuring device",
-// which is exactly the product's honesty contract (§0.4 — we publish
-// what we measure and how wrong we are). Hover/elevation lives in
-// globals.css (.e-card / .e-cta) since inline styles can't :hover.
+// 2026-06-20 site redesign (Claude Design handoff) — Stripe-style indigo
+// on a cool blue-grey field. The same token KEYS as before (so every
+// validator page that reads C.* reskins in one place), but the VALUES
+// now match _pr/ui.tsx so the funnel + report + all validator surfaces
+// share one visual language. Hover/elevation lives in globals.css.
 export const C = {
-  bg: "#f3f4f4",
+  bg: "#f6f9fc",
   panel: "#ffffff",
-  border: "#e4e6e8",
-  borderStrong: "#c9cdd2",
-  text: "#15171b",
-  textDim: "#5c616b",
-  textFaint: "#969ca6",
-  accent: "#e04e14",
-  accentSoft: "#fdeade",
-  ok: "#1e7d4e",
-  okSoft: "#e2f1e9",
-  warn: "#a16a07",
-  warnSoft: "#faf0d3",
-  bad: "#c03325",
-  badSoft: "#fae3df",
-  exp: "#5b51d8",
-  expSoft: "#eceafb",
+  border: "#e7ecf3",
+  borderStrong: "#dbe3ee",
+  text: "#0a2540",
+  textDim: "#48566a",
+  textFaint: "#8693a6",
+  accent: "#635bff",
+  accentSoft: "#ecebff",
+  ok: "#1a9d54",
+  okSoft: "#e3f4ea",
+  warn: "#8a5a12",
+  warnSoft: "#f6ead0",
+  bad: "#c0432a",
+  badSoft: "#fbe4de",
+  exp: "#635bff",
+  expSoft: "#ecebff",
 } as const;
 
 export const FS =
-  'var(--font-sans-loaded), "Inter", "Pretendard", -apple-system, BlinkMacSystemFont, sans-serif';
+  'var(--font-pr-body), "Hanken Grotesk", var(--font-sans-loaded), "Inter", -apple-system, BlinkMacSystemFont, sans-serif';
+export const FD =
+  'var(--font-pr-display), "Space Grotesk", var(--font-sans-loaded), system-ui, sans-serif';
 export const FM =
   'var(--font-mono-loaded), "JetBrains Mono", "SF Mono", Menlo, monospace';
 
 export type Tone = "neutral" | "accent" | "ok" | "warn" | "bad" | "exp";
 
 const PILL_TONES: Record<Tone, { bg: string; fg: string; bd: string }> = {
-  neutral: { bg: "#eef0f2", fg: C.textDim, bd: C.border },
-  accent: { bg: C.accentSoft, fg: C.accent, bd: "#f5cdb6" },
+  neutral: { bg: "#f0f4f9", fg: C.textDim, bd: C.border },
+  accent: { bg: C.accentSoft, fg: C.accent, bd: "#d4d0fb" },
   ok: { bg: C.okSoft, fg: C.ok, bd: "#c4e0d0" },
   warn: { bg: C.warnSoft, fg: C.warn, bd: "#ecdcab" },
-  bad: { bg: C.badSoft, fg: C.bad, bd: "#f0c4bc" },
-  exp: { bg: C.expSoft, fg: C.exp, bd: "#d4cef4" },
+  bad: { bg: C.badSoft, fg: C.bad, bd: "#f3cabf" },
+  exp: { bg: C.expSoft, fg: C.exp, bd: "#d4d0fb" },
 };
 
 // Squared "instrument tag" — the redesign drops the pill silhouette;
@@ -95,7 +96,7 @@ export function Bar({
   max = 100,
   color = C.accent,
   height = 6,
-  bg = "#e8eaec",
+  bg = "#e7ecf3",
 }: {
   value: number;
   max?: number;
@@ -169,10 +170,10 @@ export function Btn({
     background: primary ? C.accent : C.panel,
     color: primary ? "#fff" : C.text,
     border: primary ? "none" : `1px solid ${C.border}`,
-    borderRadius: 7,
+    borderRadius: 10,
     padding: "8px 14px",
     fontSize: 13,
-    fontWeight: 500,
+    fontWeight: 600,
     cursor: "pointer",
     fontFamily: FS,
     textDecoration: "none",

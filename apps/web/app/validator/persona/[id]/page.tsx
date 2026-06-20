@@ -197,7 +197,7 @@ function PersonaInner() {
                 width: "100%",
                 aspectRatio: "1",
                 borderRadius: 10,
-                background: "linear-gradient(135deg,#f3e2d4,#e6d4c0)",
+                background: "linear-gradient(135deg,#e8edf5,#dbe3ee)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -252,7 +252,7 @@ function PersonaInner() {
                     <Bar
                       value={a.v * 100}
                       color={C.accent}
-                      bg="#f3f0e8"
+                      bg="#eef3f9"
                       height={3}
                     />
                   </div>
@@ -265,7 +265,7 @@ function PersonaInner() {
                 style={{
                   marginTop: 14,
                   padding: 10,
-                  background: "#f7f4ec",
+                  background: "#f0f4f9",
                   borderRadius: 6,
                   fontSize: 11,
                   color: C.textDim,
@@ -341,15 +341,15 @@ function PersonaInner() {
                       ? C.warnSoft
                       : stepTone === "bad"
                       ? C.badSoft
-                      : "#f3f0e8";
+                      : "#eef3f9";
                   const bd =
                     stepTone === "ok"
                       ? "#cfe3d6"
                       : stepTone === "warn"
-                      ? "#ecdcb4"
+                      ? "#dbe3ee"
                       : stepTone === "bad"
                       ? "#eccac4"
-                      : "#e6e2d6";
+                      : "#e7ecf3";
                   return (
                     <div key={s.label} style={{ display: "flex", alignItems: "center" }}>
                       <div
@@ -435,7 +435,7 @@ function PersonaInner() {
                 <div
                   style={{
                     padding: 10,
-                    background: "#f7f4ec",
+                    background: "#f0f4f9",
                     borderLeft: `2px solid ${C.accent}`,
                     fontSize: 12,
                     fontStyle: "italic",
@@ -557,7 +557,7 @@ function PersonaInner() {
               <PersonaProofPanel scanId={scan.id} personaId={persona.id} />
             )}
 
-            <Card padding={14} style={{ background: "#fbf8f0", borderColor: "#ecdcb4" }}>
+            <Card padding={14} style={{ background: "#f0f4f9", borderColor: "#dbe3ee" }}>
               <div
                 style={{
                   fontSize: 11,

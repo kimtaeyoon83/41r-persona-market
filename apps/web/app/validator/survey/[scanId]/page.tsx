@@ -255,7 +255,7 @@ export default function SurveyPage() {
               padding: 14,
               marginBottom: 20,
               background: C.warnSoft,
-              border: `1px solid #ecdcb4`,
+              border: `1px solid #dbe3ee`,
               borderRadius: 8,
               fontSize: 13,
               color: C.warn,
