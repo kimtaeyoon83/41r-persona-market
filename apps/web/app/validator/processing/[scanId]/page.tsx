@@ -63,7 +63,11 @@ function ProcessingInner() {
           router.replace(`/validator/report/${scanId}`);
           return;
         }
-        if (r.scan.status !== "failed") {
+        // Terminal-for-polling states: 'failed' and 'pending_payment' will
+        // never advance on their own (the latter awaits an off-chain payment
+        // step that the worker doesn't drive), so stop polling instead of
+        // spinning forever. The render handles each with its own panel.
+        if (r.scan.status !== "failed" && r.scan.status !== "pending_payment") {
           timer = setTimeout(fetchOnce, 800);
         }
       } catch (e) {
@@ -103,6 +107,44 @@ function ProcessingInner() {
   }
 
   const { scan, recent_responses, cohort_progress } = report;
+
+  // Awaiting an (off-chain) USDC payment that was never completed — the worker
+  // doesn't run until the escrow is funded, so this scan will never progress
+  // here. Show a clear state + a way out instead of an endless spinner.
+  if (scan.status === "pending_payment") {
+    return (
+      <Frame active="discovery">
+        <div style={{ padding: 32, maxWidth: 520 }}>
+          <Pill tone="warn">Awaiting payment</Pill>
+          <div style={{ marginTop: 12, fontSize: 15, fontWeight: 600 }}>
+            This analysis is waiting for payment
+          </div>
+          <div style={{ marginTop: 8, fontSize: 13, color: C.textDim, lineHeight: 1.6 }}>
+            It was started on the USDC escrow rail but the payment was never
+            completed, so it hasn’t run. Start a new analysis — your credit
+            balance covers it instantly, no on-chain step.
+          </div>
+          <a
+            href="/"
+            style={{
+              display: "inline-block",
+              marginTop: 16,
+              padding: "9px 16px",
+              borderRadius: 8,
+              background: C.accent,
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 600,
+              textDecoration: "none",
+            }}
+          >
+            Start a new analysis →
+          </a>
+        </div>
+      </Frame>
+    );
+  }
+
   const done = scan.personas_completed;
   // 113 ≈ Mode A target (8 cohorts × 14 + 1). Mode B uses whatever
   // the worker decides — fall back to attempted or done so the dot

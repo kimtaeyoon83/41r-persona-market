@@ -106,6 +106,7 @@ export type ScanReport = {
     one_line_pitch: string | null;
     mode: 'A' | 'B';
     status:
+      | 'pending_payment'
       | 'pending'
       | 'capturing'
       | 'sampling'
