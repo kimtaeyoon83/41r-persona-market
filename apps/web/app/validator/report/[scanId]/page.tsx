@@ -3,16 +3,10 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { API_BASE, scanApi, type ScanReport } from "@/lib/api";
+import { API_BASE, scanApi, type ScanFriction, type ScanReport } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import {
   Bar,
-  Btn,
-  C,
-  Card,
-  FM,
-  FS,
-  Frame,
   PMFGauge,
   PersonaBoard,
   Pill,
@@ -20,6 +14,16 @@ import {
   SectionLabel,
 } from "../../_components/ui";
 import { ReportProofPanel } from "../../_components/proof-panel";
+import {
+  FB,
+  FD,
+  FM,
+  PR,
+  PrButton,
+  PrCard,
+  PrShell,
+  scoreTone,
+} from "../../../_pr/ui";
 
 // Screen 4: Survival Summary report. Maps to ScreenReport in
 // screens-v2.jsx, hydrated from GET /api/scan/:id/report.
@@ -29,6 +33,33 @@ import { ReportProofPanel } from "../../_components/proof-panel";
 //   - id=<uuid>  → API returns scan record. Pending scans show an
 //                  "in progress" placeholder. Completed scans render
 //                  with real data once Phase 1B ships the LLM pipeline.
+//
+// 2026-06-20 visual re-skin to the Stripe-style _pr theme. To recolor the
+// whole page (incl. the kept ../../_components/ui sub-component containers)
+// without rewriting hundreds of inline-style call sites, `C` is now a local
+// alias mapping the old warm-light palette keys onto the nearest PR.* token,
+// and `FS` aliases the PR body font. Logic/data/sub-components are unchanged.
+
+const C = {
+  bg: PR.bg,
+  panel: PR.panel,
+  border: PR.border,
+  borderStrong: PR.borderStrong,
+  text: PR.ink,
+  textDim: PR.dim,
+  textFaint: PR.faint,
+  accent: PR.accent,
+  accentSoft: PR.accentSoft,
+  ok: PR.green,
+  okSoft: PR.greenSoft,
+  warn: PR.amber,
+  warnSoft: PR.amberSoft,
+  bad: PR.redInk,
+  badSoft: "#fbe7e2",
+  exp: PR.accent,
+  expSoft: PR.accentSoft,
+} as const;
+const FS = FB;
 
 const TONE_COLOR: Record<string, string> = {
   ok: C.ok,
@@ -36,6 +67,483 @@ const TONE_COLOR: Record<string, string> = {
   warn: C.warn,
   faint: C.textFaint,
 };
+
+// ─── Local PR-themed shims ─────────────────────────────────────────
+// Keep the old `Card` / `Btn` / `Frame` call-site APIs intact (props,
+// children) but render them in the new _pr theme. This re-skins every
+// container/button on the page — including the kept shared sub-component
+// wrappers — without rewriting hundreds of inline-style call sites.
+
+function Card({
+  children,
+  style,
+  padding = 20,
+}: {
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+  padding?: number;
+}) {
+  return (
+    <PrCard pad={padding} style={style}>
+      {children}
+    </PrCard>
+  );
+}
+
+function Btn({
+  children,
+  primary,
+  onClick,
+  style,
+  href,
+}: {
+  children: React.ReactNode;
+  primary?: boolean;
+  onClick?: () => void;
+  style?: React.CSSProperties;
+  href?: string;
+}) {
+  const compact: React.CSSProperties = {
+    fontSize: 13,
+    padding: "9px 16px",
+    borderRadius: 10,
+    ...style,
+  };
+  if (href) {
+    return (
+      <Link href={href} style={{ textDecoration: "none" }}>
+        <PrButton variant={primary ? "primary" : "outline"} style={compact}>
+          {children}
+        </PrButton>
+      </Link>
+    );
+  }
+  return (
+    <PrButton
+      variant={primary ? "primary" : "outline"}
+      onClick={onClick}
+      style={compact}
+    >
+      {children}
+    </PrButton>
+  );
+}
+
+/** PR-themed replacement for the old warm-light `<Frame>` wrapper.
+ *  Renders the sticky PrShell topbar with the funnel-step label +
+ *  optional right-side actions, then centers the report body. */
+function Frame({
+  children,
+  right,
+}: {
+  children: React.ReactNode;
+  /** Ignored — kept so existing `<Frame active="report">` call sites
+   *  keep compiling, mirroring the old shared Frame. */
+  active?: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <PrShell step="4 / 4 · Report" right={right}>
+      <div style={{ maxWidth: 1080, margin: "0 auto", width: "100%" }}>
+        {children}
+      </div>
+    </PrShell>
+  );
+}
+
+// ─── THE ANSWER hero ───────────────────────────────────────────────
+// Circular SVG score gauge — ~100px, arc color from scoreTone(). Renders
+// the headline audience_fit_score in Space Grotesk (FD). Pure SVG, no
+// extra deps.
+function ScoreGauge({ value }: { value: number }) {
+  const size = 104;
+  const stroke = 9;
+  const r = (size - stroke) / 2;
+  const cx = size / 2;
+  const cy = size / 2;
+  const circ = 2 * Math.PI * r;
+  const pct = Math.min(100, Math.max(0, value));
+  const tone = scoreTone(value);
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      style={{ display: "block", flexShrink: 0 }}
+      aria-label={`Audience-fit score ${Math.round(value)} of 100`}
+    >
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={PR.panelAlt} strokeWidth={stroke} />
+      <circle
+        cx={cx}
+        cy={cy}
+        r={r}
+        fill="none"
+        stroke={tone}
+        strokeWidth={stroke}
+        strokeLinecap="round"
+        strokeDasharray={circ}
+        strokeDashoffset={circ * (1 - pct / 100)}
+        transform={`rotate(-90 ${cx} ${cy})`}
+        style={{ transition: "stroke-dashoffset .7s ease" }}
+      />
+      <text
+        x={cx}
+        y={cy + 1}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontFamily={FD}
+        fontSize={30}
+        fontWeight={700}
+        fill={PR.ink}
+        style={{ letterSpacing: "-0.03em" }}
+      >
+        {Math.round(value)}
+      </text>
+      <text
+        x={cx}
+        y={cy + 20}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontFamily={FM}
+        fontSize={9}
+        fill={PR.faint}
+        style={{ letterSpacing: "0.12em" }}
+      >
+        / 100
+      </text>
+    </svg>
+  );
+}
+
+type HeroCohort = { cohort_label: string; cohort_fit_score: number };
+
+function AnswerHero({
+  score,
+  mode,
+  modeBVerdict,
+  best,
+  worst,
+  medianScore,
+  personasCompleted,
+  frictions,
+  anchored,
+}: {
+  score: number;
+  mode: "A" | "B";
+  modeBVerdict: "pass" | "conditional" | "fail" | null;
+  best: HeroCohort;
+  worst: HeroCohort;
+  medianScore: number;
+  personasCompleted: number;
+  frictions: ScanFriction[];
+  anchored: boolean;
+}) {
+  // Verdict band by score: >=60 strong (green), 40-60 mixed (amber), <40 weak (red).
+  const band =
+    score >= 60
+      ? { label: "Strong fit", fg: PR.green, bg: PR.greenSoft }
+      : score >= 40
+        ? { label: "Mixed fit", fg: PR.amberInk, bg: PR.amberSoft }
+        : { label: "Weak fit", fg: PR.redInk, bg: "#fbe7e2" };
+
+  // Plain-language verdict, reusing the report's existing best/worst/median data.
+  const verdictSentence =
+    mode === "B"
+      ? `This product is a ${band.label.toLowerCase()} for the named audience — the single audience bucket scores ${Math.round(
+          score,
+        )} / 100${modeBVerdict ? ` (${modeBVerdict})` : ""}.`
+      : `Best-fit audience “${best.cohort_label}” scores ${Math.round(
+          best.cohort_fit_score,
+        )}, the weakest “${worst.cohort_label}” sits at ${Math.round(
+          worst.cohort_fit_score,
+        )}, and the median across cohorts is ${Math.round(medianScore)}.`;
+
+  // "What to do next" — reuse the actionable friction clusters the report
+  // already computes (excludes the long-tail / "Various" bucket, same rule
+  // as the Improvement priority table below).
+  const nextSteps = frictions
+    .filter(
+      (f) =>
+        !f.title.toLowerCase().includes("long-tail") && f.where !== "Various",
+    )
+    .slice(0, 3);
+
+  // Audiences ranked — the existing best / median / worst data as bars.
+  const rankedRows: { label: string; score: number; tag: string }[] =
+    mode === "A"
+      ? [
+          { label: best.cohort_label, score: best.cohort_fit_score, tag: "BEST" },
+          { label: "Median across cohorts", score: medianScore, tag: "MEDIAN" },
+          { label: worst.cohort_label, score: worst.cohort_fit_score, tag: "WORST" },
+        ]
+      : [];
+
+  return (
+    <PrCard
+      pad={24}
+      shadow
+      style={{ borderRadius: 18, marginBottom: 22 }}
+    >
+      <div
+        style={{
+          fontFamily: FM,
+          fontSize: 11,
+          letterSpacing: "0.14em",
+          color: PR.faint,
+          marginBottom: 16,
+        }}
+      >
+        THE ANSWER
+      </div>
+      <div
+        style={{
+          display: "flex",
+          gap: 22,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
+        <ScoreGauge value={score} />
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 12px",
+              borderRadius: 999,
+              fontFamily: FM,
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              color: band.fg,
+              background: band.bg,
+              marginBottom: 10,
+            }}
+          >
+            {band.label}
+          </span>
+          <div
+            style={{
+              fontFamily: FB,
+              fontSize: 16,
+              lineHeight: 1.55,
+              color: PR.ink,
+            }}
+          >
+            {verdictSentence}
+          </div>
+          <div
+            style={{
+              marginTop: 6,
+              fontFamily: FM,
+              fontSize: 11,
+              color: PR.faint,
+            }}
+          >
+            {personasCompleted} personas analyzed
+          </div>
+        </div>
+      </div>
+
+      {nextSteps.length > 0 && (
+        <div
+          style={{
+            marginTop: 20,
+            background: PR.panelAlt,
+            border: `1px solid ${PR.border}`,
+            borderRadius: 14,
+            padding: 18,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: FM,
+              fontSize: 11,
+              letterSpacing: "0.12em",
+              color: PR.dim,
+              marginBottom: 12,
+            }}
+          >
+            WHAT TO DO NEXT
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {nextSteps.map((f, i) => (
+              <div
+                key={f.rank}
+                style={{ display: "flex", gap: 12, alignItems: "flex-start" }}
+              >
+                <div
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 7,
+                    flexShrink: 0,
+                    background: PR.accentSoft,
+                    color: PR.accent,
+                    fontFamily: FM,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {i + 1}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontFamily: FB,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: PR.ink,
+                    }}
+                  >
+                    {f.title}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: FB,
+                      fontSize: 12.5,
+                      color: PR.dim,
+                      lineHeight: 1.5,
+                      marginTop: 2,
+                    }}
+                  >
+                    {f.detail}
+                  </div>
+                </div>
+                <span
+                  style={{
+                    flexShrink: 0,
+                    fontFamily: FM,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: PR.accent,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {f.impact}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {rankedRows.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <div
+            style={{
+              fontFamily: FM,
+              fontSize: 11,
+              letterSpacing: "0.12em",
+              color: PR.dim,
+              marginBottom: 12,
+            }}
+          >
+            AUDIENCES RANKED
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {rankedRows.map((row) => {
+              const tone = scoreTone(row.score);
+              const w = Math.max(2, Math.min(100, row.score));
+              return (
+                <div
+                  key={row.tag}
+                  style={{ display: "flex", alignItems: "center", gap: 12 }}
+                >
+                  <div
+                    style={{
+                      width: 150,
+                      minWidth: 150,
+                      fontFamily: FB,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: PR.ink,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={row.label}
+                  >
+                    <span
+                      style={{
+                        fontFamily: FM,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: PR.faint,
+                        letterSpacing: "0.08em",
+                        marginRight: 6,
+                      }}
+                    >
+                      {row.tag}
+                    </span>
+                    {row.label}
+                  </div>
+                  <div
+                    style={{
+                      flex: 1,
+                      height: 12,
+                      borderRadius: 999,
+                      background: PR.panelAlt,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${w}%`,
+                        height: "100%",
+                        background: tone,
+                        borderRadius: 999,
+                        transition: "width .6s",
+                      }}
+                    />
+                  </div>
+                  <div
+                    style={{
+                      width: 40,
+                      textAlign: "right",
+                      fontFamily: FM,
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: tone,
+                    }}
+                  >
+                    {Math.round(row.score)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {anchored && (
+        <div
+          style={{
+            marginTop: 18,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "5px 12px",
+            borderRadius: 999,
+            background: PR.greenSoft,
+            color: PR.green,
+            fontFamily: FM,
+            fontSize: 10.5,
+            fontWeight: 700,
+            letterSpacing: "0.08em",
+          }}
+          title="Report snapshot sealed on Walrus — see the proof strip below."
+        >
+          ✓ VERIFIED ON SUI · WALRUS
+        </div>
+      )}
+    </PrCard>
+  );
+}
 
 export default function ValidatorReportPage() {
   const params = useParams();
@@ -157,8 +665,30 @@ export default function ValidatorReportPage() {
   const effectiveAarrr = visitorAvailable ? r.aarrr_weighted : r.aarrr;
 
   return (
-    <Frame active="report">
+    <Frame
+      active="report"
+      right={
+        <Link href="/" style={{ textDecoration: "none" }}>
+          <PrButton variant="outline" style={{ fontSize: 13, padding: "9px 16px", borderRadius: 10 }}>
+            Analyze another →
+          </PrButton>
+        </Link>
+      }
+    >
       <div className="v-page-pad">
+        {result && (
+          <AnswerHero
+            score={effectiveResult!.audience_fit_score}
+            mode={r.scan.mode}
+            modeBVerdict={r.scan.mode_b_verdict}
+            best={effectiveResult!.best}
+            worst={effectiveResult!.worst}
+            medianScore={effectiveResult!.median_score}
+            personasCompleted={r.scan.personas_completed}
+            frictions={frictions}
+            anchored={!!r.report_anchor}
+          />
+        )}
         <div
           className="v-stack-sm"
           style={{
@@ -291,13 +821,13 @@ export default function ValidatorReportPage() {
               style={{
                 background: C.panel,
                 color: C.text,
-                border: `1px solid ${C.border}`,
-                borderRadius: 7,
-                padding: "8px 14px",
+                border: `1px solid ${C.borderStrong}`,
+                borderRadius: 10,
+                padding: "9px 16px",
                 fontSize: 13,
-                fontWeight: 500,
+                fontWeight: 600,
                 cursor: "pointer",
-                fontFamily: FS,
+                fontFamily: FB,
                 textDecoration: "none",
                 display: "inline-block",
               }}
@@ -1333,7 +1863,7 @@ function verdictBorder(score: number): string {
 // width is proportional to the % of personas passing each stage.
 // The bars narrow from Acquisition (always 100%) downward — the
 // classic AARRR drop-off shape.
-const AARRR_COLORS = [C.ok, C.accent, C.warn, C.exp, C.bad];
+const AARRR_COLORS = [PR.green, PR.accent, PR.amber, PR.navy2, PR.redInk];
 
 function AarrrFunnelBlock({
   funnel,
