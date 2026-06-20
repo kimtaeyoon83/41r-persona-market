@@ -135,7 +135,16 @@ export type SettleDeps = {
   ) => Promise<{ digest: string }>;
   close: (coinType: string, campaignId: string, capId: string) => Promise<{ digest: string }>;
   persist: (scanId: string, status: string) => Promise<void>;
+  /** Sui addresses of this scan's survey respondents (resolvable ones only).
+   *  Receive the survey-reward slice (§9 split). */
+  loadRespondents: (scanId: string) => Promise<string[]>;
 };
+
+/** Escrow split (decided 2026-06-20). Platform fee + persona-time both go to
+ *  the operator for now (synthetic personas are operator-owned); survey reward
+ *  is split among the scan's resolvable respondents; the remainder (1 - sum)
+ *  refunds to the requester on close. Basis points. */
+export const SETTLE_BPS = { platform: 1000, personaTime: 3000, survey: 5000 } as const;
 
 export function defaultSettleDeps(): SettleDeps {
   const packageId = requirePackageId();
@@ -164,6 +173,22 @@ export function defaultSettleDeps(): SettleDeps {
         .set({ escrowStatus: status })
         .where(eq(schema.audienceFitScans.id, scanId));
     },
+    loadRespondents: async (scanId) => {
+      // Respondents whose Sui address we hold (users.wallet_address, 0x form).
+      // Stored when a respondent submits a survey with their derived address;
+      // null-address respondents simply don't receive the on-chain split (their
+      // slice refunds to the requester on close).
+      const rows = await db
+        .select({ addr: schema.users.walletAddress })
+        .from(schema.surveyResponses)
+        .innerJoin(schema.users, eq(schema.users.id, schema.surveyResponses.userId))
+        .where(eq(schema.surveyResponses.scanId, scanId));
+      const seen = new Set<string>();
+      for (const r of rows) {
+        if (r.addr && /^0x[0-9a-fA-F]{64}$/.test(r.addr)) seen.add(r.addr);
+      }
+      return [...seen];
+    },
   };
 }
 
@@ -188,17 +213,40 @@ export async function settleAndClose(
     return { status: 'skipped', reason: 'missing_campaign_fields' };
   }
 
-  await deps.settle(
-    e.escrowCoinType,
-    e.campaignObjectId,
-    e.campaignCapId,
-    recipient,
-    BigInt(e.escrowAmount),
-  );
+  const amount = BigInt(e.escrowAmount);
+  const coin = e.escrowCoinType;
+  const campaign = e.campaignObjectId;
+  const cap = e.campaignCapId;
+
+  // Operator slice = platform fee + persona-time (synthetic personas are
+  // operator-owned). Paid first.
+  const operatorCut = (amount * BigInt(SETTLE_BPS.platform + SETTLE_BPS.personaTime)) / 10_000n;
+  if (operatorCut > 0n) await deps.settle(coin, campaign, cap, recipient, operatorCut);
+
+  // Survey slice = split evenly among resolvable respondents. Integer division
+  // leaves dust + any null-address shares in the pool → refunded on close.
+  const surveyTotal = (amount * BigInt(SETTLE_BPS.survey)) / 10_000n;
+  const respondents = await deps.loadRespondents(scanId);
+  let paidRespondents = 0;
+  if (respondents.length > 0 && surveyTotal > 0n) {
+    const per = surveyTotal / BigInt(respondents.length);
+    if (per > 0n) {
+      for (const addr of respondents) {
+        await deps.settle(coin, campaign, cap, addr, per);
+        paidRespondents++;
+      }
+    }
+  }
   await deps.persist(scanId, 'settled');
-  await deps.close(e.escrowCoinType, e.campaignObjectId, e.campaignCapId);
+
+  // Close refunds the remainder (the ~10% buffer + any unpaid survey slice) to
+  // the requester.
+  await deps.close(coin, campaign, cap);
   await deps.persist(scanId, 'closed');
 
-  log.info({ scanId, campaign: e.campaignObjectId }, 'escrow settled + closed');
+  log.info(
+    { scanId, campaign, operatorCut: operatorCut.toString(), paidRespondents },
+    'escrow settled (split) + closed',
+  );
   return { status: 'closed' };
 }
