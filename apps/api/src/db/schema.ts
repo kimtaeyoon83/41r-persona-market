@@ -186,6 +186,14 @@ export const personas = pgTable('personas', {
    *  scripts/transfer-personas.ts. Null = still operator-held. */
   transferredTo: text('transferred_to'),
   transferredAt: timestamp('transferred_at'),
+  /** Content-hash commitment (verifiable integrity, 2026-06-20). content_hash =
+   *  sha256 of the plaintext vector JSON (the bytes that were Seal-encrypted).
+   *  content_manifest_blob_id = a PUBLIC Walrus blob holding that hash,
+   *  add_memwal_ref'd onto the Sui object → tamper-evident. Lets a holder of the
+   *  plaintext verify content WITHOUT decrypting the sealed blob. Null until the
+   *  persona is anchored + the hash committed (anchor.ts / backfill script). */
+  contentHash: text('content_hash'),
+  contentManifestBlobId: text('content_manifest_blob_id'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -395,6 +403,12 @@ export const audienceFitScans = pgTable('audience_fit_scans', {
   reportWalrusBlobId: text('report_walrus_blob_id'),
   reportSealId: text('report_seal_id'),
   reportAnchoredAt: timestamp('report_anchored_at'),
+  /** Content-hash commitment for the report snapshot (2026-06-20). Same scheme
+   *  as personas.content_hash: sha256 of the plaintext report payload +
+   *  a public Walrus manifest blob, so the report's integrity is client-
+   *  verifiable without decrypting the Seal-encrypted snapshot. */
+  reportContentHash: text('report_content_hash'),
+  reportManifestBlobId: text('report_manifest_blob_id'),
 
   createdAt: timestamp('created_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),

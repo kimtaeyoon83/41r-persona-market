@@ -39,6 +39,7 @@ const FILES = [
   '0023_usdc_escrow.sql',
   '0024_mutual_campaigns.sql',
   '0025_persona_transfer.sql',
+  '0026_content_hash.sql',
 ];
 const DRY_RUN = process.argv.includes('--dry-run');
 

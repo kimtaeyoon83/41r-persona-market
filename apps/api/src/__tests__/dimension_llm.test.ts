@@ -206,6 +206,8 @@ function makePersonaForPrompt(): PersonaRow {
     anchoredAt: null,
     transferredTo: null,
     transferredAt: null,
+    contentHash: null,
+    contentManifestBlobId: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
     vector: {

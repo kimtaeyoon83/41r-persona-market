@@ -6,9 +6,13 @@ import {
   anchorScanReport,
   transferPersonaToUser,
   isSuiAddress,
+  sha256Hex,
+  commitPersonaContentHash,
+  buildContentManifest,
   type AnchorDeps,
   type ScanAnchorDeps,
   type TransferDeps,
+  type ContentHashDeps,
 } from '../services/sui/anchor.js';
 
 describe('extractCreatedObjectId (pure)', () => {
@@ -137,6 +141,7 @@ describe('anchorScanReport (Walrus+Seal, no mint)', () => {
       reportWalrusBlobId: 'rblob',
       reportSealId: '7331',
       reportAnchoredAt: now,
+      reportContentHash: sha256Hex(JSON.stringify({ scan_id: 's1' })),
     });
   });
 
@@ -235,5 +240,77 @@ describe('transferPersonaToUser (mint-to-user §4.1)', () => {
   it('throws when the persona does not exist', async () => {
     const deps = makeTransferDeps({ loadPersona: vi.fn(async () => null) });
     await expect(transferPersonaToUser('missing', RECIPIENT, deps)).rejects.toThrow('not found');
+  });
+});
+
+describe('sha256Hex + buildContentManifest (pure)', () => {
+  it('hashes deterministically + emits a self-describing manifest', () => {
+    const h = sha256Hex('{"a":1}');
+    expect(h).toMatch(/^[0-9a-f]{64}$/);
+    const m = buildContentManifest({
+      kind: 'persona_vector',
+      id: 'p1',
+      contentHash: h,
+      now: new Date('2026-06-20T00:00:00.000Z'),
+    });
+    expect(m).toEqual({
+      v: 1,
+      kind: 'persona_vector',
+      id: 'p1',
+      content_sha256: h,
+      algo: 'sha256',
+      committed_at: '2026-06-20T00:00:00.000Z',
+    });
+  });
+});
+
+function makeHashDeps(over: Partial<ContentHashDeps> = {}): ContentHashDeps {
+  return {
+    load: vi.fn(async () => ({ suiObjectId: '0xOBJ', vector: { voice: 'hi' }, contentHash: null })),
+    storePublic: vi.fn(async () => ({ blobId: 'manifestBlob' })),
+    addMemwalRef: vi.fn(async () => ({ digest: 'd' })),
+    persist: vi.fn(async () => {}),
+    ...over,
+  };
+}
+
+describe('commitPersonaContentHash (Method B)', () => {
+  it('hashes plaintext → public manifest → add_memwal_ref → persists', async () => {
+    const deps = makeHashDeps();
+    const r = await commitPersonaContentHash('p1', deps);
+    const expectedHash = sha256Hex(JSON.stringify({ voice: 'hi' }));
+    expect(r).toEqual({ status: 'committed', contentHash: expectedHash, manifestBlobId: 'manifestBlob' });
+    // the PUBLIC manifest carries the hash (not the sealed vector)
+    const stored = (deps.storePublic as ReturnType<typeof vi.fn>).mock.calls[0][0] as Uint8Array;
+    expect(JSON.parse(new TextDecoder().decode(stored)).content_sha256).toBe(expectedHash);
+    expect(deps.addMemwalRef).toHaveBeenCalledWith('0xOBJ', 'manifestBlob');
+    expect(deps.persist).toHaveBeenCalledWith('p1', {
+      contentHash: expectedHash,
+      contentManifestBlobId: 'manifestBlob',
+    });
+  });
+
+  it('skips an unanchored persona (no object to ref)', async () => {
+    const deps = makeHashDeps({
+      load: vi.fn(async () => ({ suiObjectId: null, vector: {}, contentHash: null })),
+    });
+    const r = await commitPersonaContentHash('p1', deps);
+    expect(r).toEqual({ status: 'skipped', reason: 'not_anchored' });
+    expect(deps.storePublic).not.toHaveBeenCalled();
+    expect(deps.addMemwalRef).not.toHaveBeenCalled();
+  });
+
+  it('is idempotent — skips when the hash is already committed', async () => {
+    const deps = makeHashDeps({
+      load: vi.fn(async () => ({ suiObjectId: '0xOBJ', vector: {}, contentHash: 'abc' })),
+    });
+    const r = await commitPersonaContentHash('p1', deps);
+    expect(r).toEqual({ status: 'skipped', reason: 'already_committed' });
+    expect(deps.addMemwalRef).not.toHaveBeenCalled();
+  });
+
+  it('throws when the persona does not exist', async () => {
+    const deps = makeHashDeps({ load: vi.fn(async () => null) });
+    await expect(commitPersonaContentHash('missing', deps)).rejects.toThrow('not found');
   });
 });

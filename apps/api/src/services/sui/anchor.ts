@@ -13,12 +13,14 @@
 //  - callers run it bounded (scripts/anchor-personas.ts --max) or fire-and-
 //    forget non-fatal; it must never be looped unbounded (real testnet mints).
 
+import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import type { Transaction } from '@mysten/sui/transactions';
 import { db, schema } from '../../db/index.js';
 import { getSuiClient, getSuiSigner, requirePackageId } from './client.js';
 import { buildMintPersona, buildAddMemwalRef, buildTransferPersona } from './tx.js';
 import { sealEncryptAndStore } from '../seal.js';
+import { putBlob } from '../walrus.js';
 import { childLogger } from '../../logger.js';
 
 const log = childLogger({ svc: 'sui.anchor' });
@@ -195,7 +197,12 @@ export type ScanAnchorDeps = {
   encryptStore: (args: { id: string; data: Uint8Array }) => Promise<{ blobId: string }>;
   persist: (
     scanId: string,
-    fields: { reportWalrusBlobId: string; reportSealId: string; reportAnchoredAt: Date },
+    fields: {
+      reportWalrusBlobId: string;
+      reportSealId: string;
+      reportAnchoredAt: Date;
+      reportContentHash: string;
+    },
   ) => Promise<void>;
 };
 
@@ -238,14 +245,22 @@ export async function anchorScanReport(
     return { status: 'skipped', walrusBlobId: scan.reportWalrusBlobId };
   }
 
-  const data = new TextEncoder().encode(JSON.stringify(scan.payload));
+  const plaintext = JSON.stringify(scan.payload);
+  const data = new TextEncoder().encode(plaintext);
   const sealId = toSealHexId(scanId);
   const { blobId } = await deps.encryptStore({ id: sealId, data });
+
+  // Content hash of the (plaintext) report payload. Unlike personas, a scan
+  // report has no Sui object to anchor a manifest onto (scan ≈ campaign mint is
+  // deferred), so this is a DB-stored integrity hash a viewer recomputes from
+  // the displayed report — honest self-consistency, not on-chain-anchored.
+  const reportContentHash = sha256Hex(plaintext);
 
   await deps.persist(scanId, {
     reportWalrusBlobId: blobId,
     reportSealId: sealId,
     reportAnchoredAt: now,
+    reportContentHash,
   });
 
   log.info({ scanId, blobId }, 'scan report anchored on-chain (Walrus+Seal)');
@@ -350,4 +365,114 @@ export async function transferPersonaToUser(
 
   log.info({ personaId, suiObjectId: persona.suiObjectId, recipient }, 'persona transferred to user');
   return { status: 'transferred', suiObjectId: persona.suiObjectId, recipient, digest };
+}
+
+// ─── Content-hash commitment (verifiable integrity, Method B) ────────
+// The anchored Walrus blob is Seal-ENCRYPTED, so a viewer can prove it exists
+// but not check its content. We commit sha256(plaintext) in a PUBLIC Walrus
+// manifest blob and add_memwal_ref it onto the persona's Sui object. Walrus is
+// content-addressed, so the manifest's blob id (now on-chain) is a tamper-
+// evident commitment: a holder of the plaintext re-hashes it and compares
+// against the public manifest — no decryption, no Move republish.
+
+export function sha256Hex(s: string): string {
+  return createHash('sha256').update(s).digest('hex');
+}
+
+/** Canonical plaintext for a persona = the exact JSON that gets Seal-encrypted
+ *  in anchorPersona (JSON.stringify(vector)). Keep these two in lockstep so the
+ *  committed hash matches the sealed bytes' source. */
+export function personaPlaintext(vector: unknown): string {
+  return JSON.stringify(vector);
+}
+
+/** The public manifest object stored on Walrus. Self-describing so a verifier
+ *  needs nothing but this blob + the plaintext. */
+export function buildContentManifest(args: {
+  kind: 'persona_vector' | 'scan_report';
+  id: string;
+  contentHash: string;
+  now: Date;
+}) {
+  return {
+    v: 1,
+    kind: args.kind,
+    id: args.id,
+    content_sha256: args.contentHash,
+    algo: 'sha256',
+    committed_at: args.now.toISOString(),
+  };
+}
+
+export type ContentHashResult =
+  | { status: 'skipped'; reason: string }
+  | { status: 'committed'; contentHash: string; manifestBlobId: string };
+
+export type ContentHashDeps = {
+  load: (
+    personaId: string,
+  ) => Promise<{ suiObjectId: string | null; vector: unknown; contentHash: string | null } | null>;
+  /** PUBLIC Walrus put — NOT Seal-encrypted (the manifest must be readable by
+   *  anyone verifying). Distinct from anchorPersona's encryptStore. */
+  storePublic: (data: Uint8Array) => Promise<{ blobId: string }>;
+  addMemwalRef: (personaObjectId: string, blobId: string) => Promise<{ digest: string }>;
+  persist: (
+    personaId: string,
+    fields: { contentHash: string; contentManifestBlobId: string },
+  ) => Promise<void>;
+};
+
+export function defaultContentHashDeps(): ContentHashDeps {
+  const packageId = requirePackageId();
+  return {
+    load: async (personaId) => {
+      const [row] = await db
+        .select({
+          suiObjectId: schema.personas.suiObjectId,
+          vector: schema.personas.vector,
+          contentHash: schema.personas.contentHash,
+        })
+        .from(schema.personas)
+        .where(eq(schema.personas.id, personaId))
+        .limit(1);
+      return row ?? null;
+    },
+    storePublic: async (data) => ({ blobId: (await putBlob(data)).blobId }),
+    addMemwalRef: (personaObjectId, blobId) =>
+      executeTx(buildAddMemwalRef(packageId, personaObjectId, blobId)),
+    persist: async (personaId, fields) => {
+      await db
+        .update(schema.personas)
+        .set({ ...fields, updatedAt: new Date() })
+        .where(eq(schema.personas.id, personaId));
+    },
+  };
+}
+
+/**
+ * Commit a persona's plaintext content hash on-chain via a public Walrus
+ * manifest. Idempotent: skips when not anchored (no object to ref) or when the
+ * hash is already committed. Used by anchor drivers right after anchorPersona
+ * and by the backfill script for already-anchored personas.
+ */
+export async function commitPersonaContentHash(
+  personaId: string,
+  deps: ContentHashDeps = defaultContentHashDeps(),
+  now: Date = new Date(),
+): Promise<ContentHashResult> {
+  const p = await deps.load(personaId);
+  if (!p) throw new Error(`persona ${personaId} not found`);
+  if (!p.suiObjectId) return { status: 'skipped', reason: 'not_anchored' };
+  if (p.contentHash) return { status: 'skipped', reason: 'already_committed' };
+
+  const contentHash = sha256Hex(personaPlaintext(p.vector));
+  const manifest = buildContentManifest({ kind: 'persona_vector', id: personaId, contentHash, now });
+  const { blobId } = await deps.storePublic(
+    new TextEncoder().encode(JSON.stringify(manifest)),
+  );
+  await deps.addMemwalRef(p.suiObjectId, blobId);
+  await deps.persist(personaId, { contentHash, contentManifestBlobId: blobId });
+
+  log.info({ personaId, contentHash, manifestBlobId: blobId }, 'persona content hash committed');
+  return { status: 'committed', contentHash, manifestBlobId: blobId };
 }
