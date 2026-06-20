@@ -115,6 +115,15 @@ const envSchema = z.object({
       '0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC',
     ),
 
+  // ── Mutual-sealed campaigns on-chain anchor (§4.5) ──
+  // When false (default), mutual campaigns run as a real off-chain sealed
+  // exchange (Walrus/Seal sealing IS performed; state machine is the source
+  // of truth) but the rpm::mutual Sui object is NOT minted. Flip to 1 only
+  // after the package is published + the operator wallet is funded — the
+  // mint/transition txs are operator-signed (synthetic personas are
+  // operator-owned), same custody model as escrow settle/close.
+  MUTUAL_ONCHAIN_ENABLED: boolFromString(false),
+
   // ── Mode C build gate (behavior simulation §11) ──
   // THE single source of truth for whether autonomous (Mode C) traversal
   // sessions are allowed. Stays false in production until the human

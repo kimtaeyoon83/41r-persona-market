@@ -103,8 +103,13 @@ pnpm tsx scripts/spike-behavior-sim/run.ts spike/<id>/graph.json [--start=<node>
 ## Key Conventions
 
 ### Backend (apps/api)
-- 7 active routes under `src/routes/`, mounted in `src/index.ts`:
+- 9 active routes under `src/routes/`, mounted in `src/index.ts`:
   `scan.ts`, `calibration.ts`, `benchmark.ts`, `hello.ts`,
+  `session.ts` (Mode C planner — `POST /api/session/plan`, gated),
+  `mutual.ts` (§4.5 mutual-sealed campaigns — Privy-gated
+  requester/persona-scoped two-way sealed exchange; state machine +
+  Seal/Walrus sealing in `services/sui/mutual.ts`, on-chain mint
+  deferred behind `MUTUAL_ONCHAIN_ENABLED`),
   `console.ts` (Console S2 — workspace CRUD/keys/analytics),
   `me_responses.ts` (Phase 5.1 — `/api/me/survey-responses[/:scanId]`,
   `/api/me/points`; Console S1 2026-06-11 adds `/api/me/credits`),
@@ -275,8 +280,14 @@ design-doc promises are NOT yet wired. Don't pitch these as done:
 - **Autonomous browsing (Mode C) is gated** (`THINK_ALOUD_GATE_PASSED=false`).
   The shipped validator is capture-and-react (1 screenshot + persona
   reactions), not autonomous traversal. The headline pitch must say so.
-- **Mutual-sealed campaigns (§4.5)** exist in Move + `seal_approve_evidence`
-  but have ZERO API/UI routes — unreachable from the product.
+- **Mutual-sealed campaigns (§4.5)** are now REACHABLE — `routes/mutual.ts` +
+  `services/sui/mutual.ts` + `/console/mutual` ship the full state machine
+  (asset_sealed → … → settled / aborted) with REAL Seal/Walrus sealing of the
+  asset + evidence blobs. What's still DEFERRED: the on-chain
+  rpm::mutual::MutualCampaign mint (needs a funded reward Coin, gated by
+  `MUTUAL_ONCHAIN_ENABLED`, default off — same honesty pattern as scan-report
+  anchoring). So `sui_object_id` stays null; copy says "off-chain sealed
+  exchange, on-chain mint deferred", never implies a finished chain flow.
 - **USDC end-to-end is unverified**: the Privy raw-sign → Sui signature path
   (`lib/sui-wallet.ts::signAndExecuteSuiTx`) has never succeeded in a real
   browser; needs in-browser live-verify before the flag flips on.

@@ -81,6 +81,12 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
           <Link href="/console" className={`cs-item${pathname === "/console" ? " active" : ""}`}>
             <span style={{ fontFamily: FM, fontSize: 11 }}>▦</span> {t("console.title")}
           </Link>
+          <Link
+            href="/console/mutual"
+            className={`cs-item${pathname === "/console/mutual" ? " active" : ""}`}
+          >
+            <span style={{ fontFamily: FM, fontSize: 11 }}>⇄</span> {t("mutual.nav")}
+          </Link>
 
           <div className="cs-label">{t("console.title")}</div>
           {sites === null ? (

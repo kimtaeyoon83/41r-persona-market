@@ -10,6 +10,7 @@ import meResponsesRouter from './routes/me_responses.js';
 import consoleRouter from './routes/console.js';
 import partnerRouter from './routes/partner.js';
 import sessionRouter from './routes/session.js';
+import mutualRouter from './routes/mutual.js';
 import { startCalibrationCron } from './services/calibration/cron.js';
 import { startDigestCron } from './services/notify.js';
 import { allowedOrigins, corsOptions } from './config/cors.js';
@@ -76,6 +77,9 @@ app.use('/api/partner', partnerRouter);
 // session or returns 422 mode_c_gated. Mode C dispatch stays gated by
 // env THINK_ALOUD_GATE_PASSED (false in prod until calibration passes).
 app.use('/api/session', readLimiter, sessionRouter);
+// Mutual-sealed campaigns (design doc §4.5) — Privy-gated, requester/
+// persona-scoped two-way sealed exchange (services/sui/mutual.ts).
+app.use('/api/mutual', readLimiter, mutualRouter);
 
 // Static file serving for screenshots (local dev fallback, production uses R2 CDN)
 if (process.env.NODE_ENV !== 'production') {

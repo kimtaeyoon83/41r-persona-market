@@ -740,6 +740,77 @@ export const meApi = {
   getCredits: () => request<MyCredits>(`/api/me/credits`),
 };
 
+// ─── Mutual-sealed campaigns (design doc §4.5) ──────────────────
+export type MutualState =
+  | 'asset_sealed'
+  | 'persona_opted_in'
+  | 'asset_revealed'
+  | 'evidence_committed'
+  | 'evidence_revealed'
+  | 'settled'
+  | 'aborted';
+
+export type MutualCampaign = {
+  id: string;
+  title: string;
+  description: string | null;
+  state: MutualState;
+  role: 'requester' | 'persona';
+  is_requester: boolean;
+  persona_opted_in: boolean;
+  asset_hash: string;
+  asset_sandbox_only: boolean;
+  asset_sealed: boolean;
+  asset_walrus_url: string | null;
+  evidence_sealed: boolean;
+  evidence_walrus_url: string | null;
+  reward_amount: string;
+  stake_amount: string;
+  sui_object_id: string | null;
+  created_at: string;
+  updated_at: string;
+  settled_at: string | null;
+};
+
+export const mutualApi = {
+  list: () => request<{ campaigns: MutualCampaign[] }>(`/api/mutual`),
+
+  get: (id: string) => request<{ campaign: MutualCampaign }>(`/api/mutual/${id}`),
+
+  /** asset_base64 is Seal-encrypted server-side; plaintext is never stored. */
+  create: (body: {
+    title: string;
+    description?: string;
+    asset_base64: string;
+    sandbox_only?: boolean;
+    reward_amount?: number;
+    stake_amount?: number;
+  }) =>
+    request<{ campaign: MutualCampaign }>(`/api/mutual`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  optIn: (id: string) =>
+    request<{ campaign: MutualCampaign }>(`/api/mutual/${id}/opt-in`, {
+      method: 'POST',
+      body: '{}',
+    }),
+
+  commitEvidence: (id: string, evidenceB64: string) =>
+    request<{ campaign: MutualCampaign }>(`/api/mutual/${id}/commit-evidence`, {
+      method: 'POST',
+      body: JSON.stringify({ evidence_base64: evidenceB64 }),
+    }),
+
+  /** Single-edge transitions: reveal-asset | reveal-evidence | settle | slash. */
+  transition: (id: string, action: 'reveal-asset' | 'reveal-evidence' | 'settle' | 'slash') =>
+    request<{ campaign: MutualCampaign }>(`/api/mutual/${id}/${action}`, {
+      method: 'POST',
+      body: '{}',
+    }),
+};
+
 // ─── Calibration API (Phase 2-C-1) ─────────────────────────────
 export type CalibrationReport = {
   period_start: string;

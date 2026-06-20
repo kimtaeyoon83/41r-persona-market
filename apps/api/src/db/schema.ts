@@ -792,3 +792,59 @@ export const creditTransactions = pgTable('credit_transactions', {
       sql`${t.reason} IN ('signup_bonus','signup_bonus_wallet','signup_bonus_upgrade')`,
     ),
 }));
+
+// ─── Mutual-sealed campaigns (design doc v0.4 §4.5, 2026-06-20) ──────
+// Two-way sealed exchange between a company (requester) and a persona
+// owner. The company seals a pre-release asset (Walrus blob + Seal
+// policy, company→persona); the persona seals its session evidence
+// (persona→company). True atomicity is impossible across the asymmetric
+// reveal, so an escrow-backed STATE MACHINE plus a slashable stake stand
+// in for it (§4.5.3).
+//
+// This is the off-chain MIRROR of on-chain rpm::mutual::MutualCampaign.
+// The sealed asset/evidence blobs on Walrus are the REAL artifacts; the
+// Sui object/cap ids are populated only when MUTUAL_ONCHAIN_ENABLED mints
+// the object — same honesty contract as scan-report anchoring (the chain
+// anchor is optional, the seal is not). State is the source of truth.
+export const mutualCampaigns = pgTable('mutual_campaigns', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  /** Company that created + funds the campaign (holds the owner cap). */
+  requesterUserId: uuid('requester_user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  /** Persona owner who opted in (null until opt-in). */
+  personaUserId: uuid('persona_user_id').references(() => users.id, {
+    onDelete: 'set null',
+  }),
+  title: text('title').notNull(),
+  description: text('description'),
+  // ── SealedAsset (company → persona, §4.5.1 A) ──
+  /** sha256 of the plaintext asset — integrity check independent of Seal. */
+  assetHash: text('asset_hash').notNull(),
+  /** Walrus blob id of the Seal-encrypted asset. null = not sealed yet
+   *  (Seal/Walrus unconfigured); the UI hides the Walrus link when null. */
+  assetBlobId: text('asset_blob_id'),
+  assetSealId: text('asset_seal_id'),
+  /** §4.5.3 — decrypt only inside the platform sandbox (T1+). */
+  assetSandboxOnly: boolean('asset_sandbox_only').notNull().default(true),
+  // ── SealedEvidence (persona → company, §4.5.1 B) ──
+  evidenceHash: text('evidence_hash'),
+  evidenceBlobId: text('evidence_blob_id'),
+  evidenceSealId: text('evidence_seal_id'),
+  // ── Escrow + bond (base units; notional when off-chain) ──
+  rewardAmount: bigint('reward_amount', { mode: 'bigint' }).notNull().default(0n),
+  stakeAmount: bigint('stake_amount', { mode: 'bigint' }).notNull().default(0n),
+  /** State machine (§4.5.2): asset_sealed → persona_opted_in →
+   *  asset_revealed → evidence_committed → evidence_revealed → settled;
+   *  aborted via slash. See services/sui/mutual.ts MUTUAL_TRANSITIONS. */
+  state: text('state').notNull().default('asset_sealed'),
+  /** On-chain anchor — null until MUTUAL_ONCHAIN_ENABLED mints the object. */
+  suiObjectId: text('sui_object_id'),
+  suiCapId: text('sui_cap_id'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  settledAt: timestamp('settled_at'),
+}, (t) => ({
+  byRequester: index('mutual_campaigns_requester_idx').on(t.requesterUserId),
+  byPersona: index('mutual_campaigns_persona_idx').on(t.personaUserId),
+}));

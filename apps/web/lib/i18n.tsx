@@ -339,6 +339,46 @@ const en = {
   "persona.trustContract": "Trust contract",
   "persona.trustBody": "Response generated from PersonaVector + site captures via a single Sonnet vision call.",
   "persona.trustTail": "AI persona inference, not actual user testimony.",
+
+  // ── Mutual-sealed campaigns (§4.5) ──
+  "mutual.nav": "Mutual",
+  "mutual.title": "Mutual-sealed campaigns",
+  "mutual.subtitle":
+    "Two-way sealed exchange — seal a pre-release asset, get sealed session evidence back. An escrow + a slashable stake stand in for the impossible atomic reveal.",
+  "mutual.offchainNote":
+    "Off-chain sealed exchange. The Walrus/Seal seal is the live artifact; the on-chain Sui mint is deferred (it needs a funded reward coin).",
+  "mutual.empty": "No sealed campaigns yet.",
+  "mutual.new": "New sealed campaign",
+  "mutual.titleField": "Title",
+  "mutual.descField": "Description (optional)",
+  "mutual.asset": "Asset to seal",
+  "mutual.assetHint":
+    "A pre-release file or link. Seal-encrypted before storage — we keep only the ciphertext + a hash, never the plaintext.",
+  "mutual.reward": "Reward (base units)",
+  "mutual.stake": "Persona stake (base units)",
+  "mutual.sandboxOnly": "Sandbox-only decrypt",
+  "mutual.submit": "Seal + create",
+  "mutual.creating": "Sealing…",
+  "mutual.openInvite": "Open invitation",
+  "mutual.rewardLabel": "Reward",
+  "mutual.stakeLabel": "Stake",
+  "mutual.assetSealed": "Asset sealed · Walrus",
+  "mutual.evidenceSealed": "Evidence sealed · Walrus",
+  "mutual.notSealed": "Not sealed (Seal unconfigured)",
+  "mutual.evidencePrompt": "Paste session evidence (sealed on commit)",
+  "mutual.action.opt_in": "Opt in as persona",
+  "mutual.action.reveal_asset": "Mark asset revealed",
+  "mutual.action.commit_evidence": "Commit evidence",
+  "mutual.action.reveal_evidence": "Reveal evidence",
+  "mutual.action.settle": "Settle + pay",
+  "mutual.action.slash": "Slash",
+  "mutual.state.asset_sealed": "Asset sealed",
+  "mutual.state.persona_opted_in": "Persona opted in",
+  "mutual.state.asset_revealed": "Asset revealed",
+  "mutual.state.evidence_committed": "Evidence committed",
+  "mutual.state.evidence_revealed": "Evidence revealed",
+  "mutual.state.settled": "Settled",
+  "mutual.state.aborted": "Aborted (slashed)",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -660,6 +700,46 @@ const ko: Record<MessageKey, string> = {
   "persona.trustContract": "신뢰 계약",
   "persona.trustBody": "PersonaVector + 사이트 캡처를 단일 Sonnet 비전 호출로 생성한 응답입니다.",
   "persona.trustTail": "AI 페르소나 추론이며 실제 사용자 증언이 아닙니다.",
+
+  // ── 상호봉인 캠페인 (§4.5) ──
+  "mutual.nav": "상호봉인",
+  "mutual.title": "상호봉인 캠페인",
+  "mutual.subtitle":
+    "양방향 봉인 교환 — 미공개 자산을 봉인하고, 봉인된 세션 증거를 돌려받습니다. 불가능한 원자적 공개를 에스크로 + 슬래시 가능한 스테이크가 대신합니다.",
+  "mutual.offchainNote":
+    "오프체인 봉인 교환입니다. Walrus/Seal 봉인이 실제 산출물이며, 온체인 Sui 민팅은 보류 상태입니다(보상 코인 자금이 필요).",
+  "mutual.empty": "아직 봉인 캠페인이 없습니다.",
+  "mutual.new": "새 봉인 캠페인",
+  "mutual.titleField": "제목",
+  "mutual.descField": "설명 (선택)",
+  "mutual.asset": "봉인할 자산",
+  "mutual.assetHint":
+    "미공개 파일 또는 링크. 저장 전에 Seal로 암호화되며 — 평문이 아닌 암호문 + 해시만 보관합니다.",
+  "mutual.reward": "보상 (base units)",
+  "mutual.stake": "페르소나 스테이크 (base units)",
+  "mutual.sandboxOnly": "샌드박스 전용 복호화",
+  "mutual.submit": "봉인 + 생성",
+  "mutual.creating": "봉인 중…",
+  "mutual.openInvite": "공개 초대",
+  "mutual.rewardLabel": "보상",
+  "mutual.stakeLabel": "스테이크",
+  "mutual.assetSealed": "자산 봉인됨 · Walrus",
+  "mutual.evidenceSealed": "증거 봉인됨 · Walrus",
+  "mutual.notSealed": "봉인 안 됨 (Seal 미설정)",
+  "mutual.evidencePrompt": "세션 증거 붙여넣기 (커밋 시 봉인)",
+  "mutual.action.opt_in": "페르소나로 참여",
+  "mutual.action.reveal_asset": "자산 공개 표시",
+  "mutual.action.commit_evidence": "증거 커밋",
+  "mutual.action.reveal_evidence": "증거 공개",
+  "mutual.action.settle": "정산 + 지급",
+  "mutual.action.slash": "슬래시",
+  "mutual.state.asset_sealed": "자산 봉인됨",
+  "mutual.state.persona_opted_in": "페르소나 참여",
+  "mutual.state.asset_revealed": "자산 공개됨",
+  "mutual.state.evidence_committed": "증거 커밋됨",
+  "mutual.state.evidence_revealed": "증거 공개됨",
+  "mutual.state.settled": "정산 완료",
+  "mutual.state.aborted": "중단됨 (슬래시)",
 };
 
 const MESSAGES: Record<Locale, Record<MessageKey, string>> = { en, ko };
