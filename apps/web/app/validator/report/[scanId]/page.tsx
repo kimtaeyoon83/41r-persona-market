@@ -675,19 +675,6 @@ export default function ValidatorReportPage() {
       }
     >
       <div className="v-page-pad">
-        {result && (
-          <AnswerHero
-            score={effectiveResult!.audience_fit_score}
-            mode={r.scan.mode}
-            modeBVerdict={r.scan.mode_b_verdict}
-            best={effectiveResult!.best}
-            worst={effectiveResult!.worst}
-            medianScore={effectiveResult!.median_score}
-            personasCompleted={r.scan.personas_completed}
-            frictions={frictions}
-            anchored={!!r.report_anchor}
-          />
-        )}
         <div
           className="v-stack-sm"
           style={{
@@ -842,6 +829,22 @@ export default function ValidatorReportPage() {
             </Btn>
           </div>
         </div>
+
+        {/* "THE ANSWER" hero — renders AFTER the title header so the page
+            reads title → headline answer → detail sections. */}
+        {result && (
+          <AnswerHero
+            score={effectiveResult!.audience_fit_score}
+            mode={r.scan.mode}
+            modeBVerdict={r.scan.mode_b_verdict}
+            best={effectiveResult!.best}
+            worst={effectiveResult!.worst}
+            medianScore={effectiveResult!.median_score}
+            personasCompleted={r.scan.personas_completed}
+            frictions={frictions}
+            anchored={!!r.report_anchor}
+          />
+        )}
 
         {/* Mode B verdict block — replaces the Audience-Fit gauge for
             Mode B scans (single audience, pass/conditional/fail). */}
