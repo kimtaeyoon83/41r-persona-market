@@ -1,18 +1,20 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   nextState,
   sha256Hex,
-  MutualStateError,
-  MutualNotFound,
+  extractMutualIds,
   createMutualCampaign,
   advanceMutual,
   ACTION_ACTOR,
+  MutualStateError,
+  MutualNotFound,
   MUTUAL_STATES,
   type MutualState,
   type MutualRow,
   type CreateDeps,
   type AdvanceDeps,
 } from '../services/sui/mutual.js';
+import { env } from '../config/env.js';
 
 // ─── Pure state machine (mirror mutual.move §4.5.2) ──────────────────
 
@@ -87,6 +89,7 @@ describe('sha256Hex', () => {
 function makeCreateDeps(over: Partial<CreateDeps> = {}): CreateDeps {
   return {
     seal: vi.fn(async (id: string) => ({ blobId: `blob:${id}`, sealId: `seal:${id}` })),
+    mintOnChain: vi.fn(async () => ({ suiObjectId: '0xMUTUAL', suiCapId: '0xCAP' })),
     insert: vi.fn(
       async (row) =>
         ({
@@ -98,8 +101,8 @@ function makeCreateDeps(over: Partial<CreateDeps> = {}): CreateDeps {
           evidenceHash: null,
           evidenceBlobId: null,
           evidenceSealId: null,
-          suiObjectId: null,
-          suiCapId: null,
+          suiObjectId: row.suiObjectId ?? null,
+          suiCapId: row.suiCapId ?? null,
           createdAt: new Date(0),
           updatedAt: new Date(0),
           settledAt: null,
@@ -148,6 +151,92 @@ describe('createMutualCampaign', () => {
     );
     expect(row.assetBlobId).toBeNull();
     expect(row.assetHash).toMatch(/^[0-9a-f]{64}$/); // hash still computed
+  });
+
+  it('does NOT mint on-chain when MUTUAL_ONCHAIN_ENABLED is off (default)', async () => {
+    const deps = makeCreateDeps();
+    const row = await createMutualCampaign(
+      {
+        requesterUserId: 'u',
+        title: 't',
+        asset: new TextEncoder().encode('x'),
+        sandboxOnly: true,
+        rewardAmount: 100n,
+        stakeAmount: 0n,
+      },
+      deps,
+    );
+    expect(deps.mintOnChain).not.toHaveBeenCalled();
+    expect(row.suiObjectId).toBeNull();
+    expect(row.suiCapId).toBeNull();
+  });
+});
+
+describe('createMutualCampaign — on-chain mint gate', () => {
+  afterEach(() => {
+    (env as { MUTUAL_ONCHAIN_ENABLED: boolean }).MUTUAL_ONCHAIN_ENABLED = false;
+  });
+
+  it('mints + persists sui ids when the flag is on', async () => {
+    (env as { MUTUAL_ONCHAIN_ENABLED: boolean }).MUTUAL_ONCHAIN_ENABLED = true;
+    const deps = makeCreateDeps();
+    const row = await createMutualCampaign(
+      {
+        requesterUserId: 'u',
+        title: 't',
+        asset: new TextEncoder().encode('x'),
+        sandboxOnly: true,
+        rewardAmount: 1_000n,
+        stakeAmount: 0n,
+      },
+      deps,
+    );
+    expect(deps.mintOnChain).toHaveBeenCalledOnce();
+    expect(row.suiObjectId).toBe('0xMUTUAL');
+    expect(row.suiCapId).toBe('0xCAP');
+  });
+
+  it('is non-fatal — a mint failure still persists the off-chain seal', async () => {
+    (env as { MUTUAL_ONCHAIN_ENABLED: boolean }).MUTUAL_ONCHAIN_ENABLED = true;
+    const deps = makeCreateDeps({
+      mintOnChain: vi.fn(async () => {
+        throw new Error('rpc down');
+      }),
+    });
+    const row = await createMutualCampaign(
+      {
+        requesterUserId: 'u',
+        title: 't',
+        asset: new TextEncoder().encode('x'),
+        sandboxOnly: true,
+        rewardAmount: 1_000n,
+        stakeAmount: 0n,
+      },
+      deps,
+    );
+    expect(row.state).toBe('asset_sealed'); // seal succeeded
+    expect(row.suiObjectId).toBeNull(); // mint failed → null, not thrown
+  });
+});
+
+describe('extractMutualIds (pure)', () => {
+  it('pulls the MutualCampaign + MutualOwnerCap ids out of objectChanges', () => {
+    const changes = [
+      { type: 'created', objectType: '0x2::coin::Coin<0x2::sui::SUI>', objectId: '0xgas' },
+      { type: 'created', objectType: '0xpkg::mutual::MutualCampaign', objectId: '0xmc' },
+      { type: 'created', objectType: '0xpkg::mutual::MutualOwnerCap', objectId: '0xcap' },
+    ];
+    expect(extractMutualIds(changes)).toEqual({ suiObjectId: '0xmc', suiCapId: '0xcap' });
+  });
+
+  it('returns null when no MutualCampaign was created', () => {
+    expect(extractMutualIds([{ type: 'created', objectType: '0x2::coin::Coin', objectId: '0x1' }])).toBeNull();
+    expect(extractMutualIds(null)).toBeNull();
+  });
+
+  it('campaign with no cap → suiCapId null (still returns the object)', () => {
+    const changes = [{ type: 'created', objectType: '0xp::mutual::MutualCampaign', objectId: '0xmc' }];
+    expect(extractMutualIds(changes)).toEqual({ suiObjectId: '0xmc', suiCapId: null });
   });
 });
 

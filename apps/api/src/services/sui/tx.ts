@@ -195,6 +195,37 @@ export function buildCreateMutual(
   return tx;
 }
 
+/** Self-contained mutual create: split `rewardAmount` MIST from the gas coin
+ *  as the reward escrow (no pre-existing coin object needed), create the
+ *  MutualCampaign, and send the returned cap to `capOwner`. This is the
+ *  operator-signed mint path used when MUTUAL_ONCHAIN_ENABLED — mirrors
+ *  buildCreateUsdcCampaign's split-then-create shape but funds from gas. */
+export function buildCreateMutualFromGas(
+  packageId: string,
+  rewardAmount: bigint,
+  assetBlobRef: string,
+  assetHash: string,
+  assetSealPolicy: string,
+  sandboxOnly: boolean,
+  capOwner: string,
+): Transaction {
+  const tx = new Transaction();
+  const [reward] = tx.splitCoins(tx.gas, [tx.pure.u64(rewardAmount)]);
+  const cap = tx.moveCall({
+    target: `${packageId}::mutual::create`,
+    arguments: [
+      reward,
+      tx.pure.string(assetBlobRef),
+      tx.pure.string(assetHash),
+      tx.pure.string(assetSealPolicy),
+      tx.pure.bool(sandboxOnly),
+      tx.object(SUI_CLOCK_OBJECT_ID),
+    ],
+  });
+  tx.transferObjects([cap], tx.pure.address(capOwner));
+  return tx;
+}
+
 export function buildOptInMutual(
   packageId: string,
   mutualId: string,

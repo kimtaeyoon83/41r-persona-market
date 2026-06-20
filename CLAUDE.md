@@ -296,13 +296,22 @@ design-doc promises are NOT yet wired. Don't pitch these as done:
   `services/sui/mutual.ts` + `/console/mutual` ship the full state machine
   (asset_sealed → … → settled / aborted) with REAL Seal/Walrus sealing of the
   asset + evidence blobs. What's still DEFERRED: the on-chain
-  rpm::mutual::MutualCampaign mint (needs a funded reward Coin, gated by
-  `MUTUAL_ONCHAIN_ENABLED`, default off — same honesty pattern as scan-report
-  anchoring). So `sui_object_id` stays null; copy says "off-chain sealed
-  exchange, on-chain mint deferred", never implies a finished chain flow.
-- **USDC end-to-end is unverified**: the Privy raw-sign → Sui signature path
-  (`lib/sui-wallet.ts::signAndExecuteSuiTx`) has never succeeded in a real
-  browser; needs in-browser live-verify before the flag flips on.
+  rpm::mutual::MutualCampaign mint. The mint is now WIRED + LIVE-PROVEN (the
+  `MUTUAL_ONCHAIN_ENABLED` gate calls `defaultMintOnChain` →
+  `buildCreateMutualFromGas`; a real testnet MutualCampaign was minted 2026-06-20
+  via `scripts/mint-mutual-onchain.ts` — object exists, reward locked,
+  state=ASSET_SEALED). It stays GATED OFF by default (default-off flag, best-
+  effort non-fatal) because the product flow that funds it per campaign isn't
+  built yet — so in the default config `sui_object_id` stays null. Copy says
+  "off-chain sealed exchange, on-chain mint gated", never implies it's the
+  live default path.
+- **USDC: Sui-side signature assembly now VERIFIED, Privy behavior the lone
+  gap.** `scripts/verify-sui-sign.ts` proves `lib/sui-wallet.ts`'s assembly
+  (intent → blake2b → raw-sign 32B digest → toSerializedSignature) is
+  byte-identical to the SDK's signTransaction AND accepted on testnet. The
+  remaining unknown is purely Privy-internal: does `signMessage` raw-sign the
+  digest (correct) or re-hash it (breaks)? Needs a live in-browser Privy
+  session to confirm; `NEXT_PUBLIC_USDC_ENABLED` stays off until it does.
 
 These are product/economic decisions, not bugs — but copy/pitch must match
 this reality until they ship.

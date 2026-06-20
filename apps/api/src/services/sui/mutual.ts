@@ -20,8 +20,9 @@ import { eq } from 'drizzle-orm';
 import { db, schema } from '../../db/index.js';
 import { env } from '../../config/env.js';
 import { sealEncryptAndStore } from '../seal.js';
-import { requirePackageId } from './client.js';
+import { getSuiClient, getSuiSigner, requirePackageId } from './client.js';
 import { toSealHexId } from './anchor.js';
+import { buildCreateMutualFromGas } from './tx.js';
 import { childLogger } from '../../logger.js';
 
 const log = childLogger({ svc: 'sui.mutual' });
@@ -138,10 +139,67 @@ export type CreateInput = {
   stakeAmount: bigint;
 };
 
+/** On-chain mint args (only used when MUTUAL_ONCHAIN_ENABLED). */
+export type MintArgs = {
+  rewardAmount: bigint;
+  assetBlobRef: string;
+  assetHash: string;
+  assetSealPolicy: string;
+  sandboxOnly: boolean;
+};
+export type MintResult = { suiObjectId: string; suiCapId: string | null } | null;
+
 export type CreateDeps = {
   seal: (sealNamespaceId: string, data: Uint8Array) => Promise<SealResult>;
   insert: (row: typeof schema.mutualCampaigns.$inferInsert) => Promise<MutualRow>;
+  /** Operator-signed on-chain mint of the rpm::mutual::MutualCampaign. Called
+   *  ONLY when MUTUAL_ONCHAIN_ENABLED; best-effort (createMutualCampaign
+   *  swallows its errors so a chain hiccup never blocks the off-chain seal,
+   *  same non-fatal contract as scan-report anchoring). */
+  mintOnChain: (args: MintArgs) => Promise<MintResult>;
 };
+
+/** Default on-chain mint: split the reward from gas, create the campaign,
+ *  send the cap to the operator, and pull both object ids out of the tx.
+ *  LIVE-UNVERIFIED end to end (needs a funded operator wallet + a published
+ *  package); gated off by default — same honesty status as the USDC sign
+ *  path. The PTB builder + extraction are unit-tested; a real mint is the
+ *  scripts/mint-mutual-onchain.ts one-off. */
+export async function defaultMintOnChain(args: MintArgs): Promise<MintResult> {
+  const packageId = requirePackageId();
+  const signer = getSuiSigner();
+  const operator = signer.toSuiAddress();
+  const tx = buildCreateMutualFromGas(
+    packageId,
+    args.rewardAmount,
+    args.assetBlobRef,
+    args.assetHash,
+    args.assetSealPolicy,
+    args.sandboxOnly,
+    operator,
+  );
+  const client = getSuiClient();
+  const result = await client.signAndExecuteTransaction({
+    transaction: tx,
+    signer,
+    options: { showObjectChanges: true, showEffects: true },
+  });
+  await client.waitForTransaction({ digest: result.digest });
+  return extractMutualIds(result.objectChanges);
+}
+
+type MutualObjectChange = { type: string; objectType?: string; objectId?: string };
+
+/** Pure: pull the shared MutualCampaign id + the MutualOwnerCap id out of a
+ *  create tx's objectChanges. Exported for unit tests. */
+export function extractMutualIds(
+  objectChanges: MutualObjectChange[] | null | undefined,
+): MintResult {
+  const created = (objectChanges ?? []).filter((c) => c.type === 'created');
+  const campaign = created.find((c) => c.objectType?.includes('::mutual::MutualCampaign'))?.objectId;
+  const cap = created.find((c) => c.objectType?.includes('::mutual::MutualOwnerCap'))?.objectId;
+  return campaign ? { suiObjectId: campaign, suiCapId: cap ?? null } : null;
+}
 
 export function defaultCreateDeps(): CreateDeps {
   return {
@@ -150,6 +208,7 @@ export function defaultCreateDeps(): CreateDeps {
       const [created] = await db.insert(schema.mutualCampaigns).values(row).returning();
       return created;
     },
+    mintOnChain: defaultMintOnChain,
   };
 }
 
@@ -167,6 +226,24 @@ export async function createMutualCampaign(
   const assetHash = sha256Hex(input.asset);
   const sealed = await deps.seal(id, input.asset);
 
+  // Optional on-chain anchor — best-effort + non-fatal (a chain failure must
+  // never block the off-chain seal, which IS the real artifact). Gated off by
+  // default; same honesty contract as scan-report anchoring.
+  let onchain: MintResult = null;
+  if (env.MUTUAL_ONCHAIN_ENABLED) {
+    try {
+      onchain = await deps.mintOnChain({
+        rewardAmount: input.rewardAmount,
+        assetBlobRef: sealed?.blobId ?? '',
+        assetHash,
+        assetSealPolicy: sealed?.sealId ?? '',
+        sandboxOnly: input.sandboxOnly,
+      });
+    } catch (err) {
+      log.warn({ mutualId: id, err: (err as Error).message }, 'mutual on-chain mint failed (non-fatal)');
+    }
+  }
+
   const row = await deps.insert({
     id,
     requesterUserId: input.requesterUserId,
@@ -179,9 +256,11 @@ export async function createMutualCampaign(
     rewardAmount: input.rewardAmount,
     stakeAmount: input.stakeAmount,
     state: 'asset_sealed',
+    suiObjectId: onchain?.suiObjectId ?? null,
+    suiCapId: onchain?.suiCapId ?? null,
   });
   log.info(
-    { mutualId: id, sealed: sealed != null, onchain: env.MUTUAL_ONCHAIN_ENABLED },
+    { mutualId: id, sealed: sealed != null, onchain: onchain != null },
     'mutual campaign created',
   );
   return row;

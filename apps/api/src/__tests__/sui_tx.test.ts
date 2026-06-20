@@ -7,6 +7,7 @@ import {
   buildCommitEvidence,
   buildCreateCampaign,
   buildCreateMutual,
+  buildCreateMutualFromGas,
   buildMarkAssetRevealed,
   buildMintPersona,
   buildOptInMutual,
@@ -92,6 +93,14 @@ describe('mutual PTB builders', () => {
     expect(moveCalls(tx)).toEqual([{ module: 'mutual', fn: 'create', args: 6 }]);
     const kinds = tx.getData().commands.map((c) => c.$kind);
     expect(kinds).toContain('TransferObjects');
+  });
+
+  it('createFromGas splits the reward from gas, creates, transfers the cap', () => {
+    const tx = buildCreateMutualFromGas(PKG, 1_000n, 'blob', 'hash', 'pol', true, ADDR);
+    expect(moveCalls(tx)).toEqual([{ module: 'mutual', fn: 'create', args: 6 }]);
+    const kinds = tx.getData().commands.map((c) => c.$kind);
+    expect(kinds).toContain('SplitCoins'); // reward funded from the gas coin
+    expect(kinds).toContain('TransferObjects'); // cap → owner
   });
 
   it('the full exchange state machine maps 1:1 to builders', () => {
