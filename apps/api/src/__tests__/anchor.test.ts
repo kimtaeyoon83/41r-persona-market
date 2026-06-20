@@ -4,8 +4,11 @@ import {
   suiObjectUrl,
   anchorPersona,
   anchorScanReport,
+  transferPersonaToUser,
+  isSuiAddress,
   type AnchorDeps,
   type ScanAnchorDeps,
+  type TransferDeps,
 } from '../services/sui/anchor.js';
 
 describe('extractCreatedObjectId (pure)', () => {
@@ -150,5 +153,87 @@ describe('anchorScanReport (Walrus+Seal, no mint)', () => {
   it('throws when the scan does not exist', async () => {
     const deps = makeScanDeps({ loadScan: vi.fn(async () => null) });
     await expect(anchorScanReport('missing', deps)).rejects.toThrow('not found');
+  });
+});
+
+const RECIPIENT = '0x' + 'a'.repeat(64);
+
+describe('isSuiAddress', () => {
+  it('accepts 0x + 64 hex, rejects everything else', () => {
+    expect(isSuiAddress(RECIPIENT)).toBe(true);
+    expect(isSuiAddress('0xabc')).toBe(false); // too short
+    expect(isSuiAddress('a'.repeat(66))).toBe(false); // no 0x
+    expect(isSuiAddress('0x' + 'g'.repeat(64))).toBe(false); // non-hex
+  });
+});
+
+function makeTransferDeps(over: Partial<TransferDeps> = {}): TransferDeps {
+  return {
+    loadPersona: vi.fn(async () => ({ suiObjectId: '0xOBJ', transferredTo: null })),
+    transfer: vi.fn(async () => ({ digest: 'tdig' })),
+    persist: vi.fn(async () => {}),
+    ...over,
+  };
+}
+
+describe('transferPersonaToUser (mint-to-user §4.1)', () => {
+  it('transfers an anchored persona + persists the recipient', async () => {
+    const deps = makeTransferDeps();
+    const now = new Date('2026-06-20T00:00:00.000Z');
+    const r = await transferPersonaToUser('p1', RECIPIENT, deps, now);
+    expect(r).toEqual({
+      status: 'transferred',
+      suiObjectId: '0xOBJ',
+      recipient: RECIPIENT,
+      digest: 'tdig',
+    });
+    expect(deps.transfer).toHaveBeenCalledWith('0xOBJ', RECIPIENT);
+    expect(deps.persist).toHaveBeenCalledWith('p1', {
+      transferredTo: RECIPIENT,
+      transferredAt: now,
+    });
+  });
+
+  it('skips an invalid recipient before any load/chain call', async () => {
+    const deps = makeTransferDeps();
+    const r = await transferPersonaToUser('p1', '0xbad', deps);
+    expect(r).toEqual({ status: 'skipped', reason: 'invalid_recipient' });
+    expect(deps.loadPersona).not.toHaveBeenCalled();
+    expect(deps.transfer).not.toHaveBeenCalled();
+  });
+
+  it('skips an unanchored persona (no on-chain object to transfer)', async () => {
+    const deps = makeTransferDeps({
+      loadPersona: vi.fn(async () => ({ suiObjectId: null, transferredTo: null })),
+    });
+    const r = await transferPersonaToUser('p1', RECIPIENT, deps);
+    expect(r).toEqual({ status: 'skipped', reason: 'not_anchored' });
+    expect(deps.transfer).not.toHaveBeenCalled();
+  });
+
+  it('is idempotent — skips when already transferred to the same recipient', async () => {
+    const deps = makeTransferDeps({
+      loadPersona: vi.fn(async () => ({ suiObjectId: '0xOBJ', transferredTo: RECIPIENT })),
+    });
+    const r = await transferPersonaToUser('p1', RECIPIENT, deps);
+    expect(r).toEqual({ status: 'skipped', reason: 'already_transferred' });
+    expect(deps.transfer).not.toHaveBeenCalled();
+    expect(deps.persist).not.toHaveBeenCalled();
+  });
+
+  it('errors on a conflicting re-target (object no longer operator-owned)', async () => {
+    const other = '0x' + 'b'.repeat(64);
+    const deps = makeTransferDeps({
+      loadPersona: vi.fn(async () => ({ suiObjectId: '0xOBJ', transferredTo: other })),
+    });
+    await expect(transferPersonaToUser('p1', RECIPIENT, deps)).rejects.toThrow(
+      'already transferred',
+    );
+    expect(deps.transfer).not.toHaveBeenCalled();
+  });
+
+  it('throws when the persona does not exist', async () => {
+    const deps = makeTransferDeps({ loadPersona: vi.fn(async () => null) });
+    await expect(transferPersonaToUser('missing', RECIPIENT, deps)).rejects.toThrow('not found');
   });
 });

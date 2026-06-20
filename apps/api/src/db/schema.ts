@@ -180,6 +180,12 @@ export const personas = pgTable('personas', {
   walrusBlobId: text('walrus_blob_id'),
   sealId: text('seal_id'),
   anchoredAt: timestamp('anchored_at'),
+  /** Mint-to-user transfer (§4.1 sovereignty, 2026-06-20). When set, the
+   *  anchored object was transferred from the operator to this Sui address
+   *  (the persona's owner) via persona::transfer_to, run by
+   *  scripts/transfer-personas.ts. Null = still operator-held. */
+  transferredTo: text('transferred_to'),
+  transferredAt: timestamp('transferred_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

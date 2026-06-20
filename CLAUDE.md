@@ -267,12 +267,16 @@ The 2026-06-20 Sui-conversion audit found the chain *mechanics* are real
 (persona anchoring + escrow lifecycle proven on testnet), but several
 design-doc promises are NOT yet wired. Don't pitch these as done:
 
-- **Persona ownership = operator-owned in practice**, not user-self-custody.
-  `anchorPersona` mints operator-signed (`mint_to_sender`). The mint-to-user
-  path is HALF-wired: `persona::transfer_to` (Move) + `buildTransferPersona`
-  (tx.ts) both exist but are called from NOWHERE in prod (tests only) — there
-  is no route/script that transfers an anchored persona to its user. So the
-  design's "소유는 유저" pillar needs a *calling surface*, not new primitives.
+- **Persona ownership = operator-owned by default**, transfer-to-user now
+  WIRED but operator-triggered. `anchorPersona` mints operator-signed
+  (`mint_to_sender`). The mint-to-user calling surface shipped 2026-06-20:
+  `anchor.ts::transferPersonaToUser` (operator-signed `persona::transfer_to`,
+  idempotent — guards anchored + valid 0x recipient, persists
+  `personas.transferred_to/at`, migration 0025) + bounded operator script
+  `scripts/transfer-personas.ts --persona <id> --to 0x<64hex>`. It's a
+  deliberate per-user handover the OPERATOR runs (there's still no persona↔user
+  link with a Sui wallet for self-serve claim, and synthetic seed personas have
+  no real owner) — so "소유는 유저" is reachable per record, not yet automatic.
 - **Escrow settlement is split 10/30/50** (`settleAndClose`, `SETTLE_BPS`):
   operator takes platform 10% + persona-time 30% (synthetic personas are
   operator-owned), the survey 50% is split evenly across resolvable

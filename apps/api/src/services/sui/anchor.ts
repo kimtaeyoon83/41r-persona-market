@@ -17,7 +17,7 @@ import { eq } from 'drizzle-orm';
 import type { Transaction } from '@mysten/sui/transactions';
 import { db, schema } from '../../db/index.js';
 import { getSuiClient, getSuiSigner, requirePackageId } from './client.js';
-import { buildMintPersona, buildAddMemwalRef } from './tx.js';
+import { buildMintPersona, buildAddMemwalRef, buildTransferPersona } from './tx.js';
 import { sealEncryptAndStore } from '../seal.js';
 import { childLogger } from '../../logger.js';
 
@@ -250,4 +250,104 @@ export async function anchorScanReport(
 
   log.info({ scanId, blobId }, 'scan report anchored on-chain (Walrus+Seal)');
   return { status: 'anchored', walrusBlobId: blobId };
+}
+
+// ─── Mint-to-user transfer (§4.1 sovereignty) ────────────────────────
+// The "소유는 유저" pillar's calling surface: hand an anchored,
+// operator-minted persona object to its owner's Sui address via
+// persona::transfer_to. The PTB builder (buildTransferPersona) + the Move
+// entry already existed — this is the missing wiring that actually invokes
+// them per record and records the handover. Operator-signed (the operator
+// currently owns the object, so only it can transfer). Bounded + idempotent,
+// run via scripts/transfer-personas.ts.
+
+/** A valid Sui address: 0x + 64 hex (same shape escrow respondents use). */
+const SUI_ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/;
+
+export function isSuiAddress(addr: string): boolean {
+  return SUI_ADDRESS_RE.test(addr);
+}
+
+export type TransferResult =
+  | { status: 'skipped'; reason: string }
+  | { status: 'transferred'; suiObjectId: string; recipient: string; digest: string };
+
+export type TransferDeps = {
+  loadPersona: (
+    personaId: string,
+  ) => Promise<{ suiObjectId: string | null; transferredTo: string | null } | null>;
+  transfer: (
+    personaObjectId: string,
+    recipient: string,
+  ) => Promise<{ digest: string }>;
+  persist: (
+    personaId: string,
+    fields: { transferredTo: string; transferredAt: Date },
+  ) => Promise<void>;
+};
+
+export function defaultTransferDeps(): TransferDeps {
+  const packageId = requirePackageId();
+  return {
+    loadPersona: async (personaId) => {
+      const [row] = await db
+        .select({
+          suiObjectId: schema.personas.suiObjectId,
+          transferredTo: schema.personas.transferredTo,
+        })
+        .from(schema.personas)
+        .where(eq(schema.personas.id, personaId))
+        .limit(1);
+      return row ?? null;
+    },
+    transfer: (personaObjectId, recipient) =>
+      executeTx(buildTransferPersona(packageId, personaObjectId, recipient)),
+    persist: async (personaId, fields) => {
+      await db
+        .update(schema.personas)
+        .set({ ...fields, updatedAt: new Date() })
+        .where(eq(schema.personas.id, personaId));
+    },
+  };
+}
+
+/**
+ * Transfer an anchored persona to `recipient` (its owner's Sui address).
+ * Guards: persona must exist + be anchored (a transfer needs an on-chain
+ * object); recipient must be a valid Sui address. Idempotent: returns
+ * { skipped } when already transferred (records the prior recipient when it
+ * matches, errors on a conflicting recipient so a re-target is explicit).
+ * Operator-signed via executeTx.
+ */
+export async function transferPersonaToUser(
+  personaId: string,
+  recipient: string,
+  deps: TransferDeps = defaultTransferDeps(),
+  now: Date = new Date(),
+): Promise<TransferResult> {
+  if (!isSuiAddress(recipient)) {
+    return { status: 'skipped', reason: 'invalid_recipient' };
+  }
+  const persona = await deps.loadPersona(personaId);
+  if (!persona) throw new Error(`persona ${personaId} not found`);
+  if (!persona.suiObjectId) {
+    return { status: 'skipped', reason: 'not_anchored' };
+  }
+  if (persona.transferredTo) {
+    // Already handed over. Re-running with the same recipient is a no-op;
+    // a DIFFERENT recipient is a caller error (the object is no longer
+    // operator-owned, so a re-transfer would fail on-chain anyway).
+    if (persona.transferredTo === recipient) {
+      return { status: 'skipped', reason: 'already_transferred' };
+    }
+    throw new Error(
+      `persona ${personaId} already transferred to ${persona.transferredTo}`,
+    );
+  }
+
+  const { digest } = await deps.transfer(persona.suiObjectId, recipient);
+  await deps.persist(personaId, { transferredTo: recipient, transferredAt: now });
+
+  log.info({ personaId, suiObjectId: persona.suiObjectId, recipient }, 'persona transferred to user');
+  return { status: 'transferred', suiObjectId: persona.suiObjectId, recipient, digest };
 }
