@@ -267,13 +267,21 @@ The 2026-06-20 Sui-conversion audit found the chain *mechanics* are real
 (persona anchoring + escrow lifecycle proven on testnet), but several
 design-doc promises are NOT yet wired. Don't pitch these as done:
 
-- **Persona ownership = operator-owned**, not user-self-custody. Anchored
-  objects are minted operator-signed; the design's "소유는 유저" pillar needs
-  a mint-to-user / `transfer_to` flow that doesn't exist yet.
-- **Escrow settles 100% to the operator** (`settleAndClose`). The §9
-  two-sided settlement (escrow → inference cost + sandbox + **user rewards**)
-  is NOT implemented — there is no per-respondent USDC payout. Tester rewards
-  today are off-chain points/credits, a separate currency, not escrow earnings.
+- **Persona ownership = operator-owned in practice**, not user-self-custody.
+  `anchorPersona` mints operator-signed (`mint_to_sender`). The mint-to-user
+  path is HALF-wired: `persona::transfer_to` (Move) + `buildTransferPersona`
+  (tx.ts) both exist but are called from NOWHERE in prod (tests only) — there
+  is no route/script that transfers an anchored persona to its user. So the
+  design's "소유는 유저" pillar needs a *calling surface*, not new primitives.
+- **Escrow settlement is split 10/30/50** (`settleAndClose`, `SETTLE_BPS`):
+  operator takes platform 10% + persona-time 30% (synthetic personas are
+  operator-owned), the survey 50% is split evenly across resolvable
+  respondents (`loadRespondents` → `users.wallet_address` 0x form), and the
+  ~10% remainder refunds to the requester on close. The §9 two-sided
+  settlement IS coded — BUT it only fires for a USDC-escrow-funded scan, and
+  that rail is gated off (next bullet), so in production escrow is DORMANT:
+  no scan reaches `escrowed`, so no per-respondent payout actually runs yet.
+  Tester rewards in production today remain off-chain points/credits.
 - **Two disconnected payment rails**: off-chain credits (the working scan
   gate) and on-chain USDC escrow (gated off, `NEXT_PUBLIC_USDC_ENABLED`).
   No product flow connects "company funds escrow" → "user earns from it".
