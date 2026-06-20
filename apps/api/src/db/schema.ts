@@ -166,8 +166,10 @@ export const personas = pgTable('personas', {
   sasAttestId: text('sas_attest_id'),
   /** HD derivation index for synthetic-cohort personas (Phase 2 §D2).
    *  Null for legacy wallet-based personas (real testers). When set,
-   *  the persona's wallet is m/44'/501'/<hd_index>'/0' under the
-   *  PERSONA_MASTER_MNEMONIC. UNIQUE so one slot maps to one wallet. */
+   *  the persona's Sui wallet is m/44'/784'/<hd_index>'/0'/0' under the
+   *  PERSONA_MASTER_MNEMONIC (Sui coin type 784, not Solana 501 — the
+   *  derivation in services/sui/persona_wallets.ts is the source of truth).
+   *  UNIQUE so one slot maps to one wallet. */
   hdIndex: integer('hd_index').unique(),
   /** On-chain anchor (chain wiring, 2026-06-19). Null until the persona is
    *  anchored via scripts/anchor-personas.ts → services/sui/anchor.ts.

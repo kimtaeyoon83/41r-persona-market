@@ -36,11 +36,4 @@ describe('env flags', () => {
     const mod = await import('../config/env.js');
     expect(mod.skipPaymentVerify).toBe(false);
   });
-
-  it('USE_X402_FALLBACK is allowed in production (marked prodSafe)', async () => {
-    process.env.NODE_ENV = 'production';
-    process.env.USE_X402_FALLBACK = 'true';
-    const mod = await import('../config/env.js');
-    expect(mod.useX402Fallback).toBe(true);
-  });
 });

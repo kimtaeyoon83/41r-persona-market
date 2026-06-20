@@ -125,7 +125,6 @@ const envSchema = z.object({
 
   // Payment verification flags (credit-ledger gating).
   SKIP_PAYMENT_VERIFY: boolFromString(false),
-  USE_X402_FALLBACK: boolFromString(false),
 
   PERSONA_SOURCE_REPORT_LIMIT: intFromString(5),
 
@@ -152,12 +151,6 @@ const envSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.string().default(''),
   R2_BUCKET: z.string().default('41rpm-screenshots'),
   R2_PUBLIC_URL: z.string().default('https://pub-d5db789b01364e288af930cfd54a666e.r2.dev'),
-
-  // EVM / BSC
-  EVM_FACILITATOR_PRIVATE_KEY: z.string().optional(),
-  BSC_RPC_URL: z.string().optional(),
-  BSC_MOCKUSDC_ADDRESS: z.string().optional(),
-  X402_EVM_RESOURCE_WALLET: z.string().optional(),
 
   // Stagehand / browser
   CHROMIUM_PATH: z.string().optional(),
@@ -202,7 +195,6 @@ export const env = loadEnv();
 // ─── Backwards-compatible exports (existing imports use these) ──────
 
 export const skipPaymentVerify = env.SKIP_PAYMENT_VERIFY;
-export const useX402Fallback = env.USE_X402_FALLBACK;
 /** Mode C build gate — false until think-aloud calibration passes (§11). */
 export const thinkAloudGatePassed = env.THINK_ALOUD_GATE_PASSED;
 export const isProd = env.NODE_ENV === 'production';
