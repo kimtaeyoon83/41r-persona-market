@@ -166,8 +166,12 @@ pnpm tsx scripts/spike-behavior-sim/run.ts spike/<id>/graph.json [--start=<node>
 - Auth provider: **Privy** (`@privy-io/react-auth`) wraps the app via
   `apps/web/app/providers.tsx`. Identity-only after the Sui migration:
   Email / Google login → bearer token. No client embedded wallet (the
-  Solana embedded-wallet + `defaultSolanaRpcsPlugin` were removed);
-  persona ownership uses server-custodied Sui wallets.
+  Solana embedded-wallet + `defaultSolanaRpcsPlugin` were removed).
+  Persona ownership reality: anchored persona objects are currently
+  **operator-owned** (minted operator-signed; synthetic seed personas have
+  no real user). The design's "user owns" pillar is not yet wired — see
+  "Chain reality check" below. Don't call personas user-owned in product
+  copy until the mint-to-user / transfer path ships.
 - Loading / error UI: each page renders its own inline pattern (small
   text + retry button). No shared primitives.
 - Components: `app-shell.tsx` is the only shared wrapper. Earlier
@@ -251,6 +255,34 @@ per record, surfaced on screen:
   `db:migrate` against prod). 0021+0022 applied to prod 2026-06-19.
 - Tests: `anchor.test.ts` (executeTx extraction, persona + scan-report order,
   idempotent, error paths) + `scan_shapers.test.ts` chain block.
+
+### Chain reality check — shipped vs designed (be honest in copy)
+
+The 2026-06-20 Sui-conversion audit found the chain *mechanics* are real
+(persona anchoring + escrow lifecycle proven on testnet), but several
+design-doc promises are NOT yet wired. Don't pitch these as done:
+
+- **Persona ownership = operator-owned**, not user-self-custody. Anchored
+  objects are minted operator-signed; the design's "소유는 유저" pillar needs
+  a mint-to-user / `transfer_to` flow that doesn't exist yet.
+- **Escrow settles 100% to the operator** (`settleAndClose`). The §9
+  two-sided settlement (escrow → inference cost + sandbox + **user rewards**)
+  is NOT implemented — there is no per-respondent USDC payout. Tester rewards
+  today are off-chain points/credits, a separate currency, not escrow earnings.
+- **Two disconnected payment rails**: off-chain credits (the working scan
+  gate) and on-chain USDC escrow (gated off, `NEXT_PUBLIC_USDC_ENABLED`).
+  No product flow connects "company funds escrow" → "user earns from it".
+- **Autonomous browsing (Mode C) is gated** (`THINK_ALOUD_GATE_PASSED=false`).
+  The shipped validator is capture-and-react (1 screenshot + persona
+  reactions), not autonomous traversal. The headline pitch must say so.
+- **Mutual-sealed campaigns (§4.5)** exist in Move + `seal_approve_evidence`
+  but have ZERO API/UI routes — unreachable from the product.
+- **USDC end-to-end is unverified**: the Privy raw-sign → Sui signature path
+  (`lib/sui-wallet.ts::signAndExecuteSuiTx`) has never succeeded in a real
+  browser; needs in-browser live-verify before the flag flips on.
+
+These are product/economic decisions, not bugs — but copy/pitch must match
+this reality until they ship.
 
 ### Auth (Privy + middleware)
 - Web: Privy is the single auth provider. `usePrivy()` gives
