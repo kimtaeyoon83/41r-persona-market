@@ -12,7 +12,8 @@
 // in-browser readable. The honest verifiable claim is the public content-hash
 // commitment, not decryption.
 
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, sql } from 'drizzle-orm';
+import { COHORT_BY_ID } from '@41rpm/shared';
 import { db, schema } from '../../db/index.js';
 import { getSuiClient } from './client.js';
 import { getBlob, walrusBlobUrl } from '../walrus.js';
@@ -271,5 +272,221 @@ export async function buildReportProof(
       plaintext,
       note: REPORT_NOTE,
     },
+  };
+}
+
+// ─── Chain showcase ──────────────────────────────────────────────────────────
+// Judge-facing data-provenance view: auto-pick the scan with the MOST anchored
+// personas, then return the whole on-chain ↔ Walrus ↔ report linkage so a single
+// page can draw it. DB-only and fast (no per-persona getObject — the live drill-
+// down reuses GET /persona/:id/proof). The story it tells:
+//   persona vector → Seal blob + public manifest → Sui object.memwal_refs
+//   N personas → aggregate scores → report (its own hash + sealed blob)
+
+export type ShowcasePersona = {
+  persona_id: string;
+  cohort_id: string;
+  cohort_label: string;
+  scores: {
+    happiness: number | null;
+    engagement: number | null;
+    task_success: number | null;
+    adoption: number | null;
+    retention_d7: number | null;
+  };
+  sui_object_id: string;
+  object_url: string;
+  walrus_blob_id: string | null;
+  walrus_url: string | null;
+  content_manifest_blob_id: string | null;
+  content_manifest_url: string | null;
+  content_hash: string | null;
+  anchored_at: string | null;
+};
+
+export type ChainShowcase = {
+  scan: {
+    id: string;
+    target_url: string;
+    category: string | null;
+    one_line_pitch: string | null;
+    mode: string;
+    audience_fit_score: number | null;
+    best_cohort_id: string | null;
+    best_cohort_label: string | null;
+    best_cohort_score: number | null;
+    worst_cohort_id: string | null;
+    personas_completed: number | null;
+  };
+  report_proof: ReportProof | null;
+  personas: ShowcasePersona[];
+  counts: { anchored: number; total_in_scan: number };
+};
+
+export type ShowcaseDeps = {
+  /** The scan to feature = the one whose responses include the most anchored
+   *  personas (ties → newest). null when nothing is anchored yet. */
+  pickScanId: () => Promise<string | null>;
+  loadScan: (
+    scanId: string,
+  ) => Promise<typeof schema.audienceFitScans.$inferSelect | null>;
+  loadAnchoredPersonas: (scanId: string) => Promise<
+    Array<{
+      personaId: string;
+      cohortId: string;
+      happiness: number | null;
+      engagement: number | null;
+      taskSuccess: number | null;
+      adoption: number | null;
+      retentionD7: number | null;
+      suiObjectId: string | null;
+      walrusBlobId: string | null;
+      contentManifestBlobId: string | null;
+      contentHash: string | null;
+      anchoredAt: Date | null;
+    }>
+  >;
+  countPersonasInScan: (scanId: string) => Promise<number>;
+};
+
+export function defaultShowcaseDeps(): ShowcaseDeps {
+  return {
+    pickScanId: async () => {
+      // Prefer the scan that tells the WHOLE story: an anchored report AND the
+      // most anchored personas. Falls back to most-anchored-personas when no
+      // scan has an anchored report yet (report_anchored sorts first).
+      const rows = await db
+        .select({
+          scanId: schema.scanPersonaResponses.scanId,
+          n: sql<number>`count(distinct ${schema.personas.id})::int`,
+          reportAnchored: sql<boolean>`bool_or(${schema.audienceFitScans.reportContentHash} is not null)`,
+        })
+        .from(schema.scanPersonaResponses)
+        .innerJoin(
+          schema.personas,
+          eq(schema.personas.id, schema.scanPersonaResponses.personaId),
+        )
+        .innerJoin(
+          schema.audienceFitScans,
+          eq(schema.audienceFitScans.id, schema.scanPersonaResponses.scanId),
+        )
+        .where(isNotNull(schema.personas.suiObjectId))
+        .groupBy(schema.scanPersonaResponses.scanId)
+        .orderBy(
+          desc(sql`bool_or(${schema.audienceFitScans.reportContentHash} is not null)`),
+          desc(sql`count(distinct ${schema.personas.id})`),
+        )
+        .limit(1);
+      return rows[0]?.scanId ?? null;
+    },
+    loadScan: async (scanId) => {
+      const [row] = await db
+        .select()
+        .from(schema.audienceFitScans)
+        .where(eq(schema.audienceFitScans.id, scanId))
+        .limit(1);
+      return row ?? null;
+    },
+    loadAnchoredPersonas: async (scanId) =>
+      db
+        .select({
+          personaId: schema.scanPersonaResponses.personaId,
+          cohortId: schema.scanPersonaResponses.cohortId,
+          happiness: schema.scanPersonaResponses.happinessScore,
+          engagement: schema.scanPersonaResponses.engagementScore,
+          taskSuccess: schema.scanPersonaResponses.taskSuccessScore,
+          adoption: schema.scanPersonaResponses.adoptionScore,
+          retentionD7: schema.scanPersonaResponses.retentionD7,
+          suiObjectId: schema.personas.suiObjectId,
+          walrusBlobId: schema.personas.walrusBlobId,
+          contentManifestBlobId: schema.personas.contentManifestBlobId,
+          contentHash: schema.personas.contentHash,
+          anchoredAt: schema.personas.anchoredAt,
+        })
+        .from(schema.scanPersonaResponses)
+        .innerJoin(
+          schema.personas,
+          eq(schema.personas.id, schema.scanPersonaResponses.personaId),
+        )
+        .where(
+          and(
+            eq(schema.scanPersonaResponses.scanId, scanId),
+            isNotNull(schema.personas.suiObjectId),
+          ),
+        ),
+    countPersonasInScan: async (scanId) => {
+      const [r] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(schema.scanPersonaResponses)
+        .where(eq(schema.scanPersonaResponses.scanId, scanId));
+      return r?.n ?? 0;
+    },
+  };
+}
+
+/** Pure shaper — DB persona row → wire shape (testable without a DB). */
+export function shapeShowcasePersona(
+  p: Awaited<ReturnType<ShowcaseDeps['loadAnchoredPersonas']>>[number],
+): ShowcasePersona {
+  return {
+    persona_id: p.personaId,
+    cohort_id: p.cohortId,
+    cohort_label: COHORT_BY_ID[p.cohortId]?.label ?? p.cohortId,
+    scores: {
+      happiness: p.happiness,
+      engagement: p.engagement,
+      task_success: p.taskSuccess,
+      adoption: p.adoption,
+      retention_d7: p.retentionD7,
+    },
+    sui_object_id: p.suiObjectId!,
+    object_url: suiObjectUrl(p.suiObjectId!),
+    walrus_blob_id: p.walrusBlobId,
+    walrus_url: p.walrusBlobId ? walrusBlobUrl(p.walrusBlobId) : null,
+    content_manifest_blob_id: p.contentManifestBlobId,
+    content_manifest_url: p.contentManifestBlobId
+      ? walrusBlobUrl(p.contentManifestBlobId)
+      : null,
+    content_hash: p.contentHash,
+    anchored_at: p.anchoredAt ? p.anchoredAt.toISOString() : null,
+  };
+}
+
+export async function buildChainShowcase(
+  deps: ShowcaseDeps = defaultShowcaseDeps(),
+): Promise<ChainShowcase | null> {
+  const scanId = await deps.pickScanId();
+  if (!scanId) return null;
+  const scan = await deps.loadScan(scanId);
+  if (!scan) return null;
+
+  const [rawPersonas, total, reportProof] = await Promise.all([
+    deps.loadAnchoredPersonas(scanId),
+    deps.countPersonasInScan(scanId),
+    buildReportProof(scanId, scan),
+  ]);
+
+  const personas = rawPersonas.map(shapeShowcasePersona);
+  log.info({ scanId, anchored: personas.length, total }, 'chain showcase built');
+
+  return {
+    scan: {
+      id: scan.id,
+      target_url: scan.targetUrl,
+      category: scan.category,
+      one_line_pitch: scan.oneLinePitch,
+      mode: scan.mode,
+      audience_fit_score: scan.audienceFitScore,
+      best_cohort_id: scan.bestCohortId,
+      best_cohort_label: scan.bestCohortId
+        ? (COHORT_BY_ID[scan.bestCohortId]?.label ?? scan.bestCohortId)
+        : null,
+      best_cohort_score: scan.bestCohortScore,
+      worst_cohort_id: scan.worstCohortId,
+      personas_completed: scan.personasCompleted,
+    },
+    report_proof: reportProof,
+    personas,
+    counts: { anchored: personas.length, total_in_scan: total },
   };
 }

@@ -321,6 +321,48 @@ export type ReportProof = {
   } | null;
 };
 
+/** Chain showcase — judge-facing provenance graph (GET /api/chain/showcase).
+ *  Mirrors services/sui/proof.ts::ChainShowcase. */
+export type ShowcasePersona = {
+  persona_id: string;
+  cohort_id: string;
+  cohort_label: string;
+  scores: {
+    happiness: number | null;
+    engagement: number | null;
+    task_success: number | null;
+    adoption: number | null;
+    retention_d7: number | null;
+  };
+  sui_object_id: string;
+  object_url: string;
+  walrus_blob_id: string | null;
+  walrus_url: string | null;
+  content_manifest_blob_id: string | null;
+  content_manifest_url: string | null;
+  content_hash: string | null;
+  anchored_at: string | null;
+};
+
+export type ChainShowcase = {
+  scan: {
+    id: string;
+    target_url: string;
+    category: string | null;
+    one_line_pitch: string | null;
+    mode: string;
+    audience_fit_score: number | null;
+    best_cohort_id: string | null;
+    best_cohort_label: string | null;
+    best_cohort_score: number | null;
+    worst_cohort_id: string | null;
+    personas_completed: number | null;
+  };
+  report_proof: ReportProof | null;
+  personas: ShowcasePersona[];
+  counts: { anchored: number; total_in_scan: number };
+};
+
 /** Lightweight scan summary used by the public homepage feeds
  *  (Recent / Top / Live). Per Phase 2 §8.1 / P2-4. */
 export type ScanSummary = {
@@ -490,6 +532,10 @@ export const scanApi = {
    *  object — honestly weaker than a persona's). */
   getReportProof: (scanId: string) =>
     request<ReportProof>(`/api/scan/${scanId}/report-proof`),
+
+  /** Judge-facing chain provenance — auto-picks the most-anchored
+   *  (report-anchored first) scan + its anchored persona grid. */
+  getChainShowcase: () => request<ChainShowcase>(`/api/chain/showcase`),
 
   /** Recent 20 completed scans (newest first). */
   getRecent: () => request<{ scans: ScanSummary[] }>('/api/scan/recent'),

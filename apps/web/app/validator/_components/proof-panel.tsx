@@ -422,6 +422,18 @@ export function ReportProofPanel({ scanId }: { scanId: string }) {
         <div style={{ fontSize: 10, color: C.textFaint, lineHeight: 1.5, marginTop: 2 }}>
           {proof.report.note}
         </div>
+        <a
+          href="/proof"
+          style={{
+            fontSize: 11,
+            color: C.accent,
+            textDecoration: "none",
+            fontFamily: FS,
+            marginTop: 4,
+          }}
+        >
+          See how this is built — on-chain provenance →
+        </a>
       </div>
     </Card>
   );

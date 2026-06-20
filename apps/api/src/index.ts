@@ -11,6 +11,7 @@ import consoleRouter from './routes/console.js';
 import partnerRouter from './routes/partner.js';
 import sessionRouter from './routes/session.js';
 import mutualRouter from './routes/mutual.js';
+import chainRouter from './routes/chain.js';
 import { startCalibrationCron } from './services/calibration/cron.js';
 import { startDigestCron } from './services/notify.js';
 import { allowedOrigins, corsOptions } from './config/cors.js';
@@ -64,6 +65,8 @@ app.get('/api/health', async (req, res) => {
 // excluded — beacons are high-frequency by design.
 app.use('/api/hello', readLimiter, helloRouter);
 app.use('/api/scan', readLimiter, scanRouter);
+// Chain showcase — judge-facing data-provenance view (read-only, public).
+app.use('/api/chain', readLimiter, chainRouter);
 // Calibration is an operator/dev surface — demoted to operator-only
 // when ADMIN_API_KEY is configured (console-ia-redesign.md §3.2).
 app.use('/api/calibration', readLimiter, requireAdminKeyIfConfigured, calibrationRouter);

@@ -3,7 +3,10 @@ import { createHash } from 'node:crypto';
 import {
   buildPersonaProof,
   buildReportProof,
+  buildChainShowcase,
+  shapeShowcasePersona,
   type PersonaProofDeps,
+  type ShowcaseDeps,
 } from '../services/sui/proof.js';
 import type { schema } from '../db/index.js';
 
@@ -142,5 +145,63 @@ describe('buildReportProof', () => {
     const proof = await buildReportProof('s1', scanRow);
     const browserHash = createHash('sha256').update(proof!.report!.plaintext).digest('hex');
     expect(browserHash).toBe(proof!.report!.content_hash);
+  });
+});
+
+const personaRow = {
+  personaId: 'p1',
+  cohortId: 'investor',
+  happiness: 70,
+  engagement: 60,
+  taskSuccess: 55,
+  adoption: 40,
+  retentionD7: 5,
+  suiObjectId: '0xobj',
+  walrusBlobId: 'sealedBlob',
+  contentManifestBlobId: 'manifestBlob',
+  contentHash: 'abc123',
+  anchoredAt: new Date('2026-06-20T12:00:00.000Z'),
+};
+
+describe('shapeShowcasePersona (pure)', () => {
+  it('maps scores + builds object/walrus urls', () => {
+    const s = shapeShowcasePersona(personaRow);
+    expect(s.persona_id).toBe('p1');
+    expect(s.scores).toEqual({
+      happiness: 70,
+      engagement: 60,
+      task_success: 55,
+      adoption: 40,
+      retention_d7: 5,
+    });
+    expect(s.object_url).toContain('0xobj');
+    expect(s.walrus_url).toContain('sealedBlob');
+    expect(s.content_manifest_url).toContain('manifestBlob');
+  });
+});
+
+function showcaseDeps(overrides: Partial<ShowcaseDeps> = {}): ShowcaseDeps {
+  return {
+    pickScanId: async () => 's1',
+    loadScan: async () => scanRow,
+    loadAnchoredPersonas: async () => [personaRow],
+    countPersonasInScan: async () => 112,
+    ...overrides,
+  };
+}
+
+describe('buildChainShowcase', () => {
+  it('returns null when nothing is anchored', async () => {
+    const out = await buildChainShowcase(showcaseDeps({ pickScanId: async () => null }));
+    expect(out).toBeNull();
+  });
+
+  it('assembles scan + report proof + anchored persona grid + counts', async () => {
+    const out = await buildChainShowcase(showcaseDeps());
+    expect(out?.scan.id).toBe('s1');
+    expect(out?.report_proof?.on_chain_commitment).toBe(false);
+    expect(out?.personas).toHaveLength(1);
+    expect(out?.personas[0]?.sui_object_id).toBe('0xobj');
+    expect(out?.counts).toEqual({ anchored: 1, total_in_scan: 112 });
   });
 });
