@@ -27,6 +27,47 @@ import { C, FM, TopBar } from "../../validator/_components/ui";
 const TABS = ["overview", "reports", "analytics", "settings"] as const;
 export type ConsoleTab = (typeof TABS)[number];
 
+// Crisp 16px line icons (replace the old emoji glyphs in the rail).
+function Ico({ name }: { name: "grid" | "lock" | "plus" | "wallet" }) {
+  const common = {
+    className: "cs-ico",
+    viewBox: "0 0 16 16",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.6,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  if (name === "grid")
+    return (
+      <svg {...common}>
+        <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1.2" />
+        <rect x="9" y="2.5" width="4.5" height="4.5" rx="1.2" />
+        <rect x="2.5" y="9" width="4.5" height="4.5" rx="1.2" />
+        <rect x="9" y="9" width="4.5" height="4.5" rx="1.2" />
+      </svg>
+    );
+  if (name === "lock")
+    return (
+      <svg {...common}>
+        <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
+        <path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7" />
+      </svg>
+    );
+  if (name === "plus")
+    return (
+      <svg {...common}>
+        <path d="M8 3.2v9.6M3.2 8h9.6" />
+      </svg>
+    );
+  return (
+    <svg {...common}>
+      <rect x="2" y="4" width="12" height="8.5" rx="2" />
+      <path d="M10.6 8.2h2.2" />
+    </svg>
+  );
+}
+
 export function ConsoleShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -79,16 +120,10 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
       <div className="cs-layout">
         <aside className="cs-side">
           <Link href="/console" className={`cs-item${pathname === "/console" ? " active" : ""}`}>
-            <span style={{ fontFamily: FM, fontSize: 11 }}>▦</span> {t("console.title")}
-          </Link>
-          <Link
-            href="/console/mutual"
-            className={`cs-item${pathname === "/console/mutual" ? " active" : ""}`}
-          >
-            <span style={{ fontFamily: FM, fontSize: 11 }}>⇄</span> {t("mutual.nav")}
+            <Ico name="grid" /> Overview
           </Link>
 
-          <div className="cs-label">{t("console.title")}</div>
+          <div className="cs-label">Sites</div>
           {sites === null ? (
             <div style={{ padding: "6px 10px", fontSize: 11, color: C.textFaint }}>…</div>
           ) : (
@@ -135,7 +170,17 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
             className={`cs-item${pathname === "/console/sites/new" ? " active" : ""}`}
             style={{ color: C.accent, fontWeight: 600 }}
           >
-            {t("console.addSite")}
+            <Ico name="plus" /> {t("console.addSite").replace(/^\+\s*/, "")}
+          </Link>
+
+          <div className="cs-label">Labs</div>
+          <Link
+            href="/console/mutual"
+            className={`cs-item${pathname === "/console/mutual" ? " active" : ""}`}
+            title="Mutual-sealed exchange — experimental (on-chain mint gated)"
+          >
+            <Ico name="lock" /> {t("mutual.nav")}
+            <span className="cs-tag">BETA</span>
           </Link>
 
           <div className="cs-foot">
@@ -145,7 +190,8 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
                 className="cs-item"
                 style={{ fontFamily: FM, fontSize: 11.5 }}
               >
-                ${(balanceCents / 100).toFixed(2)} · {t("console.creditsLeft")}
+                <Ico name="wallet" /> ${(balanceCents / 100).toFixed(2)} ·{" "}
+                {t("console.creditsLeft")}
               </Link>
             )}
             <Link href="/me" className="cs-item">

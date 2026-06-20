@@ -499,7 +499,7 @@ a.e-card:hover,
   min-height: calc(100vh - 57px);
 }
 .cs-side {
-  width: 232px;
+  width: 244px;
   flex-shrink: 0;
   background: #ffffff;
   border-right: 1px solid #e7ecf3;
@@ -507,7 +507,7 @@ a.e-card:hover,
   top: 57px;
   height: calc(100vh - 57px);
   overflow-y: auto;
-  padding: 16px 10px;
+  padding: 18px 12px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -523,27 +523,43 @@ a.e-card:hover,
 .cs-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 7px;
-  font-size: 12.5px;
-  color: #5c616b;
+  gap: 9px;
+  padding: 8px 11px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #48566a;
   text-decoration: none;
-  border-left: 2px solid transparent;
   transition: background-color 0.12s ease, color 0.12s ease;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .cs-item:hover {
-  background: #f6f9fc;
+  background: #f0f4f9;
   color: #0a2540;
 }
 .cs-item.active {
-  background: #f6f9fc;
-  color: #0a2540;
+  background: #ecebff;
+  color: #635bff;
   font-weight: 600;
-  border-left-color: #635bff;
+}
+.cs-ico {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+.cs-tag {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #8693a6;
+  background: #f0f4f9;
+  border: 1px solid #e7ecf3;
+  border-radius: 999px;
+  padding: 1px 6px;
 }
 .cs-sub {
   margin-left: 14px;
