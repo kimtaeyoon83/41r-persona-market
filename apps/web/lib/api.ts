@@ -271,6 +271,56 @@ export type ScanPersonaDetail = {
   };
 };
 
+/** Live on-chain proof of a persona's integrity (GET /persona/:id/proof).
+ *  Mirrors services/sui/proof.ts::PersonaProof. */
+export type OnChainObject = {
+  exists: boolean;
+  type: string | null;
+  owner: unknown;
+  version: string | null;
+  memwal_refs: string[];
+  memwal_count: number;
+};
+
+export type PersonaProof = {
+  persona_id: string;
+  scan_id: string | null;
+  anchored: boolean;
+  anchor: {
+    sui_object_id: string;
+    object_url: string;
+    seal_blob_id: string | null;
+    seal_blob_url: string | null;
+    seal_id: string | null;
+    content_manifest_blob_id: string | null;
+    content_manifest_url: string | null;
+    anchored_at: string | null;
+  } | null;
+  onchain: OnChainObject | { error: string } | null;
+  manifest: { ok: true; manifest: unknown } | { ok: false; error: string } | null;
+  content: {
+    decryption: 'gated';
+    plaintext: string;
+    content_hash: string | null;
+  };
+};
+
+export type ReportProof = {
+  scan_id: string;
+  anchored: boolean;
+  on_chain_commitment: false;
+  report: {
+    content_hash: string | null;
+    seal_blob_id: string | null;
+    seal_blob_url: string | null;
+    seal_id: string | null;
+    anchored_at: string | null;
+    decryption: 'gated';
+    plaintext: string;
+    note: string;
+  } | null;
+};
+
 /** Lightweight scan summary used by the public homepage feeds
  *  (Recent / Top / Live). Per Phase 2 §8.1 / P2-4. */
 export type ScanSummary = {
@@ -430,6 +480,16 @@ export const scanApi = {
 
   getPersona: (scanId: string, personaId: string) =>
     request<ScanPersonaDetail>(`/api/scan/${scanId}/persona/${personaId}`),
+
+  /** Live on-chain proof for the Proof panel (getObject + Walrus manifest +
+   *  plaintext + DB hash). The browser re-hashes the plaintext to verify. */
+  getPersonaProof: (scanId: string, personaId: string) =>
+    request<PersonaProof>(`/api/scan/${scanId}/persona/${personaId}/proof`),
+
+  /** Report integrity proof (DB content-hash over the report snapshot; no Sui
+   *  object — honestly weaker than a persona's). */
+  getReportProof: (scanId: string) =>
+    request<ReportProof>(`/api/scan/${scanId}/report-proof`),
 
   /** Recent 20 completed scans (newest first). */
   getRecent: () => request<{ scans: ScanSummary[] }>('/api/scan/recent'),

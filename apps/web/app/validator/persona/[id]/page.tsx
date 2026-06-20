@@ -6,6 +6,7 @@ import { Suspense, useEffect, useState } from "react";
 import { scanApi, type ScanPersonaDetail } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { Bar, C, Card, FM, FS, Frame, Pill } from "../../_components/ui";
+import { PersonaProofPanel } from "../../_components/proof-panel";
 
 // Screen 5: Persona drill-down. Reads
 // /api/scan/:scanId/persona/:personaId — pass scanId via the
@@ -548,77 +549,12 @@ function PersonaInner() {
               </Card>
             )}
 
+            {/* On-chain proof panel — live getObject + public content-hash
+                manifest + in-browser sha256 verification. Replaces the old
+                read-only link strip. Hidden when unanchored (chain == null),
+                preserving the "no fake/empty state" honesty contract. */}
             {persona.chain && (
-              <Card padding={14}>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: C.accent,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    marginBottom: 10,
-                    fontWeight: 600,
-                    fontFamily: FS,
-                  }}
-                >
-                  On-chain · Sui testnet
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <div>
-                    <div style={{ fontSize: 10, color: C.textFaint, marginBottom: 3 }}>
-                      Persona object
-                    </div>
-                    <a
-                      href={persona.chain.object_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        fontFamily: FM,
-                        fontSize: 12,
-                        color: C.accent,
-                        wordBreak: "break-all",
-                        textDecoration: "none",
-                      }}
-                    >
-                      {persona.chain.sui_object_id} ↗
-                    </a>
-                  </div>
-                  {persona.chain.walrus_blob_id && (
-                    <div>
-                      <div style={{ fontSize: 10, color: C.textFaint, marginBottom: 3 }}>
-                        Memory blob (Walrus) · Seal-encrypted
-                      </div>
-                      {persona.chain.walrus_url ? (
-                        <a
-                          href={persona.chain.walrus_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{
-                            fontFamily: FM,
-                            fontSize: 12,
-                            color: C.accent,
-                            wordBreak: "break-all",
-                            textDecoration: "none",
-                          }}
-                        >
-                          {persona.chain.walrus_blob_id} ↗
-                        </a>
-                      ) : (
-                        <div
-                          style={{
-                            fontFamily: FM,
-                            fontSize: 12,
-                            color: C.textDim,
-                            wordBreak: "break-all",
-                          }}
-                        >
-                          {persona.chain.walrus_blob_id}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </Card>
+              <PersonaProofPanel scanId={scan.id} personaId={persona.id} />
             )}
 
             <Card padding={14} style={{ background: "#fbf8f0", borderColor: "#ecdcb4" }}>

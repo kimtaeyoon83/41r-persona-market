@@ -19,6 +19,7 @@ import {
   RetentionCurve,
   SectionLabel,
 } from "../../_components/ui";
+import { ReportProofPanel } from "../../_components/proof-panel";
 
 // Screen 4: Survival Summary report. Maps to ScreenReport in
 // screens-v2.jsx, hydrated from GET /api/scan/:id/report.
@@ -1299,32 +1300,13 @@ strong      85   70   55   30`}
           </div>
         </div>
 
+        {/* Report integrity panel — DB content-hash over the report snapshot
+            the browser recomputes + the sealed Walrus blob. Self-hides when the
+            report isn't anchored. Honestly weaker than a persona's proof (no Sui
+            object for a scan yet — the panel says so). */}
         {r.report_anchor && (
-          <div
-            style={{
-              marginTop: 8,
-              padding: "10px 14px",
-              borderRadius: 8,
-              border: `1px solid ${C.border}`,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexWrap: "wrap",
-              fontFamily: FM,
-              fontSize: 11,
-              color: C.textFaint,
-            }}
-          >
-            <span style={{ color: C.accent, letterSpacing: "0.06em" }}>ON-CHAIN</span>
-            <span>Report anchored · Walrus · Seal-encrypted:</span>
-            <a
-              href={r.report_anchor.walrus_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ color: C.accent, wordBreak: "break-all", textDecoration: "none" }}
-            >
-              {r.report_anchor.walrus_blob_id} ↗
-            </a>
+          <div style={{ marginTop: 8 }}>
+            <ReportProofPanel scanId={scanId} />
           </div>
         )}
       </div>

@@ -44,6 +44,7 @@ import { validateTargetUrl } from '../services/url_guard.js';
 import { awardSurveyPoints, isRewardAvailable } from '../services/rewards.js';
 import { notifySurveyMilestone } from '../services/notify.js';
 import { suiObjectUrl } from '../services/sui/anchor.js';
+import { buildPersonaProof, buildReportProof } from '../services/sui/proof.js';
 import { walrusBlobUrl } from '../services/walrus.js';
 import { getSuiSigner, requirePackageId } from '../services/sui/client.js';
 import { usdcAmountFromCents, verifyCampaignCreation } from '../services/sui/escrow.js';
@@ -1569,6 +1570,50 @@ router.get('/:scanId/persona/:personaId', async (req, res) => {
   }
 
   res.json(shapePersonaDetailResponse(scan, row));
+});
+
+// ─── GET /api/scan/:scanId/persona/:personaId/proof ───────────────────
+// Live on-chain proof for the Proof panel: getObject(Sui) + public manifest
+// (Walrus) + plaintext vector + DB hash. The browser re-hashes the plaintext
+// and matches it against the public manifest's sha256 (independent of our DB).
+router.get('/:scanId/persona/:personaId/proof', async (req, res) => {
+  const { scanId, personaId } = req.params;
+  if (!UUID_RE.test(scanId) || !UUID_RE.test(personaId)) {
+    res.status(400).json({ error: 'invalid_id' });
+    return;
+  }
+  try {
+    const proof = await buildPersonaProof(personaId, scanId);
+    if (!proof) {
+      res.status(404).json({ error: 'persona_not_found' });
+      return;
+    }
+    res.json(proof);
+  } catch (e) {
+    res.status(500).json({ error: 'proof_failed', detail: (e as Error).message });
+  }
+});
+
+// ─── GET /api/scan/:scanId/report-proof ───────────────────────────────
+// Report integrity proof. Honestly weaker than a persona's — no Sui object
+// (scan≈Campaign escrow deferred), so this is a DB content-hash over the
+// report snapshot the browser can recompute, plus the sealed Walrus blob.
+router.get('/:scanId/report-proof', async (req, res) => {
+  const { scanId } = req.params;
+  if (!UUID_RE.test(scanId)) {
+    res.status(400).json({ error: 'invalid_id' });
+    return;
+  }
+  try {
+    const proof = await buildReportProof(scanId);
+    if (!proof) {
+      res.status(404).json({ error: 'scan_not_found' });
+      return;
+    }
+    res.json(proof);
+  } catch (e) {
+    res.status(500).json({ error: 'proof_failed', detail: (e as Error).message });
+  }
 });
 
 // Persona-detail rawResponse hides behind Drizzle's `unknown` jsonb
