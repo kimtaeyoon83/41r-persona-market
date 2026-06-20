@@ -189,6 +189,58 @@ pnpm tsx scripts/spike-behavior-sim/run.ts spike/<id>/graph.json [--start=<node>
   **Inter** (body) + **JetBrains Mono** (money / addresses). CSS
   variables `--font-display`, `--font-sans`, `--font-mono`.
 
+### Site redesign — Stripe-style theme (Claude Design handoff, 2026-06-21)
+
+The product UI was redesigned from the warm orange "measuring device" look to a
+**Stripe-style indigo on cool blue-grey** language (indigo `#635bff` accent,
+ink `#0a2540` on field `#f6f9fc`, **Space Grotesk** display + **Hanken Grotesk**
+body + **JetBrains Mono** numerals — fonts added in `layout.tsx` as
+`--font-pr-display` / `--font-pr-body`). This is now the authoritative look —
+the OLD orange palette / Inter "instrument" theme is superseded. Two surfaces:
+
+- **Funnel pages** (landing `/`, `/validator/detail`, `/validator/processing`,
+  `/validator/report`) use the new module **`app/_pr/ui.tsx`** — `PR` tokens +
+  `FD`/`FB`/`FM` fonts + `PrShell` (sticky white topbar + cool field) /
+  `PrButton` / `PrCard` / `scoreTone`. They render their own shell, NOT `Frame`.
+  Each maps 1:1 to `Prototype.dc.html` (landing hero "Who's actually going to
+  use this?", detail "Sharpen" chips, processing dark navy `{done}/112` card,
+  report "THE ANSWER" gauge hero). Live data/flow is preserved
+  (`onAnalyze`, `?mode=B`, scanApi feeds, polling).
+- **Everything else** (validator internals, console, me, /proof) reskins through
+  the SHARED `validator/_components/ui.tsx`: the `C` palette **VALUES** were
+  flipped to the `_pr` tokens (KEYS unchanged) + `FS` → Hanken body + new `FD`
+  export. **To retheme the whole non-funnel surface, change `C`'s values in that
+  ONE file** — every page reading `C.*` (report sub-sections, persona,
+  calibration, compare, survey, how-it-works, proof, console shell, me) follows.
+  `PMFGauge`/`PersonaBoard`/`RetentionCurve`/`Bar`/`Pill` are C-driven so they
+  reskin too. Leftover hardcoded warm hexes (`#f3f0e8` etc.) were cooled
+  per-file + in `globals.css`.
+- **TopBar logo** = the **"41R" Space Grotesk wordmark** (was the
+  `rpm_black_horizontal.png`), matching `PrShell`. Same on every shared-TopBar
+  page.
+- **Console left rail** (`console/_components/shell.tsx`): 16px line icons
+  (grid/lock/plus/wallet, NOT emoji), sections Overview · SITES · LABS, the
+  Mutual item tagged `BETA` (it's the gated §4.5 experimental surface), active =
+  filled soft-indigo pill (`.cs-item.active`, `.cs-ico`, `.cs-tag` in
+  globals.css).
+- **Report order**: title header FIRST, then the "THE ANSWER" hero, then detail
+  sections — the hero must not sit above the title. All AARRR honesty banners
+  (persona-conditional, "directional only", BIGGEST LEAK) preserved through the
+  reskin — do NOT drop them when restyling.
+- **`/proof`** (`app/proof/page.tsx` + `GET /api/chain/showcase` →
+  `services/sui/proof.ts::buildChainShowcase`, route `routes/chain.ts`): the
+  judge-facing provenance page — pipeline flow diagram + the most-anchored
+  (report-anchored-first) scan's persona grid → click a persona for the 5-layer
+  drill-down (plaintext → sealed blob → public Walrus manifest JSON → live Sui
+  getObject → score→report) with in-browser sha256 verify.
+
+Do NOT revert to the orange "measuring device" palette or re-introduce the PNG
+TopBar logo; the redesign is the shipped contract. When verifying UI, render the
+LIVE page headless (Playwright-core + cached Chromium, `domcontentloaded` not
+`networkidle` — Privy keeps connections open) — do NOT claim a screen is fine
+without seeing it (the authed console needs a temp `?preview` mock hatch, removed
+before commit).
+
 ### Design tokens / utility classes
 Declared in `app/globals.css`. Prefer these over ad-hoc Tailwind combos:
 - Cards: `.hf-card` (bg-1 + line-1 border + r-4) · `.hf-card-inset` (bg-2 + r-3)
