@@ -401,60 +401,41 @@ export function TopBar({ step }: { step?: string } = {}) {
         {showAuthControls &&
           (authenticated ? (
             <>
-              {/* Chain badge — web3 convention: show the active network in the
-                  top-right. Amber = testnet, green = mainnet. */}
-              <span
-                className="hide-mobile"
-                title={`Sui ${SUI_NET_LABEL} — chain network`}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 11,
-                  fontFamily: FM,
-                  fontWeight: 600,
-                  letterSpacing: "0.04em",
-                  padding: "3px 9px",
-                  borderRadius: 999,
-                  color: SUI_IS_MAINNET ? C.ok : C.warn,
-                  background: SUI_IS_MAINNET ? C.okSoft : C.warnSoft,
-                  border: `1px solid ${SUI_IS_MAINNET ? "#c4e0d0" : "#ecdcab"}`,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                <SuiIcon size={13} />
-                Sui · {SUI_NET_LABEL}
-              </span>
-              {/* Wallet shortcut — desktop only; on phone it lives in the
-                  hamburger menu so the bar stays logo + locale + ☰. */}
+              {/* Wallet + chain in ONE neutral pill (desktop) — keeps the
+                  network visible (web3 convention) without the loud colored
+                  badge that crowded the bar. Phone hides it; the hamburger
+                  carries wallet. */}
               <Link
                 href="/me/wallet"
-                title={t("nav.wallet")}
                 className="hide-mobile"
+                title={`Your Sui wallet · ${SUI_NET_LABEL}`}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: 6,
-                  fontSize: 13,
+                  gap: 7,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 999,
+                  padding: "4px 11px 4px 9px",
+                  fontSize: 12.5,
                   color: C.textDim,
                   textDecoration: "none",
                   whiteSpace: "nowrap",
                 }}
               >
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={1.6}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+                <SuiIcon size={14} />
+                <span
+                  style={{
+                    fontFamily: FM,
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    letterSpacing: "0.03em",
+                    color: SUI_IS_MAINNET ? C.ok : C.warn,
+                  }}
                 >
-                  <rect x="2" y="4" width="12" height="8.5" rx="2" />
-                  <path d="M10.6 8.2h2.2" />
-                </svg>
-                <span className="hide-mobile">{t("nav.wallet")}</span>
+                  {SUI_NET_LABEL}
+                </span>
+                <span style={{ width: 1, height: 12, background: C.border }} />
+                <span>{t("nav.wallet")}</span>
               </Link>
               <button
                 onClick={() => logout()}
