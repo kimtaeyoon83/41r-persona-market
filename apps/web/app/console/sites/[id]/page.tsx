@@ -20,6 +20,7 @@ import {
   type ScanSummary,
   type ScanReport,
   type SiteAnalytics,
+  type SiteMember,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { C, FM, FS, Frame, Pill } from "../../../validator/_components/ui";
@@ -51,6 +52,9 @@ function SiteDetailInner() {
   const [report, setReport] = useState<ScanReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  // 'owner' (default) full control; 'viewer' = shared read-only access.
+  const [role, setRole] = useState<"owner" | "viewer">("owner");
+  const isOwner = role === "owner";
 
   // Tab lives in the URL (?tab=) so the shell sidebar's subnav and
   // the in-page tab bar stay in lockstep.
@@ -64,6 +68,7 @@ function SiteDetailInner() {
   const load = useCallback(async () => {
     const res = await consoleApi.getSite(id);
     setSite(res.workspace);
+    setRole(res.role ?? "owner");
     setScans(res.scans);
     // Show the ANCHOR scan's report — that's where partner surveys
     // accumulate and the human comparison lives. Without this the
@@ -220,6 +225,7 @@ function SiteDetailInner() {
         ) : tab === "overview" ? (
           <Overview
             site={site}
+            isOwner={isOwner}
             scans={scans}
             latest={latest}
             report={report}
@@ -236,7 +242,14 @@ function SiteDetailInner() {
         ) : tab === "analytics" ? (
           <Analytics site={site} report={report} />
         ) : (
-          <Settings site={site} copied={copied} copy={copy} onChanged={load} router={router} />
+          <Settings
+            site={site}
+            isOwner={isOwner}
+            copied={copied}
+            copy={copy}
+            onChanged={load}
+            router={router}
+          />
         )}
       </>
     </ConsoleShell>
@@ -246,6 +259,7 @@ function SiteDetailInner() {
 // ─── Overview tab (S1 layout, workspace-fed) ───────────────────────
 function Overview({
   site,
+  isOwner,
   scans,
   latest,
   report,
@@ -255,6 +269,7 @@ function Overview({
   onCopySurvey,
 }: {
   site: ConsoleSite;
+  isOwner: boolean;
   scans: ScanSummary[];
   latest: ScanSummary | null;
   report: ScanReport | null;
@@ -403,21 +418,23 @@ function Overview({
           )}
           {scores.length >= 2 && <Sparkline points={scores} />}
           <div style={{ flex: 1 }} />
-          <Link
-            href={`/validator/detail?url=${encodeURIComponent(latest.target_url)}`}
-            className="e-cta"
-            style={{
-              background: C.accent,
-              color: "#fff",
-              borderRadius: 9,
-              padding: "8px 15px",
-              fontSize: 12,
-              fontWeight: 600,
-              textDecoration: "none",
-            }}
-          >
-            {t("console.rescan")} · $2
-          </Link>
+          {isOwner && (
+            <Link
+              href={`/validator/detail?url=${encodeURIComponent(latest.target_url)}`}
+              className="e-cta"
+              style={{
+                background: C.accent,
+                color: "#fff",
+                borderRadius: 9,
+                padding: "8px 15px",
+                fontSize: 12,
+                fontWeight: 600,
+                textDecoration: "none",
+              }}
+            >
+              {t("console.rescan")} · $2
+            </Link>
+          )}
         </div>
       </div>
 
@@ -918,15 +935,143 @@ function fmtMs(ms: number): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
+// ─── Team members (read-only sharing) ──────────────────────────────
+function TeamSection({ siteId }: { siteId: string }) {
+  const { t } = useI18n();
+  const [members, setMembers] = useState<SiteMember[] | null>(null);
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await consoleApi.listMembers(siteId);
+      setMembers(r.members);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to load members");
+    }
+  }, [siteId]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const invite = async () => {
+    const e = email.trim();
+    if (!e || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await consoleApi.inviteMember(siteId, e);
+      setMembers(r.members);
+      setEmail("");
+    } catch (er) {
+      setErr(er instanceof Error ? er.message : "Invite failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async (memberId: string) => {
+    setBusy(true);
+    try {
+      const r = await consoleApi.removeMember(siteId, memberId);
+      setMembers(r.members);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SettingsCard title={t("console.team")} sub={t("console.teamSub")}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void invite();
+          }}
+          type="email"
+          placeholder={t("console.invitePlaceholder")}
+          style={{
+            flex: 1,
+            minWidth: 200,
+            padding: "8px 12px",
+            fontSize: 13,
+            border: `1px solid ${C.border}`,
+            borderRadius: 8,
+            background: "#fff",
+            color: C.text,
+            outline: "none",
+            fontFamily: FS,
+          }}
+        />
+        <button
+          onClick={() => void invite()}
+          disabled={busy || !email.trim()}
+          style={{
+            background: C.accent,
+            color: "#fff",
+            border: "none",
+            borderRadius: 8,
+            padding: "8px 16px",
+            fontSize: 12.5,
+            fontWeight: 600,
+            cursor: busy || !email.trim() ? "default" : "pointer",
+            opacity: busy || !email.trim() ? 0.6 : 1,
+            fontFamily: FS,
+          }}
+        >
+          {t("console.invite")}
+        </button>
+      </div>
+      {err && (
+        <div style={{ fontSize: 11.5, color: C.bad, marginTop: 8 }}>{err}</div>
+      )}
+      {members && members.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 14 }}>
+          {members.map((m) => (
+            <div
+              key={m.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 13,
+                padding: "7px 0",
+                borderTop: `1px solid ${C.border}`,
+              }}
+            >
+              <span style={{ flex: 1, color: C.text, wordBreak: "break-all" }}>{m.email}</span>
+              {m.status === "pending" && (
+                <span style={{ fontSize: 10, fontFamily: FM, color: C.textFaint, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  {t("console.pending")}
+                </span>
+              )}
+              <button
+                onClick={() => void remove(m.id)}
+                disabled={busy}
+                style={{ background: "none", border: "none", color: C.textFaint, fontSize: 12, cursor: "pointer", fontFamily: FS }}
+              >
+                {t("console.remove")}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </SettingsCard>
+  );
+}
+
 // ─── Settings tab (S2) ─────────────────────────────────────────────
 function Settings({
   site,
+  isOwner,
   copied,
   copy,
   onChanged,
   router,
 }: {
   site: ConsoleSite;
+  isOwner: boolean;
   copied: string | null;
   copy: (text: string, key: string) => void;
   onChanged: () => Promise<void>;
@@ -1021,8 +1166,24 @@ function Settings({
     }
   };
 
+  // Shared viewers get a read-only notice — no settings or member controls.
+  if (!isOwner) {
+    return (
+      <div style={{ maxWidth: 720 }}>
+        <SettingsCard title={t("console.access")}>
+          <div style={{ fontSize: 13, color: C.textDim, lineHeight: 1.6 }}>
+            {t("console.viewerNote")}
+          </div>
+        </SettingsCard>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 720 }}>
+      {/* Team — invite teammates to view this site (read-only). */}
+      <TeamSection siteId={site.id} />
+
       {/* Name */}
       <SettingsCard title={t("console.siteName")}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

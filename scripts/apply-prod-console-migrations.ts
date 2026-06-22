@@ -40,6 +40,7 @@ const FILES = [
   '0024_mutual_campaigns.sql',
   '0025_persona_transfer.sql',
   '0026_content_hash.sql',
+  '0027_site_members.sql',
 ];
 const DRY_RUN = process.argv.includes('--dry-run');
 

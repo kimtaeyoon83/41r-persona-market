@@ -768,6 +768,29 @@ export const siteWorkspaces = pgTable('site_workspaces', {
   uniqUserHost: uniqueIndex('site_workspaces_user_host_uniq').on(t.userId, t.urlHost),
 }));
 
+// ─── Team workspaces (2026-06-22) ───────────────────────────────────
+// Read-only sharing: a site_workspace owner invites teammates by email;
+// each member gets VIEW access to that workspace's scans/analytics. The
+// row is created with user_id=null and claimed on the member's first
+// login (privy_auth, by email) — same pattern as partner-row claiming.
+export const siteMembers = pgTable('site_members', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => siteWorkspaces.id, { onDelete: 'cascade' }),
+  /** Invited email (Google-verified identity claimed on Privy login). */
+  email: text('email').notNull(),
+  /** Filled when the invited user logs in (claim). null = pending invite. */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  /** 'viewer' only in v1 (read-only). Editor/admin roles deferred. */
+  role: text('role').notNull().default('viewer'),
+  invitedBy: uuid('invited_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  uniqWsEmail: uniqueIndex('site_members_ws_email_uniq').on(t.workspaceId, t.email),
+  userIdx: index('site_members_user_idx').on(t.userId),
+}));
+
 // ─── Credit ledger (Console Sprint 1, 2026-06-11) ───────────────────
 // Founder-side spend currency — separate from point_transactions
 // (tester-side earn currency); the two stay distinct on purpose so

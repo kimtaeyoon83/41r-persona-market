@@ -726,12 +726,23 @@ export type ConsoleSite = {
 };
 
 export type ConsoleSiteListItem = ConsoleSite & {
+  /** 'owner' = you registered it; 'viewer' = shared with you (read-only). */
+  role?: "owner" | "viewer";
   scan_count: number;
   latest_score: number | null;
   prev_score: number | null;
   latest_category: string | null;
   best_cohort_id: string | null;
   last_scan_at: string | null;
+};
+
+export type SiteMember = {
+  id: string;
+  email: string;
+  user_id: string | null;
+  role: string;
+  status: "pending" | "active";
+  created_at: string;
 };
 
 export const consoleApi = {
@@ -747,9 +758,22 @@ export const consoleApi = {
     }),
 
   getSite: (id: string) =>
-    request<{ workspace: ConsoleSite; scans: ScanSummary[] }>(
+    request<{ workspace: ConsoleSite; role?: "owner" | "viewer"; scans: ScanSummary[] }>(
       `/api/console/sites/${id}`,
     ),
+
+  /** Team sharing (owner-only). */
+  listMembers: (id: string) =>
+    request<{ members: SiteMember[] }>(`/api/console/sites/${id}/members`),
+  inviteMember: (id: string, email: string) =>
+    request<{ members: SiteMember[] }>(`/api/console/sites/${id}/members`, {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+  removeMember: (id: string, memberId: string) =>
+    request<{ members: SiteMember[] }>(`/api/console/sites/${id}/members/${memberId}`, {
+      method: "DELETE",
+    }),
 
   updateSite: (id: string, body: { url?: string; name?: string | null }) =>
     request<{ workspace: ConsoleSite }>(`/api/console/sites/${id}`, {

@@ -16,6 +16,7 @@ import {
   generateSecret,
   generateSiteKey,
   getWorkspaceForUser,
+  getWorkspaceById,
   hashSecret,
   normalizeHost,
   secretLast4,
@@ -23,6 +24,13 @@ import {
   clearWorkspaceAuthSession,
   type Workspace,
 } from '../services/workspaces.js';
+import {
+  listMembers,
+  inviteMember,
+  removeMember,
+  memberWorkspaceIds,
+  workspaceRole,
+} from '../services/workspace_members.js';
 import { isEncryptionAvailable } from '../services/crypto_box.js';
 import { validateTargetUrl } from '../services/url_guard.js';
 
@@ -175,11 +183,22 @@ router.post('/sites', requirePrivyAuth, mutationLimiter, async (req, res) => {
 // ─── List (+ per-workspace scan stats) ─────────────────────────────
 router.get('/sites', requirePrivyAuth, async (req, res) => {
   const userId = req.privyUser!.id;
-  const workspaces = await db
+  const owned = await db
     .select()
     .from(schema.siteWorkspaces)
     .where(eq(schema.siteWorkspaces.userId, userId))
     .orderBy(desc(schema.siteWorkspaces.createdAt));
+  const ownedIds = new Set(owned.map((w) => w.id));
+  // Sites shared WITH this user (team workspaces, read-only viewer).
+  const sharedOnly = (await memberWorkspaceIds(userId)).filter((id) => !ownedIds.has(id));
+  const shared = sharedOnly.length
+    ? await db
+        .select()
+        .from(schema.siteWorkspaces)
+        .where(inArray(schema.siteWorkspaces.id, sharedOnly))
+        .orderBy(desc(schema.siteWorkspaces.createdAt))
+    : [];
+  const workspaces = [...owned, ...shared];
 
   const ids = workspaces.map((w) => w.id);
   const scans = ids.length
@@ -206,6 +225,7 @@ router.get('/sites', requirePrivyAuth, async (req, res) => {
       const prev = completed[1] ?? null;
       return {
         ...shapeWorkspace(ws),
+        role: ownedIds.has(ws.id) ? ('owner' as const) : ('viewer' as const),
         scan_count: list.length,
         latest_score: latest?.audienceFitScore ?? null,
         prev_score: prev?.audienceFitScore ?? null,
@@ -226,7 +246,13 @@ router.get('/sites/:id', requirePrivyAuth, async (req, res) => {
     res.status(404).json({ error: 'workspace_not_found' });
     return;
   }
-  const ws = await getWorkspaceForUser(req.privyUser!.id, id);
+  // Owner OR shared viewer may read the detail (read-only for viewers).
+  const role = await workspaceRole(req.privyUser!.id, id);
+  if (!role) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  const ws = await getWorkspaceById(id);
   if (!ws) {
     res.status(404).json({ error: 'workspace_not_found' });
     return;
@@ -237,7 +263,7 @@ router.get('/sites/:id', requirePrivyAuth, async (req, res) => {
     .where(eq(schema.audienceFitScans.workspaceId, ws.id))
     .orderBy(desc(schema.audienceFitScans.createdAt))
     .limit(100);
-  res.json({ workspace: shapeWorkspace(ws), scans: scans.map(shapeScan) });
+  res.json({ workspace: shapeWorkspace(ws), role, scans: scans.map(shapeScan) });
 });
 
 // ─── Update ────────────────────────────────────────────────────────
@@ -402,7 +428,13 @@ router.get('/sites/:id/analytics', requirePrivyAuth, async (req, res) => {
     res.status(404).json({ error: 'workspace_not_found' });
     return;
   }
-  const ws = await getWorkspaceForUser(req.privyUser!.id, id);
+  // Owner OR shared viewer may read analytics.
+  const role = await workspaceRole(req.privyUser!.id, id);
+  if (!role) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  const ws = await getWorkspaceById(id);
   if (!ws) {
     res.status(404).json({ error: 'workspace_not_found' });
     return;
@@ -524,5 +556,56 @@ router.post(
     res.json({ ok: true });
   },
 );
+
+// ─── Team members (read-only sharing) ──────────────────────────────
+// Owner-only management. Members get VIEW access to the workspace's
+// scans/analytics (claimed by email on their first login).
+const inviteBody = z.object({ email: z.string().email().max(254) });
+
+router.get('/sites/:id/members', requirePrivyAuth, async (req, res) => {
+  const id = String(req.params.id ?? '');
+  if (!UUID_RE.test(id)) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  const ws = await getWorkspaceForUser(req.privyUser!.id, id);
+  if (!ws) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  res.json({ members: await listMembers(ws.id) });
+});
+
+router.post('/sites/:id/members', requirePrivyAuth, mutationLimiter, async (req, res) => {
+  const id = String(req.params.id ?? '');
+  const parsed = inviteBody.safeParse(req.body);
+  if (!UUID_RE.test(id) || !parsed.success) {
+    res.status(400).json({ error: 'invalid_request' });
+    return;
+  }
+  const ws = await getWorkspaceForUser(req.privyUser!.id, id);
+  if (!ws) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  await inviteMember(ws.id, parsed.data.email, req.privyUser!.id);
+  res.json({ members: await listMembers(ws.id) });
+});
+
+router.delete('/sites/:id/members/:memberId', requirePrivyAuth, mutationLimiter, async (req, res) => {
+  const id = String(req.params.id ?? '');
+  const memberId = String(req.params.memberId ?? '');
+  if (!UUID_RE.test(id) || !UUID_RE.test(memberId)) {
+    res.status(400).json({ error: 'invalid_request' });
+    return;
+  }
+  const ws = await getWorkspaceForUser(req.privyUser!.id, id);
+  if (!ws) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  await removeMember(ws.id, memberId);
+  res.json({ members: await listMembers(ws.id) });
+});
 
 export default router;

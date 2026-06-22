@@ -263,6 +263,11 @@ function SiteCard({ site }: { site: ConsoleSiteListItem }) {
         <Pill tone={site.tracked ? "ok" : "neutral"} style={{ fontSize: 9 }}>
           {site.tracked ? "● TRACKED" : "○ LITE"}
         </Pill>
+        {site.role === "viewer" && (
+          <Pill tone="accent" style={{ fontSize: 9 }}>
+            {t("console.sharedBadge")}
+          </Pill>
+        )}
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 30, fontWeight: 600, fontFamily: FM, color: tone }}>
