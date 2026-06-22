@@ -12,18 +12,16 @@ import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 
 const SUI_RPC_URL =
   process.env.NEXT_PUBLIC_SUI_RPC_URL || "https://fullnode.testnet.sui.io:443";
-const SUI_NETWORK = (process.env.NEXT_PUBLIC_SUI_NETWORK || "testnet") as
+export const SUI_NETWORK = (process.env.NEXT_PUBLIC_SUI_NETWORK || "testnet") as
   | "testnet"
   | "mainnet"
   | "devnet"
   | "localnet";
 
-/** USDC pay-with-escrow is OFF by default — it depends on the Privy raw-sign
- *  → Sui signature path which is not yet live-verified in-browser, and on the
- *  operator chain env being configured server-side. Flip
- *  NEXT_PUBLIC_USDC_ENABLED=1 only after the in-browser live-verify passes, so
- *  we never show a non-working payment button (same discipline as the Mode C
- *  gate). Credits stays the working default rail. */
+/** USDC pay-with-escrow opt-in flag. The Privy raw-sign → Sui signature path
+ *  (lib/sui-wallet.ts) was live-verified in-browser 2026-06-22 (/dev/verify-sign),
+ *  so this is now ON in prod (NEXT_PUBLIC_USDC_ENABLED=1, Railway web env).
+ *  Credits stays the working DEFAULT rail; USDC is the opt-in on-chain path. */
 export const USDC_PAY_ENABLED = process.env.NEXT_PUBLIC_USDC_ENABLED === "1";
 
 /** Circle native USDC on Sui (default testnet). Mirrors api env
@@ -41,6 +39,13 @@ export function suiClient(): SuiJsonRpcClient {
 /** USDC balance (base units, 6 dp) for an owner. */
 export async function getUsdcBalance(owner: string, coinType: string): Promise<bigint> {
   const b = await suiClient().getBalance({ owner, coinType });
+  return BigInt(b.totalBalance);
+}
+
+/** Native SUI (gas) balance in MIST (base units, 9 dp). Omitting coinType
+ *  defaults to 0x2::sui::SUI. */
+export async function getSuiBalance(owner: string): Promise<bigint> {
+  const b = await suiClient().getBalance({ owner });
   return BigInt(b.totalBalance);
 }
 
