@@ -24,8 +24,17 @@ ARG NEXT_PUBLIC_API_URL=https://api-production-a4e7.up.railway.app
 # pass-through behavior — service env vars sometimes don't reach
 # `docker build` even when declared as ARG.
 ARG NEXT_PUBLIC_PRIVY_APP_ID=cmor17hr1005w0dl1nnqmhhsy
+# NEXT_PUBLIC_* are inlined at `next build` time — Railway service vars don't
+# reliably reach the Docker build (same gotcha as PRIVY_APP_ID above), so the
+# USDC rail + Sui network must be baked in as ARG defaults or the prod bundle
+# ships them undefined (USDC_PAY_ENABLED=false → wallet/pay UI hidden). USDC
+# user-side transfer is verified+enabled (2026-06-22), so default it ON.
+ARG NEXT_PUBLIC_USDC_ENABLED=1
+ARG NEXT_PUBLIC_SUI_NETWORK=testnet
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_PRIVY_APP_ID=${NEXT_PUBLIC_PRIVY_APP_ID}
+ENV NEXT_PUBLIC_USDC_ENABLED=${NEXT_PUBLIC_USDC_ENABLED}
+ENV NEXT_PUBLIC_SUI_NETWORK=${NEXT_PUBLIC_SUI_NETWORK}
 RUN pnpm --filter @41rpm/shared build && \
     pnpm --filter @41rpm/web build
 

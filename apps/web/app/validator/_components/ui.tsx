@@ -53,6 +53,27 @@ const SUI_NET_LABEL =
   SUI_NET === "mainnet" ? "Mainnet" : SUI_NET === "testnet" ? "Testnet" : SUI_NET;
 const SUI_IS_MAINNET = SUI_NET === "mainnet";
 
+// Sui chain mark — a clean solid water-droplet in Sui "Sea" blue (#4DA2FF).
+// NOTE: hand-drawn approximation of the Sui droplet, not the official brand
+// asset. Swap in the real SVG from sui.io/brand-assets for pixel accuracy.
+export function SuiIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-label="Sui"
+      style={{ flexShrink: 0, display: "block" }}
+    >
+      <path
+        d="M12 2.2c.8 1.1 6.3 7.1 6.3 11.6a6.3 6.3 0 1 1-12.6 0C5.7 9.3 11.2 3.3 12 2.2Z"
+        fill="#4DA2FF"
+      />
+    </svg>
+  );
+}
+
 export type Tone = "neutral" | "accent" | "ok" | "warn" | "bad" | "exp";
 
 const PILL_TONES: Record<Tone, { bg: string; fg: string; bd: string }> = {
@@ -381,14 +402,7 @@ export function TopBar({ step }: { step?: string } = {}) {
                   whiteSpace: "nowrap",
                 }}
               >
-                <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 999,
-                    background: SUI_IS_MAINNET ? C.ok : C.warn,
-                  }}
-                />
+                <SuiIcon size={13} />
                 Sui · {SUI_NET_LABEL}
               </span>
               {/* Wallet shortcut — icon always (mobile-safe), label on desktop. */}
