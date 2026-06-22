@@ -16,7 +16,11 @@ const DEV_BYPASS_HEADER: Record<string, string> =
     ? { 'x-dev-user-email': 'e2e@41r.local' }
     : {};
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  options?: RequestInit,
+  _retried = false,
+): Promise<T> {
   // Spread options *first* so explicit headers merge on top — otherwise
   // `...options` at the end wipes the Content-Type we just set and the
   // server's json parser skips the body.
@@ -31,6 +35,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       ...options?.headers,
     },
   });
+  // Auth-settling self-heal: on a fresh refresh / deep-link Privy can report
+  // `authenticated` a beat before the access token is minted, so the very
+  // first request goes out with no bearer and 401s (`missing_bearer_token`).
+  // When a token getter is wired, wait briefly for the token to settle and
+  // retry ONCE before surfacing an auth error to the page. Bypass mode never
+  // hits this (the dev header makes the call 200).
+  if (res.status === 401 && _getAuthToken && !_retried) {
+    await new Promise((r) => setTimeout(r, 450));
+    return request<T>(path, options, true);
+  }
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(error.error || `Request failed: ${res.status}`);

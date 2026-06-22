@@ -12,9 +12,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
-import { checkTargetUrl } from "@/lib/url";
 import {
   consoleApi,
   scanApi,
@@ -41,22 +39,9 @@ export default function ConsolePage() {
 function ConsoleInner() {
   const { ready, authenticated, login } = useAuth();
   const { t } = useI18n();
-  const router = useRouter();
   const [sites, setSites] = useState<ConsoleSiteListItem[] | null>(null);
   const [unassigned, setUnassigned] = useState<UnassignedScan[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [newUrl, setNewUrl] = useState("");
-
-  // Start a new analysis without leaving the console — route straight to
-  // the scan-config page with the URL prefilled (no landing-page detour).
-  const startAnalysis = () => {
-    const c = checkTargetUrl(newUrl);
-    if (!c.ok) {
-      setError(c.reason || "Invalid URL");
-      return;
-    }
-    router.push(`/validator/detail?url=${encodeURIComponent(c.normalized)}`);
-  };
 
   // Credit balance moved to the ConsoleShell sidebar footer.
   const load = useCallback(async () => {
@@ -131,43 +116,6 @@ function ConsoleInner() {
         </h1>
         <div style={{ flex: 1 }} />
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-          <input
-            value={newUrl}
-            onChange={(e) => setNewUrl(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") startAnalysis();
-            }}
-            placeholder={t("console.analyzeUrlPlaceholder")}
-            style={{
-              padding: "8px 12px",
-              fontSize: 12.5,
-              border: `1px solid ${C.border}`,
-              borderRadius: 8,
-              background: "#fff",
-              color: C.text,
-              outline: "none",
-              fontFamily: FS,
-              minWidth: 200,
-            }}
-          />
-          <button
-            onClick={startAnalysis}
-            disabled={!newUrl.trim()}
-            className="e-cta"
-            style={{
-              background: C.text,
-              color: C.bg,
-              borderRadius: 8,
-              padding: "8px 14px",
-              fontSize: 12,
-              fontWeight: 600,
-              border: "none",
-              cursor: "pointer",
-              fontFamily: FS,
-            }}
-          >
-            {t("console.newAnalysis")}
-          </button>
           <Link
             href="/console/sites/new"
             className="e-cta"
