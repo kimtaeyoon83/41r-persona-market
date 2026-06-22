@@ -311,6 +311,11 @@ export function TopBar({ step }: { step?: string } = {}) {
   const { t } = useI18n();
   const active = navActive(usePathname());
   const showAuthControls = ready;
+  // Phone nav: the inline nav links are hidden ≤640px, so a hamburger opens
+  // a dropdown with the same destinations (so the console is still reachable
+  // from analysis / me pages on mobile).
+  const [menuOpen, setMenuOpen] = useState(false);
+  const closeMenu = () => setMenuOpen(false);
   return (
     <div
       style={{
@@ -486,7 +491,87 @@ export function TopBar({ step }: { step?: string } = {}) {
               {t("nav.signIn")}
             </button>
           ))}
+        {/* Phone-only hamburger — opens the nav dropdown below. */}
+        <button
+          className="show-mobile"
+          onClick={() => setMenuOpen((o) => !o)}
+          aria-label="Menu"
+          aria-expanded={menuOpen}
+          style={{
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            padding: 6,
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 4,
+          }}
+        >
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              style={{ width: 18, height: 2, borderRadius: 2, background: C.text, display: "block" }}
+            />
+          ))}
+        </button>
       </div>
+      {menuOpen && (
+        <>
+          <div
+            onClick={closeMenu}
+            style={{ position: "fixed", inset: 0, zIndex: 39 }}
+          />
+          <div
+            className="show-mobile"
+            style={{
+              position: "absolute",
+              top: "100%",
+              right: 8,
+              marginTop: 6,
+              flexDirection: "column",
+              alignItems: "stretch",
+              minWidth: 184,
+              background: C.panel,
+              border: `1px solid ${C.border}`,
+              borderRadius: 12,
+              boxShadow: "0 12px 30px -10px rgba(10,37,64,.28)",
+              padding: 6,
+              gap: 2,
+              zIndex: 41,
+            }}
+          >
+            {[
+              { href: "/", label: t("nav.analyze") },
+              { href: "/console", label: t("nav.dashboard") },
+              { href: "/validator/how-it-works", label: t("nav.howItWorks") },
+              ...(authenticated
+                ? [
+                    { href: "/me/wallet", label: t("nav.wallet") },
+                    { href: "/me", label: t("nav.myPage") },
+                  ]
+                : []),
+            ].map((it) => (
+              <Link
+                key={it.href}
+                href={it.href}
+                onClick={closeMenu}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  fontSize: 14,
+                  color: C.text,
+                  textDecoration: "none",
+                  fontFamily: FS,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {it.label}
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

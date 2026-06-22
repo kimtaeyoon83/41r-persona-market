@@ -407,6 +407,12 @@ body::before {
 @media (max-width: 640px) {
   .hide-mobile { display: none !important; }
 }
+/* Inverse — only on phone. The TopBar hamburger + its menu use this so the
+   nav (hidden on phone) is still reachable; desktop hides the hamburger. */
+.show-mobile { display: none !important; }
+@media (max-width: 640px) {
+  .show-mobile { display: flex !important; }
+}
 
 /* Validator detail pages (report/processing/persona/calibration/
    survey/me-analyses) mix inline styles with these utility hooks to
