@@ -45,6 +45,14 @@ export const FD =
 export const FM =
   'var(--font-mono-loaded), "JetBrains Mono", "SF Mono", Menlo, monospace';
 
+// Sui network for the TopBar chain badge. Read straight from the env var
+// (build-time inlined) so the shared TopBar doesn't pull the heavy Sui SDK
+// from lib/sui-pay onto every page. Mirrors sui-pay.ts SUI_NETWORK.
+const SUI_NET = process.env.NEXT_PUBLIC_SUI_NETWORK || "testnet";
+const SUI_NET_LABEL =
+  SUI_NET === "mainnet" ? "Mainnet" : SUI_NET === "testnet" ? "Testnet" : SUI_NET;
+const SUI_IS_MAINNET = SUI_NET === "mainnet";
+
 export type Tone = "neutral" | "accent" | "ok" | "warn" | "bad" | "exp";
 
 const PILL_TONES: Record<Tone, { bg: string; fg: string; bd: string }> = {
@@ -351,23 +359,85 @@ export function TopBar({ step }: { step?: string } = {}) {
         <LocaleToggle />
         {showAuthControls &&
           (authenticated ? (
-            <button
-              onClick={() => logout()}
-              title={identityLabel ?? "Sign out"}
-              style={{
-                background: "transparent",
-                border: `1px solid ${C.borderStrong}`,
-                borderRadius: 999,
-                padding: "5px 13px",
-                fontSize: 12,
-                color: C.textDim,
-                cursor: "pointer",
-                fontFamily: FS,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {t("nav.signOut")}
-            </button>
+            <>
+              {/* Chain badge — web3 convention: show the active network in the
+                  top-right. Amber = testnet, green = mainnet. */}
+              <span
+                className="hide-mobile"
+                title={`Sui ${SUI_NET_LABEL} — chain network`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 11,
+                  fontFamily: FM,
+                  fontWeight: 600,
+                  letterSpacing: "0.04em",
+                  padding: "3px 9px",
+                  borderRadius: 999,
+                  color: SUI_IS_MAINNET ? C.ok : C.warn,
+                  background: SUI_IS_MAINNET ? C.okSoft : C.warnSoft,
+                  border: `1px solid ${SUI_IS_MAINNET ? "#c4e0d0" : "#ecdcab"}`,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 999,
+                    background: SUI_IS_MAINNET ? C.ok : C.warn,
+                  }}
+                />
+                Sui · {SUI_NET_LABEL}
+              </span>
+              {/* Wallet shortcut — icon always (mobile-safe), label on desktop. */}
+              <Link
+                href="/me/wallet"
+                title={t("nav.wallet")}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  color: C.textDim,
+                  textDecoration: "none",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.6}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="2" y="4" width="12" height="8.5" rx="2" />
+                  <path d="M10.6 8.2h2.2" />
+                </svg>
+                <span className="hide-mobile">{t("nav.wallet")}</span>
+              </Link>
+              <button
+                onClick={() => logout()}
+                title={identityLabel ?? "Sign out"}
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${C.borderStrong}`,
+                  borderRadius: 999,
+                  padding: "5px 13px",
+                  fontSize: 12,
+                  color: C.textDim,
+                  cursor: "pointer",
+                  fontFamily: FS,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {t("nav.signOut")}
+              </button>
+            </>
           ) : (
             <button
               onClick={() => login()}

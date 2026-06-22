@@ -29,6 +29,7 @@ const en = {
   "nav.analyze": "Analyze",
   "nav.dashboard": "Dashboard",
   "nav.howItWorks": "How it works",
+  "nav.wallet": "Wallet",
 
   "common.loading": "Loading…",
   "common.back": "Back",
@@ -394,6 +395,7 @@ const ko: Record<MessageKey, string> = {
   "nav.analyze": "분석",
   "nav.dashboard": "대시보드",
   "nav.howItWorks": "작동 원리",
+  "nav.wallet": "지갑",
 
   "common.loading": "불러오는 중…",
   "common.back": "뒤로",
