@@ -9,8 +9,8 @@
 // pages keep their own theme (app/validator/_components/ui.tsx). Fonts come
 // from layout.tsx (--font-pr-display / --font-pr-body / --font-mono-loaded).
 
-import Link from "next/link";
 import type { ReactNode } from "react";
+import { TopBar } from "@/app/validator/_components/ui";
 
 export const PR = {
   ink: "#0a2540",
@@ -52,15 +52,18 @@ export function scoreTone(score: number | null | undefined): string {
   return PR.redInk;
 }
 
-/** Sticky white top bar + cool-blue page field. `right` slot lets a page drop
- *  in auth/step content; `step` renders the funnel-step label like the
- *  prototype's right-aligned "2 / 4 · Sharpen". */
+/** Cool-blue page field under the unified TopBar. Funnel pages share the
+ *  same persistent nav (Analyze · Dashboard · How it works · EN · auth) as
+ *  every other screen — the redesign's "one navigation" rule — via the
+ *  shared <TopBar>. `step` passes the funnel-step label ("2 / 4 · Sharpen")
+ *  through to the bar. `right` is accepted for backward-compat with existing
+ *  call sites but is no longer rendered (auth now lives in the shared bar). */
 export function PrShell({
   children,
-  right,
   step,
 }: {
   children: ReactNode;
+  /** @deprecated auth/nav now come from the shared TopBar; ignored. */
   right?: ReactNode;
   step?: string;
 }) {
@@ -80,38 +83,7 @@ export function PrShell({
         @keyframes prFade{ from{opacity:.5;transform:translateY(4px);} to{opacity:1;transform:none;} }
         .pr-link:hover{ text-decoration:underline; }
       `}</style>
-      <div
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 20,
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          padding: "13px clamp(16px,4vw,28px)",
-          background: PR.panel,
-          borderBottom: `1px solid ${PR.border}`,
-        }}
-      >
-        <Link
-          href="/"
-          style={{
-            fontFamily: FD,
-            fontSize: 20,
-            fontWeight: 700,
-            letterSpacing: "-0.02em",
-            color: PR.ink,
-            textDecoration: "none",
-          }}
-        >
-          41R
-        </Link>
-        <div style={{ flex: 1 }} />
-        {step && (
-          <span style={{ fontFamily: FM, fontSize: 11, color: PR.faint }}>{step}</span>
-        )}
-        {right}
-      </div>
+      <TopBar step={step} />
       {children}
     </div>
   );

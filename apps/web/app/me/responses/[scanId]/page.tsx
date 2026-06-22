@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { usePrivy } from "@privy-io/react-auth";
+import { useAuth } from "@/lib/auth";
 import { meApi, type MySurveyResponseDetail } from "@/lib/api";
 import { C, FM, FS, Frame } from "../../../validator/_components/ui";
 
@@ -39,7 +39,7 @@ const RETENTION_LABEL: Record<string, string> = {
 export default function MyResponseDetailPage() {
   const params = useParams<{ scanId: string }>();
   const scanId = params?.scanId ?? "";
-  const { ready, authenticated, login } = usePrivy();
+  const { ready, authenticated, login } = useAuth();
   const [data, setData] = useState<MySurveyResponseDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

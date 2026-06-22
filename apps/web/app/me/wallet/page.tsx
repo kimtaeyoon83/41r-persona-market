@@ -10,14 +10,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePrivy } from "@privy-io/react-auth";
+import { useAuth } from "@/lib/auth";
 import { useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
 import { deriveSuiAddress } from "@/lib/sui-wallet";
 import { getUsdcBalance, USDC_COIN_TYPE, USDC_PAY_ENABLED } from "@/lib/sui-pay";
 import { Btn, C, Card, FM, FS, Frame } from "../../validator/_components/ui";
 
 export default function WalletPage() {
-  const { ready, authenticated, login } = usePrivy();
+  const { ready, authenticated, login } = useAuth();
   const { wallets } = useSolanaWallets();
   const [copied, setCopied] = useState(false);
   const [usdc, setUsdc] = useState<string | null>(null);

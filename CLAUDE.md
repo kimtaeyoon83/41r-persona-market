@@ -218,6 +218,23 @@ the OLD orange palette / Inter "instrument" theme is superseded. Two surfaces:
 - **TopBar logo** = the **"41R" Space Grotesk wordmark** (was the
   `rpm_black_horizontal.png`), matching `PrShell`. Same on every shared-TopBar
   page.
+- **Unified TopBar nav** (2026-06-22): the shared `TopBar`
+  (`validator/_components/ui.tsx`) now renders ONE persistent nav on EVERY
+  screen — `Analyze → /` · `Dashboard → /console` · `How it works →
+  /validator/how-it-works` (active mapping in `navActive()`: Landing/Report/flow
+  → Analyze, Console & subs → Dashboard, Judge → How it works, `/me` & Proof →
+  none) + EN pill + auth (Sign in dark-navy pill / Sign out hairline). "My Page"
+  is deliberately NOT a top-nav item — it lives in the Console sidebar footer
+  (UX-audit "one founder home"). The funnel pages' `PrShell` (`_pr/ui.tsx`)
+  renders this SAME shared `TopBar` (passing its `2 / 4 · Sharpen` step label
+  via the new `TopBar({step})` prop) instead of a hand-rolled bar, so the 3px
+  indigo rule + nav are identical everywhere. Do NOT re-add a separate funnel
+  bar or drop the persistent nav.
+- **Auth-hook contract**: every `/me` + `/console` screen reads auth via
+  `useAuth()` (`lib/auth.ts`, the `DEV_AUTH_BYPASS`-aware wrapper over
+  `usePrivy`), NEVER `usePrivy()` directly — `/me/wallet`, `/me/responses`,
+  `/me/responses/[scanId]` were aligned to this 2026-06-22 (they bypassed the
+  E2E hatch + violated the contract). Identical under real Privy login.
 - **Console left rail** (`console/_components/shell.tsx`): 16px line icons
   (grid/lock/plus/wallet, NOT emoji), sections Overview · SITES · LABS, the
   Mutual item tagged `BETA` (it's the gated §4.5 experimental surface), active =

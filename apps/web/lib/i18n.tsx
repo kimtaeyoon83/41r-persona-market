@@ -26,6 +26,9 @@ const en = {
   "nav.myPage": "My Page",
   "nav.signIn": "Sign in",
   "nav.signOut": "Sign out",
+  "nav.analyze": "Analyze",
+  "nav.dashboard": "Dashboard",
+  "nav.howItWorks": "How it works",
 
   "common.loading": "Loading…",
   "common.back": "Back",
@@ -388,6 +391,9 @@ const ko: Record<MessageKey, string> = {
   "nav.myPage": "마이페이지",
   "nav.signIn": "로그인",
   "nav.signOut": "로그아웃",
+  "nav.analyze": "분석",
+  "nav.dashboard": "대시보드",
+  "nav.howItWorks": "작동 원리",
 
   "common.loading": "불러오는 중…",
   "common.back": "뒤로",

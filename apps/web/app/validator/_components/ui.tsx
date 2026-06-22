@@ -7,6 +7,7 @@
 // pathname bypass and does NOT touch globals.css.
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
@@ -223,21 +224,66 @@ function LocaleToggle() {
   );
 }
 
-export function TopBar() {
-  // Console Sprint 1 — logged-in nav is [Console · My Page · Sign out]
-  // (console-ia-redesign.md §2.1: both roles always visible, role is
-  // emergent; empty states are the onboarding). Stays a hairline
-  // header — no dropdowns/mega-menus (Phase 4 minimal contract).
+type NavKey = "analyze" | "dashboard" | "howitworks" | null;
+
+/** Persistent top nav (redesign handoff §"Global navigation"):
+ *  Analyze → / · Dashboard → /console · How it works →
+ *  /validator/how-it-works. Active item is ink + weight 600, inactive
+ *  is textDim. Mapping: Landing/Report/flow → Analyze; Console & subs →
+ *  Dashboard; Judge → How it works; /me & Proof → none.
+ *  "My Page" is intentionally NOT here — it lives in the Console
+ *  sidebar footer per the UX audit (one founder home). */
+function navActive(path: string | null): NavKey {
+  if (!path) return null;
+  if (path.startsWith("/console")) return "dashboard";
+  if (path.startsWith("/validator/how-it-works")) return "howitworks";
+  if (path === "/" || path.startsWith("/validator")) return "analyze";
+  return null;
+}
+
+function NavLink({
+  href,
+  label,
+  active,
+}: {
+  href: string;
+  label: string;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      style={{
+        fontSize: 13,
+        color: active ? C.text : C.textDim,
+        fontWeight: active ? 600 : 400,
+        textDecoration: "none",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {label}
+    </Link>
+  );
+}
+
+export function TopBar({ step }: { step?: string } = {}) {
+  // Persistent nav (redesign handoff): Analyze · Dashboard · How it
+  // works, always visible. EN locale pill + auth (Sign in dark navy
+  // pill / Sign out hairline pill). Stays a hairline header — no
+  // dropdowns/mega-menus. `step` renders the funnel-step label
+  // ("2 / 4 · Sharpen") as a mono tag right after the logo so the
+  // analysis flow keeps its progress hint under the unified bar.
   const { ready, authenticated, login, logout, identityLabel } = useAuth();
   const { t } = useI18n();
+  const active = navActive(usePathname());
   const showAuthControls = ready;
   return (
     <div
       style={{
         height: 54,
         borderBottom: `1px solid ${C.border}`,
-        // Signature: 3px signal-orange rule across the very top —
-        // the "instrument" brand mark, present on every screen.
+        // Signature: 3px indigo "instrument rule" across the very top —
+        // the brand mark, present on every screen.
         borderTop: `3px solid ${C.accent}`,
         background: "rgba(255, 255, 255, 0.88)",
         backdropFilter: "blur(10px)",
@@ -268,59 +314,60 @@ export function TopBar() {
       >
         41R
       </Link>
-      <div style={{ flex: 1 }} />
-      {showAuthControls && (
-        <div
+      {step && (
+        <span
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            fontSize: 12,
-            color: C.textDim,
+            fontFamily: FM,
+            fontSize: 11,
+            color: C.textFaint,
+            letterSpacing: "0.04em",
+            whiteSpace: "nowrap",
           }}
         >
-          <LocaleToggle />
-          {authenticated ? (
-            <>
-              <Link
-                href="/console"
-                style={{
-                  color: C.textDim,
-                  textDecoration: "none",
-                  padding: "6px 10px",
-                  borderRadius: 6,
-                }}
-              >
-                {t("nav.console")}
-              </Link>
-              <Link
-                href="/me"
-                style={{
-                  color: C.textDim,
-                  textDecoration: "none",
-                  padding: "6px 10px",
-                  borderRadius: 6,
-                }}
-              >
-                {t("nav.myPage")}
-              </Link>
-              <button
-                onClick={() => logout()}
-                title={identityLabel ?? "Sign out"}
-                style={{
-                  background: "transparent",
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 999,
-                  padding: "5px 12px",
-                  fontSize: 12,
-                  color: C.textDim,
-                  cursor: "pointer",
-                  fontFamily: FS,
-                }}
-              >
-                {t("nav.signOut")}
-              </button>
-            </>
+          {step}
+        </span>
+      )}
+      <div style={{ flex: 1 }} />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          fontSize: 13,
+          color: C.textDim,
+        }}
+      >
+        <NavLink href="/" label={t("nav.analyze")} active={active === "analyze"} />
+        <NavLink
+          href="/console"
+          label={t("nav.dashboard")}
+          active={active === "dashboard"}
+        />
+        <NavLink
+          href="/validator/how-it-works"
+          label={t("nav.howItWorks")}
+          active={active === "howitworks"}
+        />
+        <LocaleToggle />
+        {showAuthControls &&
+          (authenticated ? (
+            <button
+              onClick={() => logout()}
+              title={identityLabel ?? "Sign out"}
+              style={{
+                background: "transparent",
+                border: `1px solid ${C.borderStrong}`,
+                borderRadius: 999,
+                padding: "5px 13px",
+                fontSize: 12,
+                color: C.textDim,
+                cursor: "pointer",
+                fontFamily: FS,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {t("nav.signOut")}
+            </button>
           ) : (
             <button
               onClick={() => login()}
@@ -328,19 +375,19 @@ export function TopBar() {
                 background: C.text,
                 border: "none",
                 borderRadius: 999,
-                padding: "6px 14px",
-                fontSize: 12,
-                color: C.bg,
+                padding: "7px 16px",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#fff",
                 cursor: "pointer",
                 fontFamily: FS,
-                fontWeight: 500,
+                whiteSpace: "nowrap",
               }}
             >
               {t("nav.signIn")}
             </button>
-          )}
-        </div>
-      )}
+          ))}
+      </div>
     </div>
   );
 }

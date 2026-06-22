@@ -10,12 +10,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePrivy } from "@privy-io/react-auth";
+import { useAuth } from "@/lib/auth";
 import { meApi, type MySurveyResponseSummary } from "@/lib/api";
 import { C, FM, FS, Frame } from "../../validator/_components/ui";
 
 export default function MyResponsesPage() {
-  const { ready, authenticated, login } = usePrivy();
+  const { ready, authenticated, login } = useAuth();
   const [items, setItems] = useState<MySurveyResponseSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
