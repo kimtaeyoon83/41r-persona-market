@@ -623,17 +623,26 @@ a.e-card:hover,
   .cs-side .cs-foot {
     display: none;
   }
+  /* The active site's Overview/Reports/Analytics/Settings sub-tabs are hidden
+     in the collapsed mobile rail — the in-page tab bar already shows them, so
+     the rail strip keeping them too was a duplicate (design: mobile site
+     detail has ONE tab bar). The strip stays for site switching only. */
   .cs-sub {
-    margin-left: 0;
-    border-left: none;
-    padding-left: 0;
-    flex-direction: row;
-    gap: 4px;
+    display: none;
   }
   .cs-item {
     border-left: none;
     border-bottom: 2px solid transparent;
     border-radius: 6px;
+    /* in the horizontal strip every item keeps its width and long site URLs
+       truncate with ellipsis instead of blowing out the row */
+    flex-shrink: 0;
+    max-width: 168px;
+  }
+  /* the leading Overview item is icon + short label — never truncate/clip it */
+  .cs-side > .cs-item:first-child {
+    max-width: none;
+    overflow: visible;
   }
   .cs-item.active {
     border-left-color: transparent;
