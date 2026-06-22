@@ -408,13 +408,22 @@ design-doc promises are NOT yet wired. Don't pitch these as done:
   built yet — so in the default config `sui_object_id` stays null. Copy says
   "off-chain sealed exchange, on-chain mint gated", never implies it's the
   live default path.
-- **USDC: Sui-side signature assembly now VERIFIED, Privy behavior the lone
-  gap.** `scripts/verify-sui-sign.ts` proves `lib/sui-wallet.ts`'s assembly
-  (intent → blake2b → raw-sign 32B digest → toSerializedSignature) is
-  byte-identical to the SDK's signTransaction AND accepted on testnet. The
-  remaining unknown is purely Privy-internal: does `signMessage` raw-sign the
-  digest (correct) or re-hash it (breaks)? Needs a live in-browser Privy
-  session to confirm; `NEXT_PUBLIC_USDC_ENABLED` stays off until it does.
+- **USDC: user-side Sui transfer FULLY VERIFIED + ENABLED (2026-06-22).**
+  `scripts/verify-sui-sign.ts` proved `lib/sui-wallet.ts`'s assembly (intent →
+  blake2b → raw-sign 32B digest → toSerializedSignature) is byte-identical to
+  the SDK's signTransaction AND accepted on testnet. The last unknown — does
+  Privy's `signMessage` raw-sign the digest (correct) or re-hash it (breaks)? —
+  was confirmed in a LIVE in-browser Privy session via the `/dev/verify-sign`
+  harness (`app/dev/verify-sign/page.tsx`): signMessage raw-signs the exact
+  32-byte digest (`ed25519.verify(sig, digest, pubkey) = true`), so Sui accepts
+  the re-wrapped signature. `NEXT_PUBLIC_USDC_ENABLED` is now **ON** (Railway
+  web env). The full opt-in flow is wired both sides: `pay-with-usdc.tsx`
+  (createScan `usdc` → build escrow PTB → Privy-sign → `POST /:id/pay`) +
+  server escrow create/verify (`routes/scan.ts` + `services/sui/escrow.ts`),
+  on Sui **testnet** USDC. Credits remains the DEFAULT rail; USDC is opt-in.
+  Still deferred (unchanged): the §9 two-sided settlement only fires for an
+  escrow-funded scan, and no product flow yet connects "company funds escrow" →
+  "user earns from it" — so escrow settlement stays dormant in practice.
 
 These are product/economic decisions, not bugs — but copy/pitch must match
 this reality until they ship.

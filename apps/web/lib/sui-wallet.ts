@@ -40,15 +40,15 @@ export type SuiTxResult = {
  * intent message; Privy's Solana signMessage signs raw bytes, so we feed it
  * that digest and re-wrap the 64-byte signature into Sui's serialized form.
  *
- * ⚠️ STATUS (2026-06-20): the Sui-side ASSEMBLY below is now VERIFIED —
- * scripts/verify-sui-sign.ts replicates this exact pipeline (intent → blake2b
- * → raw-sign the 32B digest → toSerializedSignature) with a real Ed25519 key
- * and proves it (a) is byte-identical to the SDK's signTransaction and (b) is
- * accepted on testnet. So the ONLY remaining unknown is Privy-internal:
- * whether `signMessage` raw-signs the 32-byte digest we pass (correct) or
- * re-hashes it first (would break). That needs a live in-browser Privy session
- * to confirm. Until it does, NEXT_PUBLIC_USDC_ENABLED stays off and the
- * credits path is the default. Errors surface to the caller.
+ * ✅ STATUS (2026-06-22): FULLY VERIFIED. scripts/verify-sui-sign.ts proved
+ * the Sui-side assembly (intent → blake2b → raw-sign the 32B digest →
+ * toSerializedSignature) is byte-identical to the SDK's signTransaction and
+ * accepted on testnet. The last unknown — Privy-internal signMessage
+ * behaviour — was confirmed in a LIVE in-browser Privy session via
+ * /dev/verify-sign: `signMessage` raw-signs the exact 32-byte digest we pass
+ * (ed25519.verify(sig, digest, pubkey) = true), so Sui accepts the re-wrapped
+ * signature. The whole user-side Sui/USDC path is therefore trustworthy;
+ * NEXT_PUBLIC_USDC_ENABLED is now ON. Errors surface to the caller.
  */
 export async function signAndExecuteSuiTx(
   tx: Transaction,

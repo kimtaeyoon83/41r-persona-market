@@ -5,9 +5,10 @@
 // createScan(payment_method:'usdc') → escrow envelope → build create-escrow PTB
 // → Privy-sign as the user → POST /:id/pay (server verifies on-chain) → onPaid.
 //
-// ⚠️ The Privy raw-sign → Sui signature path (lib/sui-wallet.ts) needs an
-// in-browser live-verify before this is trusted with real value. Credits stays
-// the default rail; this is opt-in.
+// ✅ The Privy raw-sign → Sui signature path (lib/sui-wallet.ts) was
+// live-verified in-browser 2026-06-22 (/dev/verify-sign — signMessage
+// raw-signs the digest, Sui accepts it). Testnet USDC; credits stays the
+// default rail, this is the opt-in on-chain escrow path.
 
 import { useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
