@@ -15,6 +15,11 @@ import { meApi, type MyPoints, type MyCredits } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { C, FM, FS, Frame } from "../validator/_components/ui";
 
+// Dogfooding — the anchor scan whose human survey is open to testers from
+// My Page. Set via NEXT_PUBLIC_DOGFOOD_SURVEY_SCAN_ID (baked in the web
+// Dockerfile, GA-id-like). When unset the survey CTA simply doesn't render.
+const SURVEY_SCAN_ID = process.env.NEXT_PUBLIC_DOGFOOD_SURVEY_SCAN_ID;
+
 export default function MyPage() {
   const { ready, authenticated, login } = useAuth();
   const { t } = useI18n();
@@ -133,6 +138,46 @@ export default function MyPage() {
           </div>
           <RecentActivity points={points} credits={credits} />
         </div>
+
+        {/* Open survey CTA (dogfooding) — earns points, feeds the AI↔human
+            comparison for the anchored scan. */}
+        {SURVEY_SCAN_ID && (
+          <Link
+            href={`/validator/survey/${SURVEY_SCAN_ID}`}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              background: C.accentSoft,
+              border: `1px solid #d4d0fb`,
+              borderRadius: 14,
+              padding: 16,
+              textDecoration: "none",
+              marginBottom: 16,
+            }}
+          >
+            <span style={{ fontSize: 22, lineHeight: 1 }}>📋</span>
+            <span style={{ flex: 1 }}>
+              <span
+                style={{ display: "block", fontSize: 14, fontWeight: 600, color: C.text }}
+              >
+                {t("me.surveyCta")}
+              </span>
+              <span style={{ fontSize: 12, color: C.textDim }}>{t("me.surveyCtaSub")}</span>
+            </span>
+            <span
+              style={{
+                fontFamily: FM,
+                fontSize: 12,
+                fontWeight: 600,
+                color: C.accent,
+                whiteSpace: "nowrap",
+              }}
+            >
+              +100 pt →
+            </span>
+          </Link>
+        )}
 
         {/* Quick links */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>

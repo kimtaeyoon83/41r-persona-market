@@ -36,11 +36,15 @@ ARG NEXT_PUBLIC_SUI_NETWORK=testnet
 # is server-only and never appears here or in the client. layout.tsx injects
 # the t.js beacon when this + NEXT_PUBLIC_API_URL are set.
 ARG NEXT_PUBLIC_TRACKING_SITE_KEY=rpm_pk_ffe4df49792b0d6f897343fe
+# Dogfooding — anchor scan of app.project-rpm.xyz whose human survey is
+# surfaced as a CTA on My Page. Public id, safe to commit.
+ARG NEXT_PUBLIC_DOGFOOD_SURVEY_SCAN_ID=4cb0677b-baab-47f6-81d5-9e276b08050b
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_PRIVY_APP_ID=${NEXT_PUBLIC_PRIVY_APP_ID}
 ENV NEXT_PUBLIC_USDC_ENABLED=${NEXT_PUBLIC_USDC_ENABLED}
 ENV NEXT_PUBLIC_SUI_NETWORK=${NEXT_PUBLIC_SUI_NETWORK}
 ENV NEXT_PUBLIC_TRACKING_SITE_KEY=${NEXT_PUBLIC_TRACKING_SITE_KEY}
+ENV NEXT_PUBLIC_DOGFOOD_SURVEY_SCAN_ID=${NEXT_PUBLIC_DOGFOOD_SURVEY_SCAN_ID}
 RUN pnpm --filter @41rpm/shared build && \
     pnpm --filter @41rpm/web build
 
