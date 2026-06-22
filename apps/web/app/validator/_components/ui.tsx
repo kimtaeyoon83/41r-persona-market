@@ -425,10 +425,12 @@ export function TopBar({ step }: { step?: string } = {}) {
                 <SuiIcon size={13} />
                 Sui · {SUI_NET_LABEL}
               </span>
-              {/* Wallet shortcut — icon always (mobile-safe), label on desktop. */}
+              {/* Wallet shortcut — desktop only; on phone it lives in the
+                  hamburger menu so the bar stays logo + locale + ☰. */}
               <Link
                 href="/me/wallet"
                 title={t("nav.wallet")}
+                className="hide-mobile"
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -457,6 +459,7 @@ export function TopBar({ step }: { step?: string } = {}) {
               <button
                 onClick={() => logout()}
                 title={identityLabel ?? "Sign out"}
+                className="hide-mobile"
                 style={{
                   background: "transparent",
                   border: `1px solid ${C.borderStrong}`,
@@ -475,6 +478,7 @@ export function TopBar({ step }: { step?: string } = {}) {
           ) : (
             <button
               onClick={() => login()}
+              className="hide-mobile"
               style={{
                 background: C.text,
                 border: "none",
@@ -569,6 +573,33 @@ export function TopBar({ step }: { step?: string } = {}) {
                 {it.label}
               </Link>
             ))}
+            {showAuthControls && (
+              <>
+                <div style={{ height: 1, background: C.border, margin: "4px 6px" }} />
+                <button
+                  onClick={() => {
+                    closeMenu();
+                    if (authenticated) logout();
+                    else login();
+                  }}
+                  style={{
+                    textAlign: "left",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    fontSize: 14,
+                    color: authenticated ? C.textDim : C.accent,
+                    fontWeight: authenticated ? 400 : 600,
+                    fontFamily: FS,
+                    width: "100%",
+                  }}
+                >
+                  {authenticated ? t("nav.signOut") : t("nav.signIn")}
+                </button>
+              </>
+            )}
           </div>
         </>
       )}

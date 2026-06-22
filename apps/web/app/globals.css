@@ -605,6 +605,19 @@ a.e-card:hover,
     border-bottom: 1px solid #e7ecf3;
     padding: 8px 12px;
     gap: 6px;
+    /* thin, subtle scroll indicator — the default thick bar read as "broken" */
+    scrollbar-width: thin;
+    scrollbar-color: #dbe3ee transparent;
+  }
+  .cs-side::-webkit-scrollbar {
+    height: 3px;
+  }
+  .cs-side::-webkit-scrollbar-thumb {
+    background: #dbe3ee;
+    border-radius: 999px;
+  }
+  .cs-side::-webkit-scrollbar-track {
+    background: transparent;
   }
   .cs-side .cs-label,
   .cs-side .cs-foot {
