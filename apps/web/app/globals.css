@@ -582,7 +582,9 @@ a.e-card:hover,
   padding-top: 14px;
   border-top: 1px solid #e7ecf3;
 }
-@media (max-width: 768px) {
+/* Console rail collapses to a horizontal scroll strip at ≤900px (redesign
+   handoff Responsive §). Below this the 244px rail would crush the main. */
+@media (max-width: 900px) {
   .cs-layout {
     flex-direction: column;
   }

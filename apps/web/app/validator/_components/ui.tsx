@@ -276,14 +276,17 @@ function NavLink({
   href,
   label,
   active,
+  className,
 }: {
   href: string;
   label: string;
   active: boolean;
+  className?: string;
 }) {
   return (
     <Link
       href={href}
+      className={className}
       style={{
         fontSize: 13,
         color: active ? C.text : C.textDim,
@@ -368,16 +371,26 @@ export function TopBar({ step }: { step?: string } = {}) {
           color: C.textDim,
         }}
       >
-        <NavLink href="/" label={t("nav.analyze")} active={active === "analyze"} />
+        {/* Primary nav drops on phone (the logo-focused mobile TopBar from
+            the mobile handoff) — navigation comes from the console rail strip
+            + in-page CTAs there. Keeps the bar from overflowing at ≤640px. */}
+        <NavLink
+          href="/"
+          label={t("nav.analyze")}
+          active={active === "analyze"}
+          className="hide-mobile"
+        />
         <NavLink
           href="/console"
           label={t("nav.dashboard")}
           active={active === "dashboard"}
+          className="hide-mobile"
         />
         <NavLink
           href="/validator/how-it-works"
           label={t("nav.howItWorks")}
           active={active === "howitworks"}
+          className="hide-mobile"
         />
         <LocaleToggle />
         {showAuthControls &&
