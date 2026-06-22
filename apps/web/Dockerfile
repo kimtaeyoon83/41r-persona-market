@@ -31,10 +31,16 @@ ARG NEXT_PUBLIC_PRIVY_APP_ID=cmor17hr1005w0dl1nnqmhhsy
 # user-side transfer is verified+enabled (2026-06-22), so default it ON.
 ARG NEXT_PUBLIC_USDC_ENABLED=1
 ARG NEXT_PUBLIC_SUI_NETWORK=testnet
+# Dogfooding — the 41R app tracks itself. This is the PUBLIC site key
+# (rpm_pk_, GA-measurement-id semantics, safe to commit); the rpm_sk_ secret
+# is server-only and never appears here or in the client. layout.tsx injects
+# the t.js beacon when this + NEXT_PUBLIC_API_URL are set.
+ARG NEXT_PUBLIC_TRACKING_SITE_KEY=rpm_pk_ffe4df49792b0d6f897343fe
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_PRIVY_APP_ID=${NEXT_PUBLIC_PRIVY_APP_ID}
 ENV NEXT_PUBLIC_USDC_ENABLED=${NEXT_PUBLIC_USDC_ENABLED}
 ENV NEXT_PUBLIC_SUI_NETWORK=${NEXT_PUBLIC_SUI_NETWORK}
+ENV NEXT_PUBLIC_TRACKING_SITE_KEY=${NEXT_PUBLIC_TRACKING_SITE_KEY}
 RUN pnpm --filter @41rpm/shared build && \
     pnpm --filter @41rpm/web build
 
