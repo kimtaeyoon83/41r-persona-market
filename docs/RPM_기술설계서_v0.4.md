@@ -33,7 +33,7 @@
 
 ## 0.1 플랫폼 전제 (확정)
 
-- **체인: Sui (Move) — 전략적으로 확정.** 현행 41rpm 프로토타입은 Solana 위에 있으나, 검증가능 저장(Walrus)이 시스템의 load-bearing 요소이고 Walrus·Seal·Nautilus가 Sui 네이티브 스택이므로 **Sui로 전환**한다. 아직 실서비스 트래픽/자산이 없는 빌드 단계라 마이그레이션 비용은 신규 구현 비용과 사실상 동일 — 듀얼체인 부담 없이 Sui 단일 타깃으로 간다.
+- **체인: Sui (Move) — 전환 완료(2026-06).** 검증가능 저장(Walrus)이 시스템의 load-bearing 요소이고 Walrus·Seal·Nautilus가 Sui 네이티브 스택이므로 **Solana → Sui 전환을 완료**했다. 2026-06 기준 **Solana는 코드에서 완전 제거**(`@solana/*` 의존성, `packages/solana-utils`, sponsored-tx/fee-payer, payment-tx/confirm 라우트, `SOLANA_*` env 전부 삭제)됐고, 현행 체인 레이어는 Sui testnet + Walrus + Seal 단일 타깃이다. 빌드 단계라 실자산이 없어 마이그레이션 비용 ≈ 신규 구현 비용이었다.
 - **외부 스택 실재성·성숙도 (2026-06 1차 자료 확인):**
   - **Walrus** — 메인넷 2025-03 출시. RedStuff 2D 소거부호로 4–5배 복제만으로 가용성 확보. **성숙·프로덕션 가용.** 보장 범위 = content-addressing 무결성·가용성(≠ 데이터 진위).
   - **Seal** — 메인넷 2025-09-03 출시. Move 기반 온체인 접근정책 + t-of-n threshold 암호화 + 클라이언트측 암호화. **프로덕션 가용.** ⚠️ 키서버가 다수 제공자(Enoki 등) threshold 위원회 → **잔여 신뢰 가정 있음**(§4.4).

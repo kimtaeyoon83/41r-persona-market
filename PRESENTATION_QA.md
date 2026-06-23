@@ -1,5 +1,13 @@
 # 41R Persona Market — Presentation Q&A Guide
 
+> ⚠️ **HISTORICAL (2026-04 snapshot) — pre-pivot + pre-Sui.** This guide
+> describes the OLD **autotest marketplace on Solana** (Stagehand autonomous
+> tests, Solana USDC / Token-2022 / x402 / SAS-on-Solana). That system was
+> **removed in the 2026-05-04 pivot**, and the chain layer **migrated Solana →
+> Sui in 2026-06** (Solana fully deleted). The Solana sections below are
+> reference only. For the CURRENT system see `docs/HOW-IT-WORKS.md` (Audience-
+> Fit Validator) + root `CLAUDE.md` (Sui testnet · Walrus · Seal).
+
 ## System Overview (Korean)
 
 ### 한줄 요약
