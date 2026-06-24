@@ -6,6 +6,7 @@
 // access is READ-ONLY: the console GET routes accept owner OR member; every
 // mutation stays owner-only.
 
+import { randomBytes } from 'crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 
@@ -112,4 +113,77 @@ export async function workspaceRole(
     )
     .limit(1);
   return m ? 'viewer' : null;
+}
+
+// ─── Invite links (token, no email needed) ─────────────────────────
+/** Get (or lazily create) the workspace's stable invite-link token. Anyone
+ *  who opens /invite/<token> and logs in joins as a viewer. */
+export async function ensureInviteToken(workspaceId: string): Promise<string> {
+  const [ws] = await db
+    .select({ tok: schema.siteWorkspaces.inviteToken })
+    .from(schema.siteWorkspaces)
+    .where(eq(schema.siteWorkspaces.id, workspaceId))
+    .limit(1);
+  if (ws?.tok) return ws.tok;
+  const token = randomBytes(24).toString('base64url');
+  await db
+    .update(schema.siteWorkspaces)
+    .set({ inviteToken: token })
+    .where(eq(schema.siteWorkspaces.id, workspaceId));
+  return token;
+}
+
+/** Reset the token (invalidates outstanding links). */
+export async function resetInviteToken(workspaceId: string): Promise<string> {
+  const token = randomBytes(24).toString('base64url');
+  await db
+    .update(schema.siteWorkspaces)
+    .set({ inviteToken: token })
+    .where(eq(schema.siteWorkspaces.id, workspaceId));
+  return token;
+}
+
+/** Redeem an invite token for the logged-in user → adds them as a viewer.
+ *  Works for ANY email (the token is the credential). Returns the workspace
+ *  id on success, or null if the token is unknown. Idempotent. */
+export async function acceptInviteByToken(
+  token: string,
+  userId: string,
+  email: string | null,
+): Promise<{ workspaceId: string; alreadyOwner: boolean } | null> {
+  const [ws] = await db
+    .select({ id: schema.siteWorkspaces.id, owner: schema.siteWorkspaces.userId })
+    .from(schema.siteWorkspaces)
+    .where(eq(schema.siteWorkspaces.inviteToken, token))
+    .limit(1);
+  if (!ws) return null;
+  if (ws.owner === userId) return { workspaceId: ws.id, alreadyOwner: true };
+
+  // Already a member?
+  const [existing] = await db
+    .select({ id: schema.siteMembers.id })
+    .from(schema.siteMembers)
+    .where(and(eq(schema.siteMembers.workspaceId, ws.id), eq(schema.siteMembers.userId, userId)))
+    .limit(1);
+  if (existing) return { workspaceId: ws.id, alreadyOwner: false };
+
+  // Link a pending email-invite if one matches; else create a fresh row.
+  const e = email?.trim().toLowerCase() || `${userId}@link.invite`;
+  await db
+    .insert(schema.siteMembers)
+    .values({ workspaceId: ws.id, email: e, userId, role: 'viewer' })
+    .onConflictDoNothing();
+  if (email) {
+    await db
+      .update(schema.siteMembers)
+      .set({ userId })
+      .where(
+        and(
+          eq(schema.siteMembers.workspaceId, ws.id),
+          eq(sql`lower(${schema.siteMembers.email})`, e),
+          isNull(schema.siteMembers.userId),
+        ),
+      );
+  }
+  return { workspaceId: ws.id, alreadyOwner: false };
 }

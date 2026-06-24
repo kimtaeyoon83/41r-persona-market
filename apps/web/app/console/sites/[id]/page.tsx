@@ -942,6 +942,8 @@ function TeamSection({ siteId }: { siteId: string }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [link, setLink] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -977,6 +979,18 @@ function TeamSection({ siteId }: { siteId: string }) {
       setMembers(r.members);
     } finally {
       setBusy(false);
+    }
+  };
+  const copyLink = async () => {
+    setErr(null);
+    try {
+      const url = link ?? (await consoleApi.getInviteLink(siteId)).invite_url;
+      setLink(url);
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 1800);
+    } catch (er) {
+      setErr(er instanceof Error ? er.message : "Could not create link");
     }
   };
 
@@ -1023,6 +1037,57 @@ function TeamSection({ siteId }: { siteId: string }) {
           {t("console.invite")}
         </button>
       </div>
+
+      {/* Invite link — copy + share via messenger (no email needed). */}
+      <div
+        style={{
+          marginTop: 12,
+          paddingTop: 12,
+          borderTop: `1px solid ${C.border}`,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <button
+          onClick={() => void copyLink()}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            background: "#fff",
+            color: C.text,
+            border: `1px solid ${C.borderStrong}`,
+            borderRadius: 8,
+            padding: "8px 14px",
+            fontSize: 12.5,
+            fontWeight: 600,
+            cursor: "pointer",
+            fontFamily: FS,
+          }}
+        >
+          🔗 {linkCopied ? t("console.linkCopied") : t("console.copyInviteLink")}
+        </button>
+        <span style={{ fontSize: 11.5, color: C.textFaint }}>{t("console.inviteLinkHint")}</span>
+      </div>
+      {link && (
+        <div
+          style={{
+            marginTop: 8,
+            fontFamily: FM,
+            fontSize: 11,
+            color: C.textDim,
+            wordBreak: "break-all",
+            background: C.bg,
+            border: `1px solid ${C.border}`,
+            borderRadius: 8,
+            padding: "8px 10px",
+          }}
+        >
+          {link}
+        </div>
+      )}
       {err && (
         <div style={{ fontSize: 11.5, color: C.bad, marginTop: 8 }}>{err}</div>
       )}

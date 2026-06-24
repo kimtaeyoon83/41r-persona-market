@@ -30,6 +30,9 @@ import {
   removeMember,
   memberWorkspaceIds,
   workspaceRole,
+  ensureInviteToken,
+  resetInviteToken,
+  acceptInviteByToken,
 } from '../services/workspace_members.js';
 import { isEncryptionAvailable } from '../services/crypto_box.js';
 import { validateTargetUrl } from '../services/url_guard.js';
@@ -606,6 +609,62 @@ router.delete('/sites/:id/members/:memberId', requirePrivyAuth, mutationLimiter,
   }
   await removeMember(ws.id, memberId);
   res.json({ members: await listMembers(ws.id) });
+});
+
+// ─── Invite links (share a copyable link instead of email) ─────────
+const WEB_BASE = process.env.WEB_PUBLIC_URL ?? 'https://app.project-rpm.xyz';
+const inviteUrl = (token: string) => `${WEB_BASE}/invite/${token}`;
+
+// Owner: get (or lazily create) the workspace's invite link.
+router.post('/sites/:id/invite-link', requirePrivyAuth, mutationLimiter, async (req, res) => {
+  const id = String(req.params.id ?? '');
+  if (!UUID_RE.test(id)) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  const ws = await getWorkspaceForUser(req.privyUser!.id, id);
+  if (!ws) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  const token = await ensureInviteToken(ws.id);
+  res.json({ token, invite_url: inviteUrl(token) });
+});
+
+// Owner: reset the invite link (invalidates outstanding links).
+router.post('/sites/:id/invite-link/reset', requirePrivyAuth, mutationLimiter, async (req, res) => {
+  const id = String(req.params.id ?? '');
+  if (!UUID_RE.test(id)) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  const ws = await getWorkspaceForUser(req.privyUser!.id, id);
+  if (!ws) {
+    res.status(404).json({ error: 'workspace_not_found' });
+    return;
+  }
+  const token = await resetInviteToken(ws.id);
+  res.json({ token, invite_url: inviteUrl(token) });
+});
+
+// Any logged-in user: redeem an invite token → join as a read-only viewer.
+const acceptBody = z.object({ token: z.string().min(8).max(128) });
+router.post('/invite/accept', requirePrivyAuth, mutationLimiter, async (req, res) => {
+  const parsed = acceptBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'invalid_request' });
+    return;
+  }
+  const result = await acceptInviteByToken(
+    parsed.data.token,
+    req.privyUser!.id,
+    req.privyUser!.email ?? null,
+  );
+  if (!result) {
+    res.status(404).json({ error: 'invalid_invite' });
+    return;
+  }
+  res.json({ workspace_id: result.workspaceId, already_owner: result.alreadyOwner });
 });
 
 export default router;

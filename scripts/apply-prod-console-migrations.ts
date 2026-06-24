@@ -41,6 +41,7 @@ const FILES = [
   '0025_persona_transfer.sql',
   '0026_content_hash.sql',
   '0027_site_members.sql',
+  '0028_workspace_invite_token.sql',
 ];
 const DRY_RUN = process.argv.includes('--dry-run');
 

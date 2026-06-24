@@ -775,6 +775,23 @@ export const consoleApi = {
       method: "DELETE",
     }),
 
+  /** Invite link (token) — share via messenger instead of email. */
+  getInviteLink: (id: string) =>
+    request<{ token: string; invite_url: string }>(`/api/console/sites/${id}/invite-link`, {
+      method: "POST",
+      body: "{}",
+    }),
+  resetInviteLink: (id: string) =>
+    request<{ token: string; invite_url: string }>(`/api/console/sites/${id}/invite-link/reset`, {
+      method: "POST",
+      body: "{}",
+    }),
+  acceptInvite: (token: string) =>
+    request<{ workspace_id: string; already_owner: boolean }>(`/api/console/invite/accept`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+
   updateSite: (id: string, body: { url?: string; name?: string | null }) =>
     request<{ workspace: ConsoleSite }>(`/api/console/sites/${id}`, {
       method: 'PATCH',

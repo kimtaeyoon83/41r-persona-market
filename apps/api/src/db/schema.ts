@@ -762,6 +762,10 @@ export const siteWorkspaces = pgTable('site_workspaces', {
    *  'onboarding' starts capture anonymously (new-visitor view) and
    *  crosses a login gate with the stored session. null = 'any'. */
   intendedStage: text('intended_stage'),
+  /** Team invite link token (2026-06-24) — a per-workspace random string;
+   *  anyone who opens /invite/<token> and logs in joins as a read-only
+   *  viewer (no email match needed). null until the owner first generates it. */
+  inviteToken: text('invite_token'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
