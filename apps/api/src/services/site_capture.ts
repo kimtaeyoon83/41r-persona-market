@@ -10,7 +10,7 @@
 // reuses the file — typical re-runs (compare two scans, debug a
 // flagged persona) skip the browser launch entirely.
 
-import { chromium, type BrowserContextOptions } from 'playwright-core';
+import { chromium, type BrowserContextOptions, type Page } from 'playwright-core';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -82,6 +82,58 @@ function captureClassifierKey(url: string): string {
 
 function localPathFor(key: string): string {
   return path.join(LOCAL_DIR, path.basename(key));
+}
+
+// Best-effort: close blocking ad / notice / cookie-consent overlays BEFORE the
+// screenshot so the capture (and the personas) evaluate the real page, not the
+// popup. A human closes the popup and continues — this does the same. Strictly
+// dismiss/close/consent actions (Escape + close-X + cookie accept + Korean
+// "오늘 하루 보지 않기"); never submits a real form. Non-fatal and capped at a
+// few clicks so it never "clicks the page apart". A site with no popup, or a
+// popup we can't close, is unaffected (the popup_detected signal still fires).
+async function dismissOverlays(page: Page): Promise<void> {
+  // Close controls — case-insensitive text, EN + KO. Order = most-specific/
+  // safest first. We only ever click the FIRST visible match per selector.
+  const closeSelectors = [
+    'button[aria-label*="close" i]',
+    '[role="button"][aria-label*="close" i]',
+    'button[aria-label*="닫기"]',
+    'button[aria-label*="dismiss" i]',
+    'button:has-text("오늘 하루 보지 않기")',
+    'a:has-text("오늘 하루 보지 않기")',
+    'button:has-text("다시 보지 않기")',
+    'button:has-text("Accept all")',
+    'button:has-text("Accept cookies")',
+    'button:has-text("I agree")',
+    'button:has-text("Got it")',
+    'button:has-text("동의")',
+    'button:has-text("닫기")',
+    'button:has-text("Close")',
+    'button:has-text("✕")',
+    'button:has-text("×")',
+  ];
+  let closed = 0;
+  try {
+    // Escape clears most JS modals / lightboxes first.
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.waitForTimeout(120);
+
+    for (const sel of closeSelectors) {
+      if (closed >= 3) break; // a handful is plenty; avoid over-clicking
+      const el = page.locator(sel).first();
+      const visible = await el.isVisible({ timeout: 250 }).catch(() => false);
+      if (!visible) continue;
+      await el.click({ timeout: 800, noWaitAfter: true }).catch(() => {});
+      closed += 1;
+      await page.waitForTimeout(180);
+    }
+    if (closed > 0) {
+      logger.info({ closed }, 'dismissed overlay(s) before capture');
+      await page.waitForTimeout(250); // let the close animation settle
+    }
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, 'overlay dismiss failed (non-fatal)');
+  }
 }
 
 export async function captureSite(targetUrl: string): Promise<CaptureResult> {
@@ -173,6 +225,8 @@ export async function captureSite(targetUrl: string): Promise<CaptureResult> {
       await page.waitForTimeout(2500);
     }
     await page.waitForTimeout(500);
+    // Close blocking ad/notice/cookie popups so personas see the real page.
+    await dismissOverlays(page);
     // Full-page capture for personas (existing behavior).
     bufFull = await page.screenshot({ fullPage: true, type: 'png' });
     // Viewport crop for classifier (avoids Anthropic 8000px limit).
@@ -517,6 +571,8 @@ export async function captureScreens(
         }
         // Wait for the SPA to render past its splash/loading screen.
         await waitForContent(page);
+        // Close blocking ad/notice/cookie popups before the screenshot.
+        await dismissOverlays(page);
         const bufFull = await page.screenshot({ fullPage: true, type: 'png' });
         const bufView = await page.screenshot({
           type: 'png',
