@@ -1009,6 +1009,31 @@ pageFacts the prompt is byte-identical to pre-2026-06-10, locked by
 strip. Capture falls back networkidle → domcontentloaded on timeout
 (ad-heavy sites previously degraded silently to text-only scans).
 
+### Capture browser handling — overlay/popup dismissal (2026-06-25)
+
+A human closes an ad/notice/cookie popup and continues; the capture must do
+the same, or the screenshot — and every persona reaction — evaluates the popup
+instead of the real product. `site_capture.ts::dismissOverlays(page)` runs
+**right before the screenshot in BOTH `captureSite()` and `captureScreens()`**:
+1. presses **Escape** (clears most JS modals / lightboxes), then
+2. clicks the **first visible match** of a curated close/consent selector list
+   (EN + KO): `aria-label*="close"`, ×/✕, cookie "Accept all / 동의 / I agree /
+   Got it", Korean notice "오늘 하루 보지 않기 / 다시 보지 않기 / 닫기".
+
+Rules — keep them:
+- **Strictly dismiss/close/consent actions** — never submit a real form
+  (no bare "확인" / search / login submits). It's a read-only capture.
+- **Capped at 3 clicks** + short timeouts + fully `try/catch` non-fatal: a
+  site with no popup, or a popup we can't close, is unaffected and the
+  `popup_detected` signal still fires (so the persona prompt's measured-fact
+  fallback + the Q4 hallucination guard still hold).
+- **To support a new popup pattern that isn't being closed**, ADD a selector to
+  `dismissOverlays`'s `closeSelectors` (don't loosen it into clicking arbitrary
+  buttons). Already-captured scans don't reflow — **re-scan** the site to apply.
+- Validated against controlled modals (Escape-close + close-button); the close
+  only works if the site wired a handler on its own control (which real
+  ad/notice/cookie layers do).
+
 ## LLM Usage Tracking
 
 - Unified JSONL log at `USAGE_LOG_PATH` (default `/tmp/llm-usage.jsonl`)
